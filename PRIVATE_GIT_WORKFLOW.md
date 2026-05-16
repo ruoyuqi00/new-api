@@ -3,24 +3,17 @@
 本目录是 Sub2API 私人 fork 的本地工作副本：
 
 - Path: `D:\wflogin\sub2api-private`
-- Working branch: `custom/kiro-windsurf-adapters`
+- Working branch: `main`
 - Official upstream: `https://github.com/Wei-Shaw/sub2api.git`
-- Private origin: wait for your private Git repository URL
+- Private origin: `https://github.com/ruoyuqi00/sub2api-provider-adapters.git`
 
 ## Add Private Origin
 
-After creating the private repository, add it as `origin`:
+The private repository is already configured as `origin`:
 
 ```powershell
 cd D:\wflogin\sub2api-private
-git remote add origin <your-private-repo-url>
-git push -u origin custom/kiro-windsurf-adapters
-```
-
-If the private repository should use `main` as the default branch:
-
-```powershell
-git branch -M main
+git remote -v
 git push -u origin main
 ```
 
