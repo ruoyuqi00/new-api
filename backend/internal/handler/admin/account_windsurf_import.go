@@ -50,6 +50,8 @@ type windsurfAdapterConfig struct {
 }
 
 type WindsurfImportRequest struct {
+	Email    string                  `json:"email"`
+	Password string                  `json:"password"`
 	Token    string                  `json:"token"`
 	Tokens   []string                `json:"tokens"`
 	Raw      string                  `json:"raw"`
@@ -57,10 +59,12 @@ type WindsurfImportRequest struct {
 }
 
 type WindsurfImportAccount struct {
-	Token  string `json:"token"`
-	APIKey string `json:"api_key"`
-	Label  string `json:"label,omitempty"`
-	Proxy  string `json:"proxy,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Password string `json:"password,omitempty"`
+	Token    string `json:"token,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Label    string `json:"label,omitempty"`
+	Proxy    string `json:"proxy,omitempty"`
 }
 
 type WindsurfImportResult struct {
@@ -72,14 +76,17 @@ type WindsurfImportResult struct {
 }
 
 type windsurfForwardAccount struct {
-	Token  string `json:"token,omitempty"`
-	APIKey string `json:"api_key,omitempty"`
-	Label  string `json:"label,omitempty"`
-	Proxy  string `json:"proxy,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Password string `json:"password,omitempty"`
+	Token    string `json:"token,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Label    string `json:"label,omitempty"`
+	Proxy    string `json:"proxy,omitempty"`
 }
 
 type windsurfImportIdempotencyItem struct {
 	SecretHash string `json:"secret_hash"`
+	EmailHash  string `json:"email_hash,omitempty"`
 	Kind       string `json:"kind"`
 	Label      string `json:"label,omitempty"`
 	Proxy      string `json:"proxy,omitempty"`
@@ -169,22 +176,42 @@ func parseWindsurfImportAccounts(req WindsurfImportRequest) ([]windsurfForwardAc
 	add := func(account windsurfForwardAccount) error {
 		account.Token = strings.TrimSpace(account.Token)
 		account.APIKey = strings.TrimSpace(account.APIKey)
+		account.Email = strings.TrimSpace(account.Email)
+		account.Password = strings.TrimSpace(account.Password)
 		account.Label = strings.TrimSpace(account.Label)
 		account.Proxy = strings.TrimSpace(account.Proxy)
-		if account.Token == "" && account.APIKey == "" {
+		if account.Token == "" && account.APIKey == "" && account.Email == "" && account.Password == "" {
 			return nil
-		}
-		if account.Token != "" && account.APIKey != "" {
-			return fmt.Errorf("同一个 Windsurf account 只能提供 token 或 api_key 其中一种")
 		}
 
 		kind := "token"
 		secret := account.Token
+		email := ""
+		methods := 0
+		if account.Token != "" {
+			methods++
+		}
 		if account.APIKey != "" {
+			methods++
 			kind = "api_key"
 			secret = account.APIKey
 		}
+		if account.Email != "" || account.Password != "" {
+			methods++
+			kind = "email_password"
+			email = strings.ToLower(account.Email)
+			secret = account.Password
+			if account.Email == "" || account.Password == "" {
+				return fmt.Errorf("Windsurf email/password 导入必须同时提供 email 和 password")
+			}
+		}
+		if methods > 1 {
+			return fmt.Errorf("同一个 Windsurf account 只能提供 token、api_key 或 email/password 其中一种")
+		}
 		key := kind + ":" + secret
+		if email != "" {
+			key = kind + ":" + email + ":" + secret
+		}
 		if _, ok := seen[key]; ok {
 			duplicateCount++
 			return nil
@@ -197,6 +224,9 @@ func parseWindsurfImportAccounts(req WindsurfImportRequest) ([]windsurfForwardAc
 	if err := add(windsurfForwardAccount{Token: req.Token}); err != nil {
 		return nil, duplicateCount, err
 	}
+	if err := add(windsurfForwardAccount{Email: req.Email, Password: req.Password}); err != nil {
+		return nil, duplicateCount, err
+	}
 	for _, token := range req.Tokens {
 		if err := add(windsurfForwardAccount{Token: token}); err != nil {
 			return nil, duplicateCount, err
@@ -204,16 +234,18 @@ func parseWindsurfImportAccounts(req WindsurfImportRequest) ([]windsurfForwardAc
 	}
 	for _, account := range req.Accounts {
 		if err := add(windsurfForwardAccount{
-			Token:  account.Token,
-			APIKey: account.APIKey,
-			Label:  account.Label,
-			Proxy:  account.Proxy,
+			Email:    account.Email,
+			Password: account.Password,
+			Token:    account.Token,
+			APIKey:   account.APIKey,
+			Label:    account.Label,
+			Proxy:    account.Proxy,
 		}); err != nil {
 			return nil, duplicateCount, err
 		}
 	}
-	for _, token := range parseWindsurfRawTokens(req.Raw) {
-		if err := add(windsurfForwardAccount{Token: token}); err != nil {
+	for _, account := range parseWindsurfRawAccounts(req.Raw) {
+		if err := add(account); err != nil {
 			return nil, duplicateCount, err
 		}
 	}
@@ -221,7 +253,7 @@ func parseWindsurfImportAccounts(req WindsurfImportRequest) ([]windsurfForwardAc
 	return accounts, duplicateCount, nil
 }
 
-func parseWindsurfRawTokens(raw string) []string {
+func parseWindsurfRawAccounts(raw string) []windsurfForwardAccount {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
@@ -229,15 +261,22 @@ func parseWindsurfRawTokens(raw string) []string {
 	lines := strings.FieldsFunc(raw, func(r rune) bool {
 		return r == '\n' || r == '\r' || r == ',' || r == ';'
 	})
-	tokens := make([]string, 0, len(lines))
+	accounts := make([]windsurfForwardAccount, 0, len(lines))
 	for _, line := range lines {
-		token := strings.TrimSpace(line)
-		if token == "" {
+		item := strings.TrimSpace(line)
+		if item == "" {
 			continue
 		}
-		tokens = append(tokens, token)
+		if email, password, ok := strings.Cut(item, "----"); ok {
+			accounts = append(accounts, windsurfForwardAccount{
+				Email:    strings.TrimSpace(email),
+				Password: strings.TrimSpace(password),
+			})
+			continue
+		}
+		accounts = append(accounts, windsurfForwardAccount{Token: item})
 	}
-	return tokens
+	return accounts
 }
 
 func buildWindsurfImportIdempotencyPayload(accounts []windsurfForwardAccount, duplicateCount int) windsurfImportIdempotencyPayload {
@@ -245,12 +284,19 @@ func buildWindsurfImportIdempotencyPayload(accounts []windsurfForwardAccount, du
 	for _, account := range accounts {
 		kind := "token"
 		secret := account.Token
+		emailHash := ""
 		if account.APIKey != "" {
 			kind = "api_key"
 			secret = account.APIKey
 		}
+		if account.Email != "" {
+			kind = "email_password"
+			secret = account.Password
+			emailHash = hashWindsurfSecret(strings.ToLower(strings.TrimSpace(account.Email)))
+		}
 		items = append(items, windsurfImportIdempotencyItem{
 			SecretHash: hashWindsurfSecret(secret),
+			EmailHash:  emailHash,
 			Kind:       kind,
 			Label:      account.Label,
 			Proxy:      account.Proxy,

@@ -181,6 +181,14 @@ curl -sS http://127.0.0.1:8080/api/v1/admin/accounts/import/windsurf \
   --data-binary @/root/windsurf_import.json
 ```
 
+`/root/windsurf_import.json` can contain tokens or email/password lines:
+
+```json
+{
+  "raw": "token-1\ntoken-2\nuser-a@example.com----password-a\nuser-b@example.com----password-b"
+}
+```
+
 Sub2API container env required for that endpoint:
 
 ```env

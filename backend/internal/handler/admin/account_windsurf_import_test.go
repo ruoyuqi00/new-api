@@ -18,30 +18,42 @@ func TestParseWindsurfImportAccounts(t *testing.T) {
 	req := WindsurfImportRequest{
 		Token:  " token-1 ",
 		Tokens: []string{"token-1", " token-2 "},
-		Raw:    "token-3\n token-2 ; token-4",
+		Raw:    "token-3\n token-2 ; token-4 ; user@example.com----secret-pass ",
 		Accounts: []WindsurfImportAccount{
 			{APIKey: " api-key-1 ", Label: " main ", Proxy: " http://127.0.0.1:9000 "},
+			{Email: " login@example.com ", Password: " pass-1 "},
 		},
 	}
 
 	accounts, duplicateCount, err := parseWindsurfImportAccounts(req)
 	require.NoError(t, err)
-	require.Equal(t, 5, len(accounts))
+	require.Equal(t, 7, len(accounts))
 	require.Equal(t, 2, duplicateCount)
 	require.Equal(t, "token-1", accounts[0].Token)
 	require.Equal(t, "token-2", accounts[1].Token)
 	require.Equal(t, "api-key-1", accounts[2].APIKey)
 	require.Equal(t, "main", accounts[2].Label)
 	require.Equal(t, "http://127.0.0.1:9000", accounts[2].Proxy)
-	require.Equal(t, "token-3", accounts[3].Token)
-	require.Equal(t, "token-4", accounts[4].Token)
+	require.Equal(t, "login@example.com", accounts[3].Email)
+	require.Equal(t, "pass-1", accounts[3].Password)
+	require.Equal(t, "token-3", accounts[4].Token)
+	require.Equal(t, "token-4", accounts[5].Token)
+	require.Equal(t, "user@example.com", accounts[6].Email)
+	require.Equal(t, "secret-pass", accounts[6].Password)
 }
 
 func TestParseWindsurfImportAccountsRejectsMixedSecretKinds(t *testing.T) {
 	_, _, err := parseWindsurfImportAccounts(WindsurfImportRequest{
 		Accounts: []WindsurfImportAccount{{Token: "token-1", APIKey: "api-key-1"}},
 	})
-	require.ErrorContains(t, err, "只能提供 token 或 api_key")
+	require.ErrorContains(t, err, "只能提供 token")
+}
+
+func TestParseWindsurfImportAccountsRejectsPartialEmailPassword(t *testing.T) {
+	_, _, err := parseWindsurfImportAccounts(WindsurfImportRequest{
+		Accounts: []WindsurfImportAccount{{Email: "login@example.com"}},
+	})
+	require.ErrorContains(t, err, "同时提供 email 和 password")
 }
 
 func TestWindsurfImportIdempotencyPayloadDoesNotContainRawSecrets(t *testing.T) {
@@ -49,6 +61,7 @@ func TestWindsurfImportIdempotencyPayloadDoesNotContainRawSecrets(t *testing.T) 
 		Tokens: []string{"raw-token-secret"},
 		Accounts: []WindsurfImportAccount{
 			{APIKey: "raw-api-key-secret", Label: "label"},
+			{Email: "private@example.com", Password: "raw-password-secret"},
 		},
 	})
 	require.NoError(t, err)
@@ -58,8 +71,12 @@ func TestWindsurfImportIdempotencyPayloadDoesNotContainRawSecrets(t *testing.T) 
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "raw-token-secret")
 	require.NotContains(t, string(raw), "raw-api-key-secret")
+	require.NotContains(t, string(raw), "raw-password-secret")
+	require.NotContains(t, string(raw), "private@example.com")
 	require.Contains(t, string(raw), hashWindsurfSecret("raw-token-secret"))
 	require.Contains(t, string(raw), hashWindsurfSecret("raw-api-key-secret"))
+	require.Contains(t, string(raw), hashWindsurfSecret("raw-password-secret"))
+	require.Contains(t, string(raw), hashWindsurfSecret("private@example.com"))
 }
 
 func TestImportWindsurfAccountsForwardsToAdapterAndRedactsResponse(t *testing.T) {
@@ -87,17 +104,20 @@ func TestImportWindsurfAccountsForwardsToAdapterAndRedactsResponse(t *testing.T)
 	}, []windsurfForwardAccount{
 		{Token: "token-1", Label: "one"},
 		{APIKey: "api-key-1", Proxy: "http://127.0.0.1:9000"},
+		{Email: "login@example.com", Password: "pass-1"},
 	}, 0)
 	require.NoError(t, err)
 
 	require.Equal(t, "/auth/login", gotPath)
 	require.Equal(t, "Bearer internal-key", gotAuth)
 	require.Equal(t, "internal-key", gotXAPIKey)
-	require.Len(t, gotBody.Accounts, 2)
+	require.Len(t, gotBody.Accounts, 3)
 	require.Equal(t, "token-1", gotBody.Accounts[0].Token)
 	require.Equal(t, "one", gotBody.Accounts[0].Label)
 	require.Equal(t, "api-key-1", gotBody.Accounts[1].APIKey)
-	require.Equal(t, 2, result.Total)
+	require.Equal(t, "login@example.com", gotBody.Accounts[2].Email)
+	require.Equal(t, "pass-1", gotBody.Accounts[2].Password)
+	require.Equal(t, 3, result.Total)
 	require.Equal(t, http.StatusOK, result.UpstreamStatus)
 
 	upstream, ok := result.Upstream.(map[string]any)

@@ -81,6 +81,14 @@ Sub2API 新接口采用批量 `accounts` 形态转发，便于一次导入多个
 }
 ```
 
+`raw` 也支持邮箱密码行，格式为 `email----password`：
+
+```json
+{
+  "raw": "user-a@example.com----<password-a>\nuser-b@example.com----<password-b>"
+}
+```
+
 支持完整 accounts 结构：
 
 ```json
@@ -94,6 +102,11 @@ Sub2API 新接口采用批量 `accounts` 形态转发，便于一次导入多个
     {
       "api_key": "<codeium-api-key>",
       "label": "direct-key-account"
+    },
+    {
+      "email": "<windsurf-email>",
+      "password": "<windsurf-password>",
+      "label": "email-login-account"
     }
   ]
 }
@@ -101,11 +114,12 @@ Sub2API 新接口采用批量 `accounts` 形态转发，便于一次导入多个
 
 规则：
 
-- 单个 account 只能提供 `token` 或 `api_key` 其中一种。
+- 单个 account 只能提供 `token`、`api_key` 或 `email/password` 其中一种。
+- `email/password` 必须同时提供，不能只给 email 或只给 password。
 - 请求内重复凭据会去重，返回 `duplicate_count`。
 - 空输入会返回 400。
-- 不会在 Sub2API 数据库保存原始 Windsurf token。
-- 幂等请求指纹使用 token/api_key 的 SHA-256 哈希，不使用原文。
+- 不会在 Sub2API 数据库保存原始 Windsurf token 或 Windsurf 密码。
+- 幂等请求指纹使用 token/api_key/password/email 的 SHA-256 哈希，不使用原文。
 - 上游响应会递归脱敏 `token`、`api_key`、`apiKey`、`authorization`、`password`、`secret` 等字段后再返回。
 
 ## Sub2API 新接口响应
@@ -237,9 +251,11 @@ ok github.com/Wei-Shaw/sub2api/internal/handler/admin
 覆盖点：
 
 - `token`、`tokens`、`raw`、`accounts` 解析。
+- `raw` 中 `email----password` 解析。
 - 同请求去重。
-- 拒绝同一账号同时传 `token` 和 `api_key`。
-- 幂等 payload 不包含 raw token/api_key。
+- 拒绝同一账号同时传 `token`、`api_key`、`email/password` 多种凭据。
+- 拒绝 email/password 半缺失。
+- 幂等 payload 不包含 raw token/api_key/password/email。
 - 转发路径为 `/auth/login`。
 - 同时发送 `Authorization: Bearer` 和 `x-api-key`。
 - 上游响应递归脱敏。

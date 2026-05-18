@@ -140,15 +140,17 @@ Code changes:
 
 - Added `POST /api/v1/admin/accounts/import/windsurf`.
 - Added safe parser for `token`, `tokens`, `raw`, and `accounts`.
+- Extended parser to support Windsurf `email/password` and raw `email----password` lines.
 - Added duplicate detection inside one request.
 - Added forwarding to internal `WindsurfAPI /auth/login`.
 - Added recursive upstream response redaction.
-- Added token-hash idempotency payload so raw Windsurf tokens are not stored in Sub2API idempotency records.
+- Added secret-hash idempotency payload so raw Windsurf tokens/passwords/emails are not stored in Sub2API idempotency records.
 
 Reference checked:
 
 - `dwgx/WindsurfAPI` stayed at `c028576 release: 2.0.96`, tag `v2.0.96`.
 - Confirmed `/auth/login` accepts `token`, `api_key`, and `accounts`.
+- Confirmed source path also accepts account items containing `email` and `password`.
 - Confirmed accepted auth headers include `Authorization: Bearer <key>` and `x-api-key`.
 
 Validation:

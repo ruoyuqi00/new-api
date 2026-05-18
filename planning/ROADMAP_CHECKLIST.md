@@ -237,7 +237,8 @@
 ## 2026-05-18 进度更新
 
 - [x] Windsurf Stage A 后端导入接口已实现：`POST /api/v1/admin/accounts/import/windsurf`。
-- [x] 已参考 `dwgx/WindsurfAPI` 的 `/auth/login` 批量导入协议，Sub2API 只做管理员入口和安全转发，不保存原始 Windsurf token。
+- [x] 已参考 `dwgx/WindsurfAPI` 的 `/auth/login` 批量导入协议，Sub2API 只做管理员入口和安全转发，不保存原始 Windsurf token 或密码。
+- [x] 已支持 `token`、`api_key`、`email/password`，并支持 raw `email----password` 批量文本。
 - [x] 已增加单元测试和 handler 覆盖：解析、去重、配置缺失、上游转发、响应脱敏、上游错误。
 - [ ] 管理后台 UI 还未接入该接口。
 - [ ] 服务器还未部署 `windsurf-api` 内网服务，也还未把线上 Sub2API 切到本 fork 镜像。
