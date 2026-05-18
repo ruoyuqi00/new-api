@@ -293,3 +293,60 @@ Ops:
 - Should public API keys be allowed to route to Windsurf by default, or only selected groups?
 - How to price/account for Windsurf-backed requests in Sub2API billing tables?
 
+## Server status on 2026-05-18
+
+Stage A is deployed on the US server:
+
+- Sub2API private fork image: `sub2api-provider-adapters:544f553b`
+- Internal adapter: `ghcr.io/dwgx/windsurf-api:latest`
+- WindsurfAPI reference version: `v2.0.96`
+- Public exposure: Sub2API only.
+- Internal adapter endpoint: `http://windsurf-api:3003`
+- Sub2API account: `windsurf-internal-anthropic`
+- Sub2API group used for smoke: `windsurf-smoke`
+
+Verified import paths:
+
+- `email/password`
+- `token`
+- top-level `api_key`
+- `accounts[].api_key`
+
+Verified model smoke:
+
+- `gemini-2.5-flash`
+- `claude-sonnet-4.6`
+- `claude-4.5-haiku` direct internal smoke
+
+Known WindsurfAPI v2.0.96 behavior to watch:
+
+- `getAvailableModelsForAccount` can exclude an enum-keyed model when the
+  capability record is a successful probe with reason `success` instead of
+  `user_status`.
+- This was observed with `gemini-2.5-flash` on a Pro Trial account.
+- The account could call the model after setting the account tier to `pro`
+  through the internal dashboard API.
+
+Long-term patch idea for a WindsurfAPI fork or adapter shim:
+
+```js
+// Pseudocode only.
+if (account.capabilities?.[modelKey]?.ok === true) {
+  return true;
+}
+if (account.capabilities?.[modelKey]?.reason === 'not_entitled') {
+  return false;
+}
+```
+
+Keep manual operator blocklists higher priority than capability success.
+
+Recommended exposed default models for the first Sub2API Windsurf group:
+
+- `claude-sonnet-4.6`
+- `claude-4.5-haiku`
+- `gemini-2.5-flash`
+- `gpt-5.2` / `gpt-5.2-low` only after additional OpenAI-compatible smoke
+
+Do not rely on all `v1/models` entries being usable for every account. Always
+cross-check `auth/accounts` available models and run one real request.

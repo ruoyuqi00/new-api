@@ -174,3 +174,79 @@ Not deployed yet:
 - Server still needs a custom fork image.
 - Server still needs internal `windsurf-api` compose service.
 - Server still needs Sub2API env `WINDSURF_ADAPTER_INTERNAL_BASE_URL` and `WINDSURF_ADAPTER_INTERNAL_API_KEY`.
+
+## 2026-05-18 Windsurf Stage A server deployment
+
+Server status after deployment:
+
+- Compose path: `/opt/sub2api`
+- Public Sub2API domains:
+  - `https://api.vyywcw.cn/`
+  - `https://www.vyywcw.cn/`
+- Deployed Sub2API fork image: `sub2api-provider-adapters:544f553b`
+- Internal Windsurf adapter image: `ghcr.io/dwgx/windsurf-api:latest`
+- WindsurfAPI upstream version observed in reference repo and container logs:
+  `v2.0.96` / commit `c028576`
+- Sub2API upstream check: local fork is ahead of official upstream; upstream
+  had no new commits to merge at the time of the check.
+
+Services:
+
+- `sub2api` healthy after restart.
+- `windsurf-api` healthy and reachable only inside the Docker network.
+- `postgres`, `redis`, and `caddy` remained healthy.
+- No Caddy public route and no host port were added for `windsurf-api`.
+
+Server configuration added:
+
+- `WINDSURF_API_KEY`
+- `WINDSURF_DASHBOARD_PASSWORD`
+- `WINDSURF_ADAPTER_INTERNAL_BASE_URL=http://windsurf-api:3003`
+- `WINDSURF_ADAPTER_INTERNAL_API_KEY=<WINDSURF_API_KEY>`
+- `WINDSURF_ADAPTER_TIMEOUT_SECONDS=30`
+- `SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP=true`
+- `SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS=true`
+
+Important: the security URL allowlist was loosened because Sub2API needed to
+call an internal Docker service over plain HTTP. Keep `windsurf-api` internal
+only; do not add a public route for it.
+
+Import endpoint verified on server:
+
+- `POST /api/v1/admin/accounts/import/windsurf`
+- Email/password import succeeded.
+- Top-level `api_key` import succeeded after commit `544f553b`.
+- `accounts[].api_key` batch-shaped import succeeded after commit `544f553b`.
+
+Model smoke after deployment:
+
+- Internal WindsurfAPI direct `/v1/messages`:
+  - `gemini-2.5-flash` returned HTTP 200.
+  - `claude-sonnet-4.6` returned HTTP 200.
+  - `claude-4.5-haiku` returned HTTP 200.
+- Public Sub2API `/v1/messages` through the `windsurf-smoke` group:
+  - `gemini-2.5-flash` returned HTTP 200.
+  - `claude-sonnet-4.6` returned HTTP 200.
+
+Incident found and fixed during smoke:
+
+- Symptom: Sub2API public route returned 403/503 after WindsurfAPI rejected
+  `gemini-2.5-flash` with `model_not_entitled`.
+- Direct WindsurfAPI account state showed the account capability probe had
+  `gemini-2.5-flash` as successful, but `availableModels` did not include it.
+- Cause: WindsurfAPI `getAvailableModelsForAccount` only includes enum-keyed
+  models when capability reason is `user_status`; this account had a canary
+  `success` capability for `gemini-2.5-flash`, so preflight excluded it.
+- Server-side short-term fix: set the Windsurf trial account tier to `pro` via
+  the internal dashboard API, then clear the Sub2API upstream account error
+  state and restart `sub2api`.
+- Long-term fix candidate: in our adapter notes or future WindsurfAPI fork,
+  treat `capabilities[model].ok === true` as available even when the reason is
+  `success`, unless an explicit blocklist or `not_entitled` result exists.
+
+Operational note:
+
+- A single bad upstream 403 can mark the Sub2API upstream account `error`.
+  Before retesting after a known adapter-side fix, clear only transient/error
+  state for the internal upstream account and restart `sub2api` to refresh the
+  scheduler snapshot.

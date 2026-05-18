@@ -146,3 +146,37 @@ Gate 4: Native import ready.
 - NK1-NK9 pass for Kiro.
 - Backend and frontend tests pass.
 - Server deployment runbook updated.
+
+## 2026-05-18 verified results
+
+Windsurf Stage A server deployment:
+
+| ID | Result | Note |
+| --- | --- | --- |
+| W1 | PASS | `windsurf-api` running and healthy |
+| W4 | PASS | email/password import succeeded through Sub2API import endpoint |
+| W5 | PASS | batch-shaped `accounts[].api_key` import succeeded |
+| W6 | PASS | account list visible internally without printing secrets |
+| W7 | PASS | direct internal `/v1/messages` returned 200 for `claude-sonnet-4.6` |
+| W14 | PASS | no public host port or Caddy route for `windsurf-api` |
+| S1 | PASS | internal Anthropic API key account exists as `windsurf-internal-anthropic` |
+| S3 | PASS | public Sub2API `/v1/messages` returned 200 for `gemini-2.5-flash` and `claude-sonnet-4.6` |
+| S9 | PASS | Docker service base URL works after private/insecure internal URL settings |
+| SEC2 | PASS | only Sub2API is publicly exposed |
+| SEC3 | PASS | `windsurf-api` has no public host port |
+| SEC5 | PASS | internal adapter API key is configured |
+| NW2 | PASS | JSON account import accepted |
+| NW5 | PASS | upstream import response summarized without leaking secrets |
+| NW8 | PASS | idempotency payload hashes secrets instead of storing raw credentials |
+
+Observed upstream issue:
+
+- WindsurfAPI v2.0.96 can have a Pro/Trial account where
+  `capabilities["gemini-2.5-flash"].ok == true` but `availableModels` does not
+  include `gemini-2.5-flash`.
+- Symptom is HTTP 403 `model_not_entitled` before the request reaches the
+  account selection path.
+- Short-term server correction is documented in
+  `planning/SERVER_DEPLOYMENT_RUNBOOK.md`.
+- Long-term fix candidate: accept successful capability probes as available
+  unless a model is explicitly blocked or marked `not_entitled`.

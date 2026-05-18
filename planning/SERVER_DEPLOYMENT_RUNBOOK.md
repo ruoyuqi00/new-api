@@ -380,3 +380,169 @@ If Windsurf/Kiro route fails only:
 - [ ] Check model name mapping.
 - [ ] Check rate-limit/cooldown.
 - [ ] Check Sub2API account test output.
+
+## Current Windsurf deployment notes
+
+As of 2026-05-18, the server is using the private fork image
+`sub2api-provider-adapters:544f553b` and an internal `windsurf-api` service from
+`ghcr.io/dwgx/windsurf-api:latest`.
+
+Only Sub2API is publicly exposed. `windsurf-api` must stay internal:
+
+```bash
+cd /opt/sub2api
+docker compose port windsurf-api 3003
+grep -R "windsurf-api\|3003" -n Caddyfile . || true
+```
+
+The first command should not show a public host port. The second command should
+not show a Caddy route that exposes WindsurfAPI.
+
+### Safe internal Windsurf smoke
+
+Run from the server. Do not print real API keys.
+
+```bash
+cd /opt/sub2api
+set -a
+. ./.env
+set +a
+
+docker compose exec -T -e WKEY="$WINDSURF_API_KEY" windsurf-api node - <<'JS'
+const payload = {
+  model: 'claude-sonnet-4.6',
+  max_tokens: 32,
+  messages: [{ role: 'user', content: 'reply with ok' }],
+};
+const res = await fetch('http://127.0.0.1:3003/v1/messages', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', 'x-api-key': process.env.WKEY },
+  body: JSON.stringify(payload),
+});
+const data = await res.json().catch(() => ({}));
+console.log(res.status, data.error?.type || (data.content ? 'content' : 'unknown'));
+JS
+```
+
+Expected: HTTP 200 with `content`.
+
+### Safe public Sub2API smoke
+
+Use a test Sub2API key from the database or admin UI. Do not paste it into docs
+or logs.
+
+```bash
+curl -sS http://127.0.0.1:8080/v1/messages \
+  -H "authorization: Bearer <sub2api-test-key>" \
+  -H 'content-type: application/json' \
+  -H 'anthropic-version: 2023-06-01' \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 32,
+    "messages": [{"role": "user", "content": "reply with ok"}]
+  }'
+```
+
+Also smoke `gemini-2.5-flash` after account probe or manual tier correction.
+
+### If Windsurf says `model_not_entitled`
+
+Check whether this is a real entitlement failure or a stale/over-strict
+`availableModels` preflight:
+
+```bash
+cd /opt/sub2api
+set -a
+. ./.env
+set +a
+
+docker compose exec -T -e WKEY="$WINDSURF_API_KEY" windsurf-api node - <<'JS'
+const res = await fetch('http://127.0.0.1:3003/auth/accounts', {
+  headers: { 'x-api-key': process.env.WKEY },
+});
+const data = await res.json();
+for (const a of data.accounts || []) {
+  const available = a.availableModels || [];
+  const cap = a.capabilities?.['gemini-2.5-flash'];
+  console.log({
+    id: a.id,
+    status: a.status,
+    tier: a.tier,
+    hasGemini: available.includes('gemini-2.5-flash'),
+    geminiCapOk: cap?.ok,
+    geminiCapReason: cap?.reason,
+  });
+}
+JS
+```
+
+If the account is a valid Pro/Trial account and the capability is successful
+but `availableModels` excludes the model, apply the short-term internal
+dashboard correction:
+
+```bash
+docker compose exec -T \
+  -e DPASS="$WINDSURF_DASHBOARD_PASSWORD" \
+  -e ACCOUNT_ID="<windsurf-account-id>" \
+  windsurf-api node - <<'JS'
+const res = await fetch(`http://127.0.0.1:3003/dashboard/api/accounts/${process.env.ACCOUNT_ID}`, {
+  method: 'PATCH',
+  headers: {
+    'content-type': 'application/json',
+    'x-dashboard-password': process.env.DPASS,
+  },
+  body: JSON.stringify({ tier: 'pro', resetErrors: true }),
+});
+const data = await res.json().catch(() => ({}));
+console.log(res.status, data.success === true ? 'success' : data);
+JS
+```
+
+Then clear only the internal Sub2API upstream account transient/error state:
+
+```bash
+docker compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "
+UPDATE accounts
+SET temp_unschedulable_until = NULL,
+    temp_unschedulable_reason = NULL,
+    rate_limit_reset_at = NULL,
+    overload_until = NULL,
+    error_message = NULL,
+    schedulable = true,
+    status = '\''active'\''
+WHERE name = '\''windsurf-internal-anthropic'\'';
+"'
+docker compose restart sub2api
+```
+
+Retest internal WindsurfAPI first, then public Sub2API.
+
+### Updating the server later
+
+Sub2API fork:
+
+```powershell
+cd D:\wflogin\sub2api-private
+git fetch upstream main
+git log --oneline HEAD..upstream/main
+git merge upstream/main
+go test ./internal/handler/admin -run Windsurf
+go test ./internal/handler/admin
+go test ./internal/server
+git push
+```
+
+Build and deploy a new server image with a new immutable tag. Keep the previous
+tag for rollback.
+
+WindsurfAPI:
+
+```bash
+cd /opt/sub2api
+docker compose pull windsurf-api
+docker compose up -d windsurf-api
+docker compose logs --tail=200 windsurf-api
+```
+
+After every WindsurfAPI update, re-run the account list check and smoke
+`gemini-2.5-flash` plus `claude-sonnet-4.6`.
