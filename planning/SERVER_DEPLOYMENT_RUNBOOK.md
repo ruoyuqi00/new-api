@@ -171,6 +171,26 @@ Expected:
 
 ## Import Windsurf accounts
 
+After the custom Sub2API fork is deployed, prefer importing through Sub2API so the public/admin workflow stays consistent:
+
+```bash
+curl -sS http://127.0.0.1:8080/api/v1/admin/accounts/import/windsurf \
+  -H "content-type: application/json" \
+  -H "idempotency-key: windsurf-import-$(date +%Y%m%d%H%M%S)" \
+  -H "authorization: Bearer <sub2api-admin-token>" \
+  --data-binary @/root/windsurf_import.json
+```
+
+Sub2API container env required for that endpoint:
+
+```env
+WINDSURF_ADAPTER_INTERNAL_BASE_URL=http://windsurf-api:3003
+WINDSURF_ADAPTER_INTERNAL_API_KEY=<WINDSURF_API_KEY>
+WINDSURF_ADAPTER_TIMEOUT_SECONDS=30
+```
+
+Before the custom fork is deployed, import directly into WindsurfAPI from the server shell:
+
 Use a temporary file:
 
 ```bash
@@ -352,4 +372,3 @@ If Windsurf/Kiro route fails only:
 - [ ] Check model name mapping.
 - [ ] Check rate-limit/cooldown.
 - [ ] Check Sub2API account test output.
-

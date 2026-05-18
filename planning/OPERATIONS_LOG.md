@@ -133,3 +133,42 @@ Admin account note:
       `kiro.rs` image/build or build from source.
 - [ ] Add explicit backup paths for future Windsurf/Kiro data directories once
       those services exist.
+
+## 2026-05-18 Windsurf Stage A implementation
+
+Code changes:
+
+- Added `POST /api/v1/admin/accounts/import/windsurf`.
+- Added safe parser for `token`, `tokens`, `raw`, and `accounts`.
+- Added duplicate detection inside one request.
+- Added forwarding to internal `WindsurfAPI /auth/login`.
+- Added recursive upstream response redaction.
+- Added token-hash idempotency payload so raw Windsurf tokens are not stored in Sub2API idempotency records.
+
+Reference checked:
+
+- `dwgx/WindsurfAPI` stayed at `c028576 release: 2.0.96`, tag `v2.0.96`.
+- Confirmed `/auth/login` accepts `token`, `api_key`, and `accounts`.
+- Confirmed accepted auth headers include `Authorization: Bearer <key>` and `x-api-key`.
+
+Validation:
+
+```powershell
+$env:GOPROXY='https://goproxy.cn,direct'
+go test ./internal/handler/admin -run Windsurf
+go test ./internal/handler/admin
+go test ./internal/server
+```
+
+Result:
+
+```text
+ok github.com/Wei-Shaw/sub2api/internal/handler/admin
+?  github.com/Wei-Shaw/sub2api/internal/server [no test files]
+```
+
+Not deployed yet:
+
+- Server still needs a custom fork image.
+- Server still needs internal `windsurf-api` compose service.
+- Server still needs Sub2API env `WINDSURF_ADAPTER_INTERNAL_BASE_URL` and `WINDSURF_ADAPTER_INTERNAL_API_KEY`.
