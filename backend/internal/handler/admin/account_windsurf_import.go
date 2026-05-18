@@ -50,12 +50,15 @@ type windsurfAdapterConfig struct {
 }
 
 type WindsurfImportRequest struct {
-	Email    string                  `json:"email"`
-	Password string                  `json:"password"`
-	Token    string                  `json:"token"`
-	Tokens   []string                `json:"tokens"`
-	Raw      string                  `json:"raw"`
-	Accounts []WindsurfImportAccount `json:"accounts"`
+	Email       string                  `json:"email"`
+	Password    string                  `json:"password"`
+	Token       string                  `json:"token"`
+	APIKey      string                  `json:"api_key"`
+	APIKeyCamel string                  `json:"apiKey"`
+	APIKeyFlat  string                  `json:"apikey"`
+	Tokens      []string                `json:"tokens"`
+	Raw         string                  `json:"raw"`
+	Accounts    []WindsurfImportAccount `json:"accounts"`
 }
 
 type WindsurfImportAccount struct {
@@ -224,6 +227,9 @@ func parseWindsurfImportAccounts(req WindsurfImportRequest) ([]windsurfForwardAc
 	if err := add(windsurfForwardAccount{Token: req.Token}); err != nil {
 		return nil, duplicateCount, err
 	}
+	if err := add(windsurfForwardAccount{APIKey: firstNonEmptyString(req.APIKey, req.APIKeyCamel, req.APIKeyFlat)}); err != nil {
+		return nil, duplicateCount, err
+	}
 	if err := add(windsurfForwardAccount{Email: req.Email, Password: req.Password}); err != nil {
 		return nil, duplicateCount, err
 	}
@@ -251,6 +257,15 @@ func parseWindsurfImportAccounts(req WindsurfImportRequest) ([]windsurfForwardAc
 	}
 
 	return accounts, duplicateCount, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func parseWindsurfRawAccounts(raw string) []windsurfForwardAccount {

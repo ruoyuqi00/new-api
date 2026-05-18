@@ -17,6 +17,7 @@ import (
 func TestParseWindsurfImportAccounts(t *testing.T) {
 	req := WindsurfImportRequest{
 		Token:  " token-1 ",
+		APIKey: " top-level-api-key ",
 		Tokens: []string{"token-1", " token-2 "},
 		Raw:    "token-3\n token-2 ; token-4 ; user@example.com----secret-pass ",
 		Accounts: []WindsurfImportAccount{
@@ -27,19 +28,36 @@ func TestParseWindsurfImportAccounts(t *testing.T) {
 
 	accounts, duplicateCount, err := parseWindsurfImportAccounts(req)
 	require.NoError(t, err)
-	require.Equal(t, 7, len(accounts))
+	require.Equal(t, 8, len(accounts))
 	require.Equal(t, 2, duplicateCount)
 	require.Equal(t, "token-1", accounts[0].Token)
-	require.Equal(t, "token-2", accounts[1].Token)
-	require.Equal(t, "api-key-1", accounts[2].APIKey)
-	require.Equal(t, "main", accounts[2].Label)
-	require.Equal(t, "http://127.0.0.1:9000", accounts[2].Proxy)
-	require.Equal(t, "login@example.com", accounts[3].Email)
-	require.Equal(t, "pass-1", accounts[3].Password)
-	require.Equal(t, "token-3", accounts[4].Token)
-	require.Equal(t, "token-4", accounts[5].Token)
-	require.Equal(t, "user@example.com", accounts[6].Email)
-	require.Equal(t, "secret-pass", accounts[6].Password)
+	require.Equal(t, "top-level-api-key", accounts[1].APIKey)
+	require.Equal(t, "token-2", accounts[2].Token)
+	require.Equal(t, "api-key-1", accounts[3].APIKey)
+	require.Equal(t, "main", accounts[3].Label)
+	require.Equal(t, "http://127.0.0.1:9000", accounts[3].Proxy)
+	require.Equal(t, "login@example.com", accounts[4].Email)
+	require.Equal(t, "pass-1", accounts[4].Password)
+	require.Equal(t, "token-3", accounts[5].Token)
+	require.Equal(t, "token-4", accounts[6].Token)
+	require.Equal(t, "user@example.com", accounts[7].Email)
+	require.Equal(t, "secret-pass", accounts[7].Password)
+}
+
+func TestParseWindsurfImportAccountsAcceptsTopLevelAPIKeyAliases(t *testing.T) {
+	for name, req := range map[string]WindsurfImportRequest{
+		"snake": {APIKey: " api-key-1 "},
+		"camel": {APIKeyCamel: " api-key-2 "},
+		"flat":  {APIKeyFlat: " api-key-3 "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			accounts, duplicateCount, err := parseWindsurfImportAccounts(req)
+			require.NoError(t, err)
+			require.Equal(t, 0, duplicateCount)
+			require.Len(t, accounts, 1)
+			require.NotEmpty(t, accounts[0].APIKey)
+		})
+	}
 }
 
 func TestParseWindsurfImportAccountsRejectsMixedSecretKinds(t *testing.T) {
