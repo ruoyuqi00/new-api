@@ -39,6 +39,25 @@ describe('kiroImport', () => {
     })
   })
 
+  it('wraps full exported credential JSON as an account to preserve metadata', () => {
+    expect(
+      buildKiroImportPayload(
+        '{"email":"user@example.com","refresh_token":"refresh-a","access_token":"access-a","profileArn":"profile-a","expires_at":1778755870}',
+        'json'
+      )
+    ).toEqual({
+      accounts: [
+        {
+          email: 'user@example.com',
+          refresh_token: 'refresh-a',
+          access_token: 'access-a',
+          profileArn: 'profile-a',
+          expires_at: 1778755870
+        }
+      ]
+    })
+  })
+
   it('throws typed errors for empty and malformed input', () => {
     expect(() => buildKiroImportPayload('', 'refresh_token')).toThrow(KiroImportInputError)
     expect(() => buildKiroImportPayload('not-json', 'json')).toThrow(KiroImportInputError)

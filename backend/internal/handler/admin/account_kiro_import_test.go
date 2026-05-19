@@ -65,6 +65,39 @@ func TestParseKiroImportCredentials(t *testing.T) {
 	require.Equal(t, "api@example.com", credentials[9].Email)
 }
 
+func TestParseKiroImportCredentialsSupportsExportedCredentialJSON(t *testing.T) {
+	var req KiroImportRequest
+	err := json.Unmarshal([]byte(`{
+		"accounts": [
+			{
+				"email": "user@example.com",
+				"refresh_token": "fallback-refresh",
+				"access_token": "fallback-access",
+				"expires_at": 1778755870,
+				"kiro_auth_token_raw": {
+					"accessToken": "access-from-export",
+					"refreshToken": "refresh-from-export",
+					"profileArn": "arn:aws:codewhisperer:us-east-1:123456789012:profile/ABCDEF",
+					"expiresAt": "2026-05-14T10:51:10.810569+00:00",
+					"loginHint": "login@example.com"
+				}
+			}
+		]
+	}`), &req)
+	require.NoError(t, err)
+
+	credentials, duplicateCount, err := parseKiroImportCredentials(req)
+	require.NoError(t, err)
+	require.Zero(t, duplicateCount)
+	require.Len(t, credentials, 1)
+	require.Equal(t, "fallback-access", credentials[0].AccessToken)
+	require.Equal(t, "fallback-refresh", credentials[0].RefreshToken)
+	require.Equal(t, "arn:aws:codewhisperer:us-east-1:123456789012:profile/ABCDEF", credentials[0].ProfileARN)
+	require.Equal(t, "2026-05-14T10:51:10Z", credentials[0].ExpiresAt)
+	require.Equal(t, "user@example.com", credentials[0].Email)
+	require.Equal(t, "social", credentials[0].AuthMethod)
+}
+
 func TestParseKiroImportCredentialsRejectsMixedSecretKinds(t *testing.T) {
 	_, _, err := parseKiroImportCredentials(KiroImportRequest{
 		Accounts: []KiroImportAccount{{RefreshToken: "refresh-1", KiroAPIKey: "ksk_1"}},
@@ -133,7 +166,14 @@ func TestImportKiroCredentialsForwardsToAdapterAndRedactsResponse(t *testing.T) 
 		AdminAPIKey:     "admin-key",
 		Timeout:         time.Second,
 	}, []kiroForwardCredential{
-		{RefreshToken: "refresh-1", AuthMethod: "social", Email: "one@example.com"},
+		{
+			AccessToken:  "access-1",
+			RefreshToken: "refresh-1",
+			ProfileARN:   "arn:aws:codewhisperer:us-east-1:123456789012:profile/ABCDEF",
+			ExpiresAt:    "2026-05-14T10:51:10.810569+00:00",
+			AuthMethod:   "social",
+			Email:        "one@example.com",
+		},
 		{KiroAPIKey: "ksk_1", AuthMethod: "api_key"},
 	}, 0)
 	require.NoError(t, err)
@@ -143,6 +183,9 @@ func TestImportKiroCredentialsForwardsToAdapterAndRedactsResponse(t *testing.T) 
 	require.Equal(t, "admin-key", gotXAPIKey)
 	require.Len(t, gotBodies, 2)
 	require.Equal(t, "refresh-1", gotBodies[0]["refreshToken"])
+	require.Equal(t, "access-1", gotBodies[0]["accessToken"])
+	require.Equal(t, "arn:aws:codewhisperer:us-east-1:123456789012:profile/ABCDEF", gotBodies[0]["profileArn"])
+	require.Equal(t, "2026-05-14T10:51:10.810569Z", gotBodies[0]["expiresAt"])
 	require.Equal(t, "social", gotBodies[0]["authMethod"])
 	require.Equal(t, "one@example.com", gotBodies[0]["email"])
 	require.Equal(t, "ksk_1", gotBodies[1]["kiroApiKey"])

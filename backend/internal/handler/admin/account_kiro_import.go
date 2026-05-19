@@ -76,35 +76,90 @@ type KiroImportRequest struct {
 }
 
 type KiroImportAccount struct {
-	RefreshToken       string `json:"refresh_token,omitempty"`
-	RefreshTokenCamel  string `json:"refreshToken,omitempty"`
-	KiroAPIKey         string `json:"kiro_api_key,omitempty"`
-	KiroAPIKeyCamel    string `json:"kiroApiKey,omitempty"`
-	APIKey             string `json:"api_key,omitempty"`
-	APIKeyCamel        string `json:"apiKey,omitempty"`
-	APIKeyFlat         string `json:"apikey,omitempty"`
-	AuthMethod         string `json:"auth_method,omitempty"`
-	AuthMethodCamel    string `json:"authMethod,omitempty"`
-	ClientID           string `json:"client_id,omitempty"`
-	ClientIDCamel      string `json:"clientId,omitempty"`
-	ClientSecret       string `json:"client_secret,omitempty"`
-	ClientSecretCamel  string `json:"clientSecret,omitempty"`
-	Priority           uint32 `json:"priority,omitempty"`
-	Region             string `json:"region,omitempty"`
-	AuthRegion         string `json:"auth_region,omitempty"`
-	AuthRegionCamel    string `json:"authRegion,omitempty"`
-	APIRegion          string `json:"api_region,omitempty"`
-	APIRegionCamel     string `json:"apiRegion,omitempty"`
-	MachineID          string `json:"machine_id,omitempty"`
-	MachineIDCamel     string `json:"machineId,omitempty"`
-	Email              string `json:"email,omitempty"`
-	ProxyURL           string `json:"proxy_url,omitempty"`
-	ProxyURLCamel      string `json:"proxyUrl,omitempty"`
-	ProxyUsername      string `json:"proxy_username,omitempty"`
-	ProxyUsernameCamel string `json:"proxyUsername,omitempty"`
-	ProxyPassword      string `json:"proxy_password,omitempty"`
-	ProxyPasswordCamel string `json:"proxyPassword,omitempty"`
-	Endpoint           string `json:"endpoint,omitempty"`
+	RefreshToken       string             `json:"refresh_token,omitempty"`
+	RefreshTokenCamel  string             `json:"refreshToken,omitempty"`
+	AccessToken        string             `json:"access_token,omitempty"`
+	AccessTokenCamel   string             `json:"accessToken,omitempty"`
+	KiroAPIKey         string             `json:"kiro_api_key,omitempty"`
+	KiroAPIKeyCamel    string             `json:"kiroApiKey,omitempty"`
+	APIKey             string             `json:"api_key,omitempty"`
+	APIKeyCamel        string             `json:"apiKey,omitempty"`
+	APIKeyFlat         string             `json:"apikey,omitempty"`
+	AuthMethod         string             `json:"auth_method,omitempty"`
+	AuthMethodCamel    string             `json:"authMethod,omitempty"`
+	ClientID           string             `json:"client_id,omitempty"`
+	ClientIDCamel      string             `json:"clientId,omitempty"`
+	ClientSecret       string             `json:"client_secret,omitempty"`
+	ClientSecretCamel  string             `json:"clientSecret,omitempty"`
+	Priority           uint32             `json:"priority,omitempty"`
+	Region             string             `json:"region,omitempty"`
+	AuthRegion         string             `json:"auth_region,omitempty"`
+	AuthRegionCamel    string             `json:"authRegion,omitempty"`
+	APIRegion          string             `json:"api_region,omitempty"`
+	APIRegionCamel     string             `json:"apiRegion,omitempty"`
+	MachineID          string             `json:"machine_id,omitempty"`
+	MachineIDCamel     string             `json:"machineId,omitempty"`
+	Email              string             `json:"email,omitempty"`
+	LoginHint          string             `json:"login_hint,omitempty"`
+	LoginHintCamel     string             `json:"loginHint,omitempty"`
+	ProfileARN         string             `json:"profile_arn,omitempty"`
+	ProfileARNCamel    string             `json:"profileArn,omitempty"`
+	ExpiresAt          kiroFlexibleString `json:"expires_at,omitempty"`
+	ExpiresAtCamel     kiroFlexibleString `json:"expiresAt,omitempty"`
+	ProxyURL           string             `json:"proxy_url,omitempty"`
+	ProxyURLCamel      string             `json:"proxyUrl,omitempty"`
+	ProxyUsername      string             `json:"proxy_username,omitempty"`
+	ProxyUsernameCamel string             `json:"proxyUsername,omitempty"`
+	ProxyPassword      string             `json:"proxy_password,omitempty"`
+	ProxyPasswordCamel string             `json:"proxyPassword,omitempty"`
+	Endpoint           string             `json:"endpoint,omitempty"`
+	AuthTokenRaw       KiroAuthTokenRaw   `json:"kiro_auth_token_raw,omitempty"`
+}
+
+type KiroAuthTokenRaw struct {
+	AccessToken       string             `json:"access_token,omitempty"`
+	AccessTokenCamel  string             `json:"accessToken,omitempty"`
+	RefreshToken      string             `json:"refresh_token,omitempty"`
+	RefreshTokenCamel string             `json:"refreshToken,omitempty"`
+	Email             string             `json:"email,omitempty"`
+	LoginHint         string             `json:"login_hint,omitempty"`
+	LoginHintCamel    string             `json:"loginHint,omitempty"`
+	ProfileARN        string             `json:"profile_arn,omitempty"`
+	ProfileARNCamel   string             `json:"profileArn,omitempty"`
+	ExpiresAt         kiroFlexibleString `json:"expires_at,omitempty"`
+	ExpiresAtCamel    kiroFlexibleString `json:"expiresAt,omitempty"`
+	UserID            string             `json:"user_id,omitempty"`
+	UserIDCamel       string             `json:"userId,omitempty"`
+}
+
+type kiroFlexibleString string
+
+func (value *kiroFlexibleString) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*value = ""
+		return nil
+	}
+
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		*value = kiroFlexibleString(asString)
+		return nil
+	}
+
+	var asNumber json.Number
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&asNumber); err == nil {
+		*value = kiroFlexibleString(asNumber.String())
+		return nil
+	}
+
+	return fmt.Errorf("expected string, number, or null")
+}
+
+func (value kiroFlexibleString) text() string {
+	return strings.TrimSpace(string(value))
 }
 
 type KiroImportResult struct {
@@ -126,7 +181,10 @@ type KiroImportItem struct {
 }
 
 type kiroForwardCredential struct {
+	AccessToken   string `json:"accessToken,omitempty"`
 	RefreshToken  string `json:"refreshToken,omitempty"`
+	ProfileARN    string `json:"profileArn,omitempty"`
+	ExpiresAt     string `json:"expiresAt,omitempty"`
 	AuthMethod    string `json:"authMethod,omitempty"`
 	ClientID      string `json:"clientId,omitempty"`
 	ClientSecret  string `json:"clientSecret,omitempty"`
@@ -202,6 +260,18 @@ func importKiroCredentials(ctx context.Context, cfg kiroAdapterConfig, credentia
 	endpoint := strings.TrimRight(cfg.InternalBaseURL, "/") + "/api/admin/credentials"
 	client := &http.Client{Timeout: cfg.Timeout}
 	for i, credential := range credentials {
+		normalized, ok, err := normalizeKiroForwardCredential(credential)
+		if err != nil {
+			result.Failed++
+			result.Items = append(result.Items, KiroImportItem{Index: i, Kind: "unknown", Error: err.Error()})
+			continue
+		}
+		if !ok {
+			result.Failed++
+			result.Items = append(result.Items, KiroImportItem{Index: i, Kind: "unknown", Error: "empty kiro credential"})
+			continue
+		}
+		credential = normalized
 		kind, _ := kiroCredentialKindAndSecret(credential)
 		item := KiroImportItem{Index: i, Kind: kind}
 
@@ -314,8 +384,12 @@ func parseKiroImportCredentials(req KiroImportRequest) ([]kiroForwardCredential,
 }
 
 func normalizeKiroImportAccount(account KiroImportAccount) kiroForwardCredential {
+	nested := account.AuthTokenRaw
 	return kiroForwardCredential{
-		RefreshToken:  firstNonEmptyString(account.RefreshToken, account.RefreshTokenCamel),
+		AccessToken:   firstNonEmptyString(account.AccessToken, account.AccessTokenCamel, nested.AccessToken, nested.AccessTokenCamel),
+		RefreshToken:  firstNonEmptyString(account.RefreshToken, account.RefreshTokenCamel, nested.RefreshToken, nested.RefreshTokenCamel),
+		ProfileARN:    firstNonEmptyString(account.ProfileARN, account.ProfileARNCamel, nested.ProfileARN, nested.ProfileARNCamel),
+		ExpiresAt:     normalizeKiroExpiresAt(firstNonEmptyKiroFlexibleString(account.ExpiresAt, account.ExpiresAtCamel, nested.ExpiresAt, nested.ExpiresAtCamel)),
 		AuthMethod:    firstNonEmptyString(account.AuthMethod, account.AuthMethodCamel),
 		ClientID:      firstNonEmptyString(account.ClientID, account.ClientIDCamel),
 		ClientSecret:  firstNonEmptyString(account.ClientSecret, account.ClientSecretCamel),
@@ -324,7 +398,7 @@ func normalizeKiroImportAccount(account KiroImportAccount) kiroForwardCredential
 		AuthRegion:    firstNonEmptyString(account.AuthRegion, account.AuthRegionCamel),
 		APIRegion:     firstNonEmptyString(account.APIRegion, account.APIRegionCamel),
 		MachineID:     firstNonEmptyString(account.MachineID, account.MachineIDCamel),
-		Email:         account.Email,
+		Email:         firstNonEmptyString(account.Email, account.LoginHint, account.LoginHintCamel, nested.Email, nested.LoginHint, nested.LoginHintCamel),
 		ProxyURL:      firstNonEmptyString(account.ProxyURL, account.ProxyURLCamel),
 		ProxyUsername: firstNonEmptyString(account.ProxyUsername, account.ProxyUsernameCamel),
 		ProxyPassword: firstNonEmptyString(account.ProxyPassword, account.ProxyPasswordCamel),
@@ -334,7 +408,10 @@ func normalizeKiroImportAccount(account KiroImportAccount) kiroForwardCredential
 }
 
 func normalizeKiroForwardCredential(credential kiroForwardCredential) (kiroForwardCredential, bool, error) {
+	credential.AccessToken = strings.TrimSpace(credential.AccessToken)
 	credential.RefreshToken = strings.TrimSpace(credential.RefreshToken)
+	credential.ProfileARN = strings.TrimSpace(credential.ProfileARN)
+	credential.ExpiresAt = normalizeKiroExpiresAt(credential.ExpiresAt)
 	credential.AuthMethod = canonicalKiroAuthMethod(strings.TrimSpace(credential.AuthMethod))
 	credential.ClientID = strings.TrimSpace(credential.ClientID)
 	credential.ClientSecret = strings.TrimSpace(credential.ClientSecret)
@@ -371,6 +448,35 @@ func normalizeKiroForwardCredential(credential kiroForwardCredential) (kiroForwa
 		return credential, false, fmt.Errorf("Kiro api_key 导入必须提供 kiroApiKey")
 	}
 	return credential, true, nil
+}
+
+func firstNonEmptyKiroFlexibleString(values ...kiroFlexibleString) string {
+	for _, value := range values {
+		if text := value.text(); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func normalizeKiroExpiresAt(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	if seconds, err := strconv.ParseFloat(value, 64); err == nil {
+		if seconds > 1e12 {
+			seconds = seconds / 1000
+		}
+		wholeSeconds := int64(seconds)
+		nanoseconds := int64((seconds - float64(wholeSeconds)) * 1e9)
+		return time.Unix(wholeSeconds, nanoseconds).UTC().Format(time.RFC3339Nano)
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed.UTC().Format(time.RFC3339Nano)
+	}
+	return value
 }
 
 func canonicalKiroAuthMethod(method string) string {

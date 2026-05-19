@@ -47,6 +47,23 @@ const parseJSONImportInput = (input: string): KiroImportRequest => {
     return { accounts: parsed as KiroImportAccount[] }
   }
   if (parsed && typeof parsed === 'object') {
+    const record = parsed as Record<string, unknown>
+    const accountMetadataKeys = [
+      'access_token',
+      'accessToken',
+      'profile_arn',
+      'profileArn',
+      'expires_at',
+      'expiresAt',
+      'login_hint',
+      'loginHint',
+      'auth_method',
+      'authMethod',
+      'kiro_auth_token_raw'
+    ]
+    if (!Array.isArray(record.accounts) && accountMetadataKeys.some(key => key in record)) {
+      return { accounts: [parsed as KiroImportAccount] }
+    }
     return parsed as KiroImportRequest
   }
   throw new KiroImportInputError('invalid_json_shape')

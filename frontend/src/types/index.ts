@@ -1194,6 +1194,8 @@ export interface WindsurfImportItem {
 export interface KiroImportAccount {
   refresh_token?: string
   refreshToken?: string
+  access_token?: string
+  accessToken?: string
   kiro_api_key?: string
   kiroApiKey?: string
   api_key?: string
@@ -1214,6 +1216,12 @@ export interface KiroImportAccount {
   machine_id?: string
   machineId?: string
   email?: string
+  login_hint?: string
+  loginHint?: string
+  profile_arn?: string
+  profileArn?: string
+  expires_at?: string | number
+  expiresAt?: string | number
   proxy_url?: string
   proxyUrl?: string
   proxy_username?: string
@@ -1221,6 +1229,21 @@ export interface KiroImportAccount {
   proxy_password?: string
   proxyPassword?: string
   endpoint?: string
+  kiro_auth_token_raw?: {
+    access_token?: string
+    accessToken?: string
+    refresh_token?: string
+    refreshToken?: string
+    email?: string
+    login_hint?: string
+    loginHint?: string
+    profile_arn?: string
+    profileArn?: string
+    expires_at?: string | number
+    expiresAt?: string | number
+    user_id?: string
+    userId?: string
+  }
 }
 
 export interface KiroImportRequest {
