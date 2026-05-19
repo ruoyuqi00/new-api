@@ -62,18 +62,23 @@
             {{ t('admin.accounts.windsurfImportResult') }}
           </div>
           <span
-            class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+            :class="[
+              'rounded-full px-2.5 py-1 text-xs font-medium',
+              result.failed > 0
+                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+            ]"
           >
-            HTTP {{ result.upstream_status }}
+            {{ t('admin.accounts.windsurfImportResultBadge', { succeeded: result.succeeded, failed: result.failed }) }}
           </span>
         </div>
         <div class="text-sm text-gray-700 dark:text-dark-300">
           {{ t('admin.accounts.windsurfImportResultSummary', result) }}
         </div>
         <pre
-          v-if="upstreamPreview"
+          v-if="itemsPreview"
           class="max-h-56 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-dark-800 dark:text-dark-200"
-        >{{ upstreamPreview }}</pre>
+        >{{ itemsPreview }}</pre>
       </div>
     </form>
 
@@ -166,7 +171,14 @@ const modeHelp = computed(() => {
   return t('admin.accounts.windsurfImportTokenHelp')
 })
 
-const upstreamPreview = computed(() => {
+const itemsPreview = computed(() => {
+  if (result.value?.items?.length) {
+    try {
+      return JSON.stringify(result.value.items, null, 2).slice(0, 6000)
+    } catch {
+      return String(result.value.items).slice(0, 6000)
+    }
+  }
   if (!result.value?.upstream) return ''
   try {
     return JSON.stringify(result.value.upstream, null, 2).slice(0, 6000)
@@ -207,8 +219,10 @@ const handleImport = async () => {
     })
 
     result.value = res
-    appStore.showSuccess(t('admin.accounts.windsurfImportSuccess', {
-      forwarded: res.forwarded,
+    const successKey = res.failed > 0 ? 'windsurfImportCompletedWithErrors' : 'windsurfImportSuccess'
+    appStore.showSuccess(t(`admin.accounts.${successKey}`, {
+      succeeded: res.succeeded,
+      failed: res.failed,
       duplicate_count: res.duplicate_count
     }))
     emit('imported')

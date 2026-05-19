@@ -111,7 +111,7 @@ func TestImportWindsurfAccountsForwardsToAdapterAndRedactsResponse(t *testing.T)
 		gotXAPIKey = r.Header.Get("x-api-key")
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"token":"should-not-return","nested":{"api_key":"secret","ok":true},"results":[{"id":"1","email":"a@example.com","status":"active"}]}`))
+		_, _ = w.Write([]byte(`{"success":true,"token":"should-not-return","nested":{"api_key":"secret","ok":true},"results":[{"id":"1","email":"a@example.com","status":"active"},{"id":"2","email":"b@example.com","status":"active"},{"id":"3","email":"login@example.com","status":"active"}]}`))
 	}))
 	defer server.Close()
 
@@ -136,7 +136,14 @@ func TestImportWindsurfAccountsForwardsToAdapterAndRedactsResponse(t *testing.T)
 	require.Equal(t, "login@example.com", gotBody.Accounts[2].Email)
 	require.Equal(t, "pass-1", gotBody.Accounts[2].Password)
 	require.Equal(t, 3, result.Total)
+	require.Equal(t, 3, result.Succeeded)
+	require.Equal(t, 0, result.Failed)
 	require.Equal(t, http.StatusOK, result.UpstreamStatus)
+	require.Len(t, result.Items, 3)
+	require.Equal(t, "token", result.Items[0].Kind)
+	require.Equal(t, "api_key", result.Items[1].Kind)
+	require.Equal(t, "email_password", result.Items[2].Kind)
+	require.True(t, result.Items[0].Success)
 
 	upstream, ok := result.Upstream.(map[string]any)
 	require.True(t, ok)
@@ -145,6 +152,33 @@ func TestImportWindsurfAccountsForwardsToAdapterAndRedactsResponse(t *testing.T)
 	require.True(t, ok)
 	require.Equal(t, "***", nested["api_key"])
 	require.Equal(t, true, nested["ok"])
+}
+
+func TestImportWindsurfAccountsNormalizesPartialBatchFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"id":"1","status":"active"},{"email":"bad@example.com","error":"login failed"}],"active":1}`))
+	}))
+	defer server.Close()
+
+	result, err := importWindsurfAccounts(context.Background(), windsurfAdapterConfig{
+		InternalBaseURL: server.URL,
+		InternalAPIKey:  "internal-key",
+		Timeout:         time.Second,
+	}, []windsurfForwardAccount{
+		{Token: "token-1"},
+		{Email: "bad@example.com", Password: "pass-1"},
+	}, 0)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, result.Total)
+	require.Equal(t, 1, result.Succeeded)
+	require.Equal(t, 1, result.Failed)
+	require.Len(t, result.Items, 2)
+	require.True(t, result.Items[0].Success)
+	require.False(t, result.Items[1].Success)
+	require.Equal(t, "email_password", result.Items[1].Kind)
+	require.Equal(t, "login failed", result.Items[1].Error)
 }
 
 func TestImportWindsurfAccountsReturnsSafeUpstreamError(t *testing.T) {
@@ -161,6 +195,10 @@ func TestImportWindsurfAccountsReturnsSafeUpstreamError(t *testing.T) {
 	}, []windsurfForwardAccount{{Token: "token-1"}}, 0)
 	require.Error(t, err)
 	require.Equal(t, http.StatusUnauthorized, result.UpstreamStatus)
+	require.Equal(t, 0, result.Succeeded)
+	require.Equal(t, 1, result.Failed)
+	require.Len(t, result.Items, 1)
+	require.False(t, result.Items[0].Success)
 	require.NotContains(t, err.Error(), "token-1")
 	upstream, ok := result.Upstream.(map[string]any)
 	require.True(t, ok)

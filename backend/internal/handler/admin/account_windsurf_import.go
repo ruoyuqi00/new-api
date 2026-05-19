@@ -71,11 +71,23 @@ type WindsurfImportAccount struct {
 }
 
 type WindsurfImportResult struct {
-	Total          int `json:"total"`
-	Forwarded      int `json:"forwarded"`
-	DuplicateCount int `json:"duplicate_count"`
-	UpstreamStatus int `json:"upstream_status"`
-	Upstream       any `json:"upstream,omitempty"`
+	Total          int                  `json:"total"`
+	Forwarded      int                  `json:"forwarded"`
+	Succeeded      int                  `json:"succeeded"`
+	Failed         int                  `json:"failed"`
+	DuplicateCount int                  `json:"duplicate_count"`
+	UpstreamStatus int                  `json:"upstream_status"`
+	Items          []WindsurfImportItem `json:"items,omitempty"`
+	Upstream       any                  `json:"upstream,omitempty"`
+}
+
+type WindsurfImportItem struct {
+	Index          int    `json:"index"`
+	Kind           string `json:"kind"`
+	UpstreamStatus int    `json:"upstream_status,omitempty"`
+	Success        bool   `json:"success"`
+	Error          string `json:"error,omitempty"`
+	Upstream       any    `json:"upstream,omitempty"`
 }
 
 type windsurfForwardAccount struct {
@@ -164,6 +176,14 @@ func importWindsurfAccounts(ctx context.Context, cfg windsurfAdapterConfig, acco
 	}
 	result.UpstreamStatus = resp.StatusCode
 	result.Upstream = sanitizeWindsurfAdapterResponse(respBody)
+	result.Items = buildWindsurfImportItems(accounts, resp.StatusCode, result.Upstream)
+	for _, item := range result.Items {
+		if item.Success {
+			result.Succeeded++
+		} else {
+			result.Failed++
+		}
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return result, infraerrors.Newf(http.StatusBadGateway, "WINDSURF_IMPORT_UPSTREAM_FAILED", "windsurf adapter returned status %d", resp.StatusCode)
@@ -257,6 +277,81 @@ func parseWindsurfImportAccounts(req WindsurfImportRequest) ([]windsurfForwardAc
 	}
 
 	return accounts, duplicateCount, nil
+}
+
+func buildWindsurfImportItems(accounts []windsurfForwardAccount, statusCode int, upstream any) []WindsurfImportItem {
+	items := make([]WindsurfImportItem, 0, len(accounts))
+	results := windsurfUpstreamResults(upstream)
+	for i, account := range accounts {
+		item := WindsurfImportItem{
+			Index:          i,
+			Kind:           windsurfAccountKind(account),
+			UpstreamStatus: statusCode,
+		}
+		if i < len(results) {
+			item.Upstream = results[i]
+			if msg := windsurfUpstreamErrorMessage(results[i]); msg != "" {
+				item.Error = msg
+			}
+		} else if len(results) > 0 {
+			item.Error = "windsurf adapter response missing item result"
+		}
+
+		if statusCode < 200 || statusCode >= 300 {
+			if item.Error == "" {
+				item.Error = fmt.Sprintf("windsurf adapter returned status %d", statusCode)
+			}
+		} else if item.Error == "" {
+			item.Success = true
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func windsurfUpstreamResults(upstream any) []any {
+	asMap, ok := upstream.(map[string]any)
+	if !ok {
+		return nil
+	}
+	rawResults, ok := asMap["results"].([]any)
+	if !ok {
+		return nil
+	}
+	return rawResults
+}
+
+func windsurfUpstreamErrorMessage(value any) string {
+	asMap, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if raw, ok := asMap["error"]; ok {
+		switch typed := raw.(type) {
+		case string:
+			return strings.TrimSpace(typed)
+		case map[string]any:
+			if msg, ok := typed["message"].(string); ok {
+				return strings.TrimSpace(msg)
+			}
+		}
+		if encoded, err := json.Marshal(raw); err == nil {
+			return string(encoded)
+		}
+		return "windsurf adapter returned an item error"
+	}
+	return ""
+}
+
+func windsurfAccountKind(account windsurfForwardAccount) string {
+	switch {
+	case account.APIKey != "":
+		return "api_key"
+	case account.Email != "" || account.Password != "":
+		return "email_password"
+	default:
+		return "token"
+	}
 }
 
 func firstNonEmptyString(values ...string) string {

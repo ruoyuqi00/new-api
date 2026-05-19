@@ -53,11 +53,18 @@
 
 已观察版本：
 
-- Sub2API upstream: `6e66edb chore: update sponsors`
+- Sub2API upstream: `8584b8f7 Merge pull request #2504 from yetone/fix-admin-settings-darkmode`
 - WindsurfAPI: `dwgx/WindsurfAPI`, `c028576 release: 2.0.96`, tag `v2.0.96`
 - WindsurfPoolAPI: `guanxiaol/WindsurfPoolAPI`, tag `v2.0.7`
 - Kiro main reference: `hank9999/kiro.rs`, observed tag `v2026.3.1`
 - Kiro backup reference: `jwadow/kiro-gateway`, observed tag `v2.3`
+
+2026-05-19 latest adapter-fusion baseline:
+
+- Private fork includes official upstream through `8584b8f7`.
+- Windsurf import responses are normalized into per-account `items[]`.
+- Kiro import bridge is deployed in code and expects an internal-only
+  `kiro-rs` service.
 
 ## 执行顺序
 

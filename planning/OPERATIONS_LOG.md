@@ -363,3 +363,38 @@ Deployment note:
   - `KIRO_ADAPTER_ADMIN_API_KEY=<kiro-rs adminApiKey>`
   - `KIRO_ADAPTER_TIMEOUT_SECONDS=30`
 - Do not expose `kiro-rs` through Caddy or Docker host ports.
+
+## 2026-05-19 provider adapter fusion round 2
+
+Reference refresh:
+
+- Official Sub2API upstream advanced from `11870cf8` to `8584b8f7`.
+- Merged upstream updates into the private fork. The upstream changes cover
+  OpenAI-compatible usage parsing, Codex tool-call ID test alignment, and admin
+  settings dark-mode readability.
+- `dwgx/WindsurfAPI` remains at `c028576`, tag `v2.0.96`.
+- `hank9999/kiro.rs` remains at `f1bbe9f`; local tags were refreshed through
+  `v2026.3.1`.
+- `Jwadow/kiro-gateway` remains at `a5292ca`, tag line `v2.3`.
+
+Code changes:
+
+- Normalized Windsurf import responses into per-item `items[]`, matching the
+  Kiro import shape more closely.
+- `POST /api/v1/admin/accounts/import/windsurf` now returns:
+  - `succeeded`
+  - `failed`
+  - `items[].index`
+  - `items[].kind`
+  - `items[].success`
+  - `items[].error`
+  - redacted `items[].upstream`
+- The admin Windsurf import modal now shows success/failure counts and a
+  per-item preview instead of relying only on the raw upstream body.
+
+Operational impact:
+
+- Existing clients that only read `total`, `forwarded`, `duplicate_count`,
+  `upstream_status`, or `upstream` remain compatible.
+- Operators can now identify the exact failed row in a batch import without
+  printing tokens, API keys, or passwords.

@@ -102,6 +102,7 @@ Use when implementing Sub2API native import.
 | NW7 | Internal proxy down | import when WindsurfAPI stopped | clear internal error |
 | NW8 | Idempotency | retry same request | no duplicate side effects |
 | NW9 | Frontend i18n | zh/en UI | strings present |
+| NW10 | Per-item result | one good and one bad item | `succeeded`, `failed`, and `items[]` match rows |
 
 ## Native Kiro import tests
 

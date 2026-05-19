@@ -268,3 +268,19 @@
 - [ ] Verify `Import Kiro` UI on the deployed admin page.
 - [ ] Import one real Kiro credential and smoke direct internal `/v1/messages`.
 - [ ] Create/enable the Sub2API `kiro-internal-anthropic` upstream only after direct smoke passes.
+
+## 2026-05-19 readable update: Fusion round 2
+
+- [x] Merged official Sub2API upstream through `8584b8f7`.
+- [x] Confirmed `dwgx/WindsurfAPI` still has no newer release than
+  `c028576` / `v2.0.96`.
+- [x] Confirmed `hank9999/kiro.rs` remains at `f1bbe9f`; refreshed local tags
+  through `v2026.3.1`.
+- [x] Confirmed `Jwadow/kiro-gateway` remains at `a5292ca` / `v2.3`.
+- [x] Added normalized per-account Windsurf import results:
+  `succeeded`, `failed`, and `items[]`.
+- [x] Updated Windsurf admin import UI to show per-item results like the Kiro
+  import UI.
+- [ ] Build and deploy the next fork image to the US server.
+- [ ] Re-run Sub2API public health, internal Windsurf, and internal Kiro
+  smoke checks after deployment.

@@ -270,3 +270,47 @@ ok github.com/Wei-Shaw/sub2api/internal/handler/admin
 4. 已完成：配置 `WINDSURF_ADAPTER_INTERNAL_BASE_URL` 和 `WINDSURF_ADAPTER_INTERNAL_API_KEY`。
 5. 已完成：用真实账号跑完整链路，公网只访问 Sub2API，`windsurf-api` 仅内网可达。
 6. 下一步：开始 Kiro Stage A，复用同样的“内网代理 + Sub2API 管理导入入口”模式，不急着把 Kiro token 生命周期全部写进 Sub2API。
+
+## 2026-05-19 update: normalized per-account result
+
+The import endpoint now keeps the original response fields and adds a stable
+per-item summary:
+
+```json
+{
+  "total": 2,
+  "forwarded": 2,
+  "succeeded": 1,
+  "failed": 1,
+  "duplicate_count": 0,
+  "upstream_status": 200,
+  "items": [
+    {
+      "index": 0,
+      "kind": "token",
+      "success": true,
+      "upstream_status": 200,
+      "upstream": {
+        "id": "account-id",
+        "email": "user@example.com",
+        "status": "active"
+      }
+    },
+    {
+      "index": 1,
+      "kind": "email_password",
+      "success": false,
+      "error": "login failed",
+      "upstream_status": 200,
+      "upstream": {
+        "email": "bad@example.com",
+        "error": "login failed"
+      }
+    }
+  ]
+}
+```
+
+`kind` is one of `token`, `api_key`, or `email_password`. All nested token,
+API-key, password, and authorization fields are still redacted before returning
+the result to the admin UI.

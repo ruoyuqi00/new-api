@@ -1174,8 +1174,20 @@ export interface WindsurfImportRequest {
 export interface WindsurfImportResult {
   total: number
   forwarded: number
+  succeeded: number
+  failed: number
   duplicate_count: number
   upstream_status: number
+  items?: WindsurfImportItem[]
+  upstream?: unknown
+}
+
+export interface WindsurfImportItem {
+  index: number
+  kind: string
+  upstream_status?: number
+  success: boolean
+  error?: string
   upstream?: unknown
 }
 
