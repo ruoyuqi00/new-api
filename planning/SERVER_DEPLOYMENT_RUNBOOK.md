@@ -65,6 +65,25 @@ Do not add Claude-family Kiro models to Sub2API mapping until direct and public
 smoke both pass. As of 2026-05-19, Claude-family Kiro requests still fail with
 model/subscription errors even though the credential plan reports `KIRO PRO`.
 
+Current deployed Sub2API fork image:
+
+```text
+sub2api-provider-adapters:a147caa0
+```
+
+Rollback image:
+
+```text
+sub2api-provider-adapters:c4cefc76
+```
+
+Latest recorded rollback files:
+
+```text
+/opt/sub2api-backups/sub2api-20260519-123646.tar.gz
+/opt/sub2api-backups/docker-compose-20260519-044206-pre-a147caa0.yml
+```
+
 记录日期：2026-05-16
 
 ## Server metadata

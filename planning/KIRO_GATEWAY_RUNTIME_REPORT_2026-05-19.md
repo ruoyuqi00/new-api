@@ -51,8 +51,16 @@ Internet
 本轮服务器变更：
 
 - 将临时运行的 `sub2api-kiro-gateway` 固化到 `/opt/sub2api/docker-compose.yml`。
+- 部署 Sub2API 新镜像：
+  - `sub2api-provider-adapters:a147caa0`
+- 上一个 Sub2API 镜像：
+  - `sub2api-provider-adapters:c4cefc76`
+- 镜像切换前服务器数据备份：
+  - `/opt/sub2api-backups/sub2api-20260519-123646.tar.gz`
 - compose 变更前备份：
   - `/opt/sub2api-backups/docker-compose-20260519-042547-pre-kiro-gateway.yml`
+- 镜像切换前 compose 备份：
+  - `/opt/sub2api-backups/docker-compose-20260519-044206-pre-a147caa0.yml`
 - `kiro-gateway` 镜像：
   - `ghcr.io/jwadow/kiro-gateway:latest`
 - `kiro-gateway` 内部端口：

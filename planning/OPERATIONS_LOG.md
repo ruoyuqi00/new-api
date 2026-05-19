@@ -1,5 +1,31 @@
 # Operations Log
 
+## 2026-05-19 Sub2API image a147caa0 deployment
+
+Deployment:
+
+- Built local fork image on the US server from git archive:
+  `sub2api-provider-adapters:a147caa0`.
+- Previous production image:
+  `sub2api-provider-adapters:c4cefc76`.
+- Server data backup before image build:
+  `/opt/sub2api-backups/sub2api-20260519-123646.tar.gz`.
+- Compose backup before switching the image tag:
+  `/opt/sub2api-backups/docker-compose-20260519-044206-pre-a147caa0.yml`.
+
+Post-deploy validation:
+
+- `sub2api` healthy on `127.0.0.1:8080->8080`.
+- Public `https://api.vyywcw.cn/` returned HTTP 200.
+- Public `https://www.vyywcw.cn/` returned HTTP 200.
+- Internal adapter ports remained unpublished:
+  - `windsurf-api` `3003/tcp`: `null`
+  - `kiro-rs` `8990/tcp`: `null`
+  - `kiro-gateway` `8000/tcp`: `null`
+- Internal `kiro-gateway /v1/models` returned 13 model IDs.
+- Public Sub2API smoke with `qwen3-coder-next` returned HTTP 200 and text
+  `ok`.
+
 ## 2026-05-19 Kiro Gateway runtime validation
 
 Reference refresh:
