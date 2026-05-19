@@ -548,3 +548,67 @@ Note:
 - The deploy helper's first health curl ran too early while the container was
   still starting and returned a transient connection reset. A follow-up retry
   verification passed after the container became healthy.
+
+## 2026-05-19 kiro.rs admin metadata patch and public smoke
+
+Reference refresh:
+
+- `hank9999/kiro.rs` remains at `f1bbe9f`, latest observed tag
+  `v2026.3.1`.
+- `Jwadow/kiro-gateway` remains at `a5292ca`, latest observed tag `v2.3`.
+- Private Sub2API fork remains synced with `origin/main` at `1709e676` before
+  this documentation update.
+
+kiro.rs patch:
+
+- Patched local `D:\wflogin\kiro.rs-master` so admin
+  `POST /api/admin/credentials` accepts full exported metadata:
+  - `accessToken` / `access_token`
+  - `profileArn` / `profile_arn`
+  - `expiresAt` / `expires_at`
+- Added snake_case aliases for common admin import fields so direct API import
+  and Sub2API bridge import use the same shape.
+- Changed `AdminService::add_credential` to pass `access_token`,
+  `profile_arn`, and `expires_at` into `KiroCredentials` instead of setting
+  them to `None`.
+- Built server image `kiro-rs-admin-metadata:20260519-1425`.
+- Switched only the internal `kiro-rs` service to that image.
+
+Verification:
+
+- Targeted Rust test passed:
+  `cargo test admin::types::tests::add_credential_request_accepts_full_export_metadata`.
+- Full local `cargo test` still has 8 pre-existing Anthropic converter failures
+  around old `claude-sonnet-4` / `claude-opus` model assertions. Those failures
+  are unrelated to the admin import metadata patch.
+- Server `kiro-rs` restarted successfully and loaded 1 credential.
+- Internal Kiro admin credential status returned:
+  - `total: 1`
+  - `available: 1`
+  - `with_profile_arn: 1`
+  - `auth_methods: ["social"]`
+- Internal Windsurf account status returned:
+  - `total: 1`
+  - `active: 1`
+  - tier: `pro`
+- Public Sub2API smoke through `https://api.vyywcw.cn/v1/messages` passed:
+  - Windsurf `claude-sonnet-4.6`: HTTP 200, text `ok`
+  - Kiro `qwen3-coder-next`: HTTP 200, text `ok`
+  - Kiro `deepseek-3.2`: HTTP 200, text `ok`
+
+Exposure check:
+
+- Adapter ports remain internal only:
+  - `sub2api-windsurf-api`: `{"3003/tcp":null}`
+  - `sub2api-kiro-rs`: `{"8990/tcp":null}`
+  - `sub2api-kiro-gateway`: `{"8000/tcp":null}`
+- Caddy has no `windsurf-api`, `kiro-rs`, `kiro-gateway`, `3003`, `8990`, or
+  `8000` routes.
+
+Operational note:
+
+- Browser admin login should use the current remembered password.
+- The server `.env` `ADMIN_PASSWORD` no longer matches the live admin password,
+  so CLI admin import smoke through `POST /api/v1/admin/accounts/import/kiro`
+  was skipped after a 401 login response. Do not store the current admin
+  password in Git or docs.

@@ -1,0 +1,130 @@
+diff --git a/src/admin/types.rs b/src/admin/types.rs
+--- a/src/admin/types.rs
++++ b/src/admin/types.rs
+@@
+ pub struct AddCredentialRequest {
++    /// Access token（可选；导入完整 Kiro 导出凭据时使用）
++    #[serde(alias = "access_token")]
++    pub access_token: Option<String>,
++
+     /// 刷新令牌（OAuth 凭据必填，API Key 凭据不需要）
++    #[serde(alias = "refresh_token")]
+     pub refresh_token: Option<String>,
+ 
++    /// Profile ARN（可选；Kiro Runtime 请求会使用它做 profile 绑定）
++    #[serde(alias = "profile_arn")]
++    pub profile_arn: Option<String>,
++
++    /// Access token 过期时间（RFC3339；可选）
++    #[serde(alias = "expires_at")]
++    pub expires_at: Option<String>,
++
+     /// 认证方式（可选，默认 social）
+     #[serde(default = "default_auth_method")]
++    #[serde(alias = "auth_method")]
+     pub auth_method: String,
+ 
+     /// OIDC Client ID（IdC 认证需要）
++    #[serde(alias = "client_id")]
+     pub client_id: Option<String>,
+ 
+     /// OIDC Client Secret（IdC 认证需要）
++    #[serde(alias = "client_secret")]
+     pub client_secret: Option<String>,
+@@
+     /// 凭据级 Auth Region（用于 Token 刷新）
++    #[serde(alias = "auth_region")]
+     pub auth_region: Option<String>,
+ 
+     /// 凭据级 API Region（用于 API 请求）
++    #[serde(alias = "api_region")]
+     pub api_region: Option<String>,
+ 
+     /// 凭据级 Machine ID（可选，64 位字符串）
+     /// 未配置时回退到 config.json 的 machineId
++    #[serde(alias = "machine_id")]
+     pub machine_id: Option<String>,
+@@
+     /// 凭据级代理 URL（可选，特殊值 "direct" 表示不使用代理）
++    #[serde(alias = "proxy_url")]
+     pub proxy_url: Option<String>,
+ 
+     /// 凭据级代理认证用户名（可选）
++    #[serde(alias = "proxy_username")]
+     pub proxy_username: Option<String>,
+ 
+     /// 凭据级代理认证密码（可选）
++    #[serde(alias = "proxy_password")]
+     pub proxy_password: Option<String>,
+@@
+     /// Kiro API Key（API Key 凭据必填，格式: ksk_xxxxxxxx）
+     /// 设置后直接作为 Bearer Token 使用，无需 refreshToken
+     #[serde(skip_serializing_if = "Option::is_none")]
++    #[serde(alias = "kiro_api_key")]
+     pub kiro_api_key: Option<String>,
+@@
+ fn default_auth_method() -> String {
+     "social".to_string()
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::AddCredentialRequest;
++
++    #[test]
++    fn add_credential_request_accepts_full_export_metadata() {
++        let request: AddCredentialRequest = serde_json::from_str(
++            r#"{
++                "accessToken": "access-a",
++                "refreshToken": "refresh-a",
++                "profileArn": "arn:aws:codewhisperer:us-east-1:123456789012:profile/ABCDEF",
++                "expiresAt": "2026-05-14T10:51:10Z",
++                "email": "user@example.com"
++            }"#,
++        )
++        .expect("camelCase metadata should deserialize");
++
++        assert_eq!(request.access_token.as_deref(), Some("access-a"));
++        assert_eq!(request.refresh_token.as_deref(), Some("refresh-a"));
++        assert_eq!(
++            request.profile_arn.as_deref(),
++            Some("arn:aws:codewhisperer:us-east-1:123456789012:profile/ABCDEF")
++        );
++        assert_eq!(request.expires_at.as_deref(), Some("2026-05-14T10:51:10Z"));
++        assert_eq!(request.email.as_deref(), Some("user@example.com"));
++
++        let request: AddCredentialRequest = serde_json::from_str(
++            r#"{
++                "access_token": "access-b",
++                "refresh_token": "refresh-b",
++                "profile_arn": "arn:aws:codewhisperer:us-east-1:123456789012:profile/GHIJKL",
++                "expires_at": "2026-05-14T10:51:10Z"
++            }"#,
++        )
++        .expect("snake_case metadata should deserialize");
++
++        assert_eq!(request.access_token.as_deref(), Some("access-b"));
++        assert_eq!(request.refresh_token.as_deref(), Some("refresh-b"));
++        assert_eq!(
++            request.profile_arn.as_deref(),
++            Some("arn:aws:codewhisperer:us-east-1:123456789012:profile/GHIJKL")
++        );
++        assert_eq!(request.expires_at.as_deref(), Some("2026-05-14T10:51:10Z"));
++    }
++}
+diff --git a/src/admin/service.rs b/src/admin/service.rs
+--- a/src/admin/service.rs
++++ b/src/admin/service.rs
+@@
+         let new_cred = KiroCredentials {
+             id: None,
+-            access_token: None,
++            access_token: req.access_token,
+             refresh_token: req.refresh_token,
+-            profile_arn: None,
+-            expires_at: None,
++            profile_arn: req.profile_arn,
++            expires_at: req.expires_at,
+             auth_method: Some(req.auth_method),
+             client_id: req.client_id,
+             client_secret: req.client_secret,

@@ -1,5 +1,12 @@
 # Sub2API Provider Adapter Planning Index
 
+## 2026-05-19 Provider Account Operations
+
+- `PROVIDER_ACCOUNT_OPERATIONS_GUIDE.md`
+  - Current production workflow for importing Windsurf/Kiro credentials,
+    verifying public Sub2API access, checking adapter privacy, and updating the
+    server later.
+
 ## 2026-05-19 Kiro Gateway Runtime Docs
 
 - `KIRO_GATEWAY_RUNTIME_REPORT_2026-05-19.md`

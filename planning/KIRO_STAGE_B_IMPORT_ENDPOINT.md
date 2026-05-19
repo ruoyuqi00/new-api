@@ -106,7 +106,10 @@ Content-Type: application/json
 
 转发给 `kiro.rs` 的字段使用 camelCase：
 
+- `accessToken`
 - `refreshToken`
+- `profileArn`
+- `expiresAt`
 - `authMethod`
 - `clientId`
 - `clientSecret`

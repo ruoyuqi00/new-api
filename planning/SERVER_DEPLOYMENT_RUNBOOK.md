@@ -1,5 +1,32 @@
 # Server Deployment Runbook
 
+## 2026-05-19 Kiro/Windsurf external verification
+
+Current internal adapter images on the US server:
+
+- Sub2API fork: `sub2api-provider-adapters:a147caa0`
+- WindsurfAPI: `ghcr.io/dwgx/windsurf-api:latest`
+- Kiro Gateway: `ghcr.io/jwadow/kiro-gateway:latest`
+- patched kiro.rs: `kiro-rs-admin-metadata:20260519-1425`
+
+External smoke through `https://api.vyywcw.cn/v1/messages` passed:
+
+- `claude-sonnet-4.6` through Windsurf: HTTP 200, text `ok`
+- `qwen3-coder-next` through Kiro Gateway: HTTP 200, text `ok`
+- `deepseek-3.2` through Kiro Gateway: HTTP 200, text `ok`
+
+The current adapter credential status checks report:
+
+- Windsurf: 1 account, 1 active, tier `pro`.
+- kiro.rs: 1 credential, 1 available, 1 credential with `profileArn`.
+
+The server `.env` `ADMIN_PASSWORD` is stale and returns 401 for CLI login.
+Browser admin operations should use the current remembered password. Do not
+store the current admin password in this repo.
+
+See `planning/PROVIDER_ACCOUNT_OPERATIONS_GUIDE.md` for the admin UI account
+import workflow.
+
 ## 2026-05-19 Current Kiro Gateway runtime
 
 The server now has two Kiro-related internal services:
