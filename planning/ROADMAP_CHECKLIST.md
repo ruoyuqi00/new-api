@@ -240,5 +240,12 @@
 - [x] 已参考 `dwgx/WindsurfAPI` 的 `/auth/login` 批量导入协议，Sub2API 只做管理员入口和安全转发，不保存原始 Windsurf token 或密码。
 - [x] 已支持 `token`、`api_key`、`email/password`，并支持 raw `email----password` 批量文本。
 - [x] 已增加单元测试和 handler 覆盖：解析、去重、配置缺失、上游转发、响应脱敏、上游错误。
-- [ ] 管理后台 UI 还未接入该接口。
-- [ ] 服务器还未部署 `windsurf-api` 内网服务，也还未把线上 Sub2API 切到本 fork 镜像。
+- [x] 管理后台 UI 已接入该接口，支持 token、api_key、`email----password` 和 JSON 四种导入模式。
+- [x] 服务器已部署 `windsurf-api` 内网服务，线上 Sub2API 已切到本 fork 镜像。
+
+## 2026-05-19 进度更新
+
+- [x] 已合并官方 upstream 新增的 Anthropic API-key passthrough 流式 keepalive 修复。
+- [x] 已确认 `dwgx/WindsurfAPI` 仍停留在 `v2.0.96`，暂无新 tag。
+- [x] 已补充前端 Windsurf 导入解析单测和 TypeScript 类型检查。
+- [ ] 待部署下一版 fork 镜像后，在服务器后台页面确认 `导入 Windsurf` 入口可见。

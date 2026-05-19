@@ -1150,6 +1150,35 @@ export interface CodexSessionImportResult {
   errors?: CodexSessionImportMessage[]
 }
 
+export interface WindsurfImportAccount {
+  email?: string
+  password?: string
+  token?: string
+  api_key?: string
+  label?: string
+  proxy?: string
+}
+
+export interface WindsurfImportRequest {
+  email?: string
+  password?: string
+  token?: string
+  api_key?: string
+  apiKey?: string
+  apikey?: string
+  tokens?: string[]
+  raw?: string
+  accounts?: WindsurfImportAccount[]
+}
+
+export interface WindsurfImportResult {
+  total: number
+  forwarded: number
+  duplicate_count: number
+  upstream_status: number
+  upstream?: unknown
+}
+
 // ==================== Usage & Redeem Types ====================
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'

@@ -532,6 +532,18 @@ go test ./internal/server
 git push
 ```
 
+If the change touches the frontend admin UI, also run from `frontend`:
+
+```powershell
+$env:npm_config_dangerously_allow_all_builds='true'
+corepack pnpm install --frozen-lockfile
+corepack pnpm exec vitest run src/components/admin/account/__tests__/windsurfImport.spec.ts
+corepack pnpm exec vue-tsc --noEmit
+```
+
+Do not commit a generated `frontend/pnpm-workspace.yaml` unless it is an
+intentional repository policy change.
+
 Build and deploy a new server image with a new immutable tag. Keep the previous
 tag for rollback.
 

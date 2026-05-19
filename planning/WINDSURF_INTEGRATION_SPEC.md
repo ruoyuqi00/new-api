@@ -259,31 +259,32 @@ Stage C: direct native provider.
 
 Backend:
 
-- [ ] Add internal adapter config:
-  - `providers.windsurf.internal_base_url`
-  - `providers.windsurf.internal_api_key`
-- [ ] Add `WindsurfImportRequest`.
-- [ ] Add `POST /api/v1/admin/providers/windsurf/import`.
-- [ ] Validate input supports line mode and JSON mode.
-- [ ] Redact all token values in logs.
-- [ ] Call internal `/auth/login`.
-- [ ] Normalize per-account success/failure.
-- [ ] Return import summary.
-- [ ] Add tests for parsing, redaction, success, partial failure.
+- [x] Add internal adapter config via env:
+  - `WINDSURF_ADAPTER_INTERNAL_BASE_URL`
+  - `WINDSURF_ADAPTER_INTERNAL_API_KEY`
+  - compatible aliases under `PROVIDER_ADAPTERS_WINDSURF_*`
+- [x] Add `WindsurfImportRequest`.
+- [x] Add `POST /api/v1/admin/accounts/import/windsurf`.
+- [x] Validate input supports line mode and JSON mode.
+- [x] Redact all token values in returned upstream payloads and error messages.
+- [x] Call internal `/auth/login`.
+- [ ] Normalize detailed per-account success/failure from WindsurfAPI responses.
+- [x] Return import summary.
+- [x] Add tests for parsing, redaction, success, config failure, and upstream failure.
 
 Frontend:
 
-- [ ] Add Windsurf import modal.
-- [ ] Support textarea batch import.
-- [ ] Show per-account result.
+- [x] Add Windsurf import modal.
+- [x] Support textarea batch import.
+- [ ] Show normalized per-account result after backend exposes stable item shape.
 - [ ] Link to create Sub2API upstream account if missing.
-- [ ] Add zh/en i18n strings.
+- [x] Add zh/en i18n strings.
 
 Ops:
 
-- [ ] Add env placeholders to server compose.
-- [ ] Add backup path to backup script.
-- [ ] Add logs command to runbook.
+- [x] Add env placeholders to server compose.
+- [x] Add backup path guidance to runbook.
+- [x] Add logs command to runbook.
 
 ## Open questions
 

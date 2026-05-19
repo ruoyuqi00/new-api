@@ -18,6 +18,8 @@ import type {
   AdminDataImportResult,
   CodexSessionImportRequest,
   CodexSessionImportResult,
+  WindsurfImportRequest,
+  WindsurfImportResult,
   CheckMixedChannelRequest,
   CheckMixedChannelResponse
 } from '@/types'
@@ -554,6 +556,22 @@ export async function importCodexSession(payload: CodexSessionImportRequest): Pr
   return data
 }
 
+export async function importWindsurf(
+  payload: WindsurfImportRequest,
+  options?: { idempotencyKey?: string }
+): Promise<WindsurfImportResult> {
+  const headers: Record<string, string> = {}
+  if (options?.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey
+  }
+  const { data } = await apiClient.post<WindsurfImportResult>(
+    '/admin/accounts/import/windsurf',
+    payload,
+    { headers }
+  )
+  return data
+}
+
 /**
  * Get Antigravity default model mapping from backend
  * @returns Default model mapping (from -> to)
@@ -671,6 +689,7 @@ export const accountsAPI = {
   exportData,
   importData,
   importCodexSession,
+  importWindsurf,
   getAntigravityDefaultModelMapping,
   batchClearError,
   batchRefresh,

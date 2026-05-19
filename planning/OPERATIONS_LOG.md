@@ -250,3 +250,54 @@ Operational note:
   Before retesting after a known adapter-side fix, clear only transient/error
   state for the internal upstream account and restart `sub2api` to refresh the
   scheduler snapshot.
+
+## 2026-05-19 Upstream sync and Windsurf UI import
+
+Reference check:
+
+- Official Sub2API upstream advanced by two commits:
+  - `164e2f61 fix: add keepalive for Anthropic passthrough streams`
+  - `1d78dde8 Merge pull request #2552 from lyen1688/fix/anthropic-passthrough-keepalive`
+- Merged `upstream/main` into the private fork without conflicts.
+- `dwgx/WindsurfAPI` remained at `c028576 release: 2.0.96`, tag `v2.0.96`.
+
+Code changes:
+
+- Added the admin UI entry `Import Windsurf` under account management more actions.
+- Added a Windsurf import modal that calls `POST /api/v1/admin/accounts/import/windsurf`.
+- UI import modes:
+  - `token`: one or more Windsurf tokens.
+  - `api_key`: one or more Codeium/Windsurf API keys, submitted as `api_key`.
+  - `email_password`: one `email----password` pair per line.
+  - `json`: full backend-supported request object or account array.
+- Added frontend request/response types and an API client wrapper with an
+  idempotency key header.
+- Added pure parser tests for the UI payload builder.
+
+Validation:
+
+```powershell
+$env:GOCACHE='C:\Users\Administrator\.codex\memories\gocache'
+go test ./internal/handler/admin -run Windsurf
+go test ./internal/service -run 'AnthropicAPIKeyPassthrough'
+
+$env:npm_config_dangerously_allow_all_builds='true'
+corepack pnpm exec vitest run src/components/admin/account/__tests__/windsurfImport.spec.ts
+corepack pnpm exec vue-tsc --noEmit
+```
+
+Result:
+
+```text
+ok github.com/Wei-Shaw/sub2api/internal/handler/admin
+ok github.com/Wei-Shaw/sub2api/internal/service
+1 frontend test file passed, 6 tests passed
+vue-tsc passed
+```
+
+Operational note:
+
+- `pnpm` v11 may require build-script approval for `esbuild` and `vue-demi`
+  on a fresh local checkout. For local verification, using
+  `npm_config_dangerously_allow_all_builds=true` avoids committing a generated
+  `pnpm-workspace.yaml` approval file.

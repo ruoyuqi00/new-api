@@ -264,9 +264,9 @@ ok github.com/Wei-Shaw/sub2api/internal/handler/admin
 
 ## 下一步
 
-1. 给 Sub2API 管理后台补一个 Windsurf 批量导入 UI。
-2. 在服务器 compose 里加 `windsurf-api` 内网服务。
-3. 把 Sub2API 从官方镜像切到本 fork 构建镜像。
-4. 配置 `WINDSURF_ADAPTER_INTERNAL_BASE_URL` 和 `WINDSURF_ADAPTER_INTERNAL_API_KEY`。
-5. 用一个测试 token 跑完整链路：导入到 WindsurfAPI，Sub2API 创建/测试内网上游账号，公网只访问 Sub2API。
-6. 开始 Kiro Stage A：先复用同样的“内网代理 + Sub2API 管理导入入口”模式，不急着把 Kiro token 生命周期全部写进 Sub2API。
+1. 已完成：给 Sub2API 管理后台补 Windsurf 批量导入 UI，支持 token、api_key、`email----password`、JSON 四种模式。
+2. 已完成：在服务器 compose 里加 `windsurf-api` 内网服务。
+3. 已完成：把 Sub2API 从官方镜像切到本 fork 构建镜像。
+4. 已完成：配置 `WINDSURF_ADAPTER_INTERNAL_BASE_URL` 和 `WINDSURF_ADAPTER_INTERNAL_API_KEY`。
+5. 已完成：用真实账号跑完整链路，公网只访问 Sub2API，`windsurf-api` 仅内网可达。
+6. 下一步：开始 Kiro Stage A，复用同样的“内网代理 + Sub2API 管理导入入口”模式，不急着把 Kiro token 生命周期全部写进 Sub2API。
