@@ -659,3 +659,14 @@ If direct Kiro smoke passes, create or enable the Sub2API upstream account:
 
 Potential follow-up: evaluate whether Claude Code clients should route through
 `/cc/v1/messages`; standard Sub2API Anthropic passthrough uses `/v1/messages`.
+
+### Current fork image after 2026-05-19 fusion round 2
+
+- Current image on the US server: `sub2api-provider-adapters:c4cefc76`.
+- Rollback image: `sub2api-provider-adapters:f95c2073`.
+- Pre-deploy backup:
+  `/opt/sub2api-backups/sub2api-20260519-102757-pre-c4cefc76.tar.gz`.
+- Public Sub2API health passed on `https://api.vyywcw.cn/` and
+  `https://www.vyywcw.cn/`.
+- `windsurf-api` and `kiro-rs` remain internal Docker services with no
+  published host ports.

@@ -398,3 +398,37 @@ Operational impact:
   `upstream_status`, or `upstream` remain compatible.
 - Operators can now identify the exact failed row in a batch import without
   printing tokens, API keys, or passwords.
+
+Deployment:
+
+- Built and deployed server image `sub2api-provider-adapters:c4cefc76`.
+- Previous server image was `sub2api-provider-adapters:f95c2073`.
+- Server backup before switch:
+  `/opt/sub2api-backups/sub2api-20260519-102757-pre-c4cefc76.tar.gz`
+  (about 40 MB).
+- `docker compose ps` showed:
+  - `sub2api` healthy on `127.0.0.1:8080->8080`.
+  - `windsurf-api` internal only on `3003/tcp`.
+  - `kiro-rs` internal only on `8990/tcp`.
+  - Postgres, Redis, and Caddy running.
+
+Smoke results:
+
+- Local Sub2API health: `GET http://127.0.0.1:8080/health` returned
+  `{"status":"ok"}`.
+- Public `https://api.vyywcw.cn/` returned HTTP 200.
+- Public `https://www.vyywcw.cn/` returned HTTP 200.
+- Internal Windsurf health from Sub2API container returned status ok and
+  reported one active account.
+- Internal Kiro models endpoint from Sub2API container returned a model list.
+- Internal Kiro admin credentials endpoint returned `total: 0`, which is
+  expected before a real Kiro credential is imported.
+- Docker inspect confirmed adapter ports are not published:
+  - `sub2api-windsurf-api`: `{"3003/tcp":null}`
+  - `sub2api-kiro-rs`: `{"8990/tcp":null}`
+
+Note:
+
+- The deploy helper's first health curl ran too early while the container was
+  still starting and returned a transient connection reset. A follow-up retry
+  verification passed after the container became healthy.

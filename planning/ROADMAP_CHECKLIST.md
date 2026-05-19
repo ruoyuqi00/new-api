@@ -281,6 +281,7 @@
   `succeeded`, `failed`, and `items[]`.
 - [x] Updated Windsurf admin import UI to show per-item results like the Kiro
   import UI.
-- [ ] Build and deploy the next fork image to the US server.
-- [ ] Re-run Sub2API public health, internal Windsurf, and internal Kiro
+- [x] Build and deploy the next fork image to the US server:
+  `sub2api-provider-adapters:c4cefc76`.
+- [x] Re-run Sub2API public health, internal Windsurf, and internal Kiro
   smoke checks after deployment.
