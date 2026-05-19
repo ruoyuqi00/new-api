@@ -26,6 +26,35 @@ Post-deploy validation:
 - Public Sub2API smoke with `qwen3-coder-next` returned HTTP 200 and text
   `ok`.
 
+## 2026-05-19 Kiro.rs Claude correction
+
+Correction:
+
+- Local `D:\wflogin\kiro.rs-master` can access Claude through its local runtime
+  configuration.
+- Local smoke against `claude-sonnet-4-6` returned HTTP 200 and text `ok`.
+- The local config includes a proxy URL, while the server `kiro-rs` service
+  uses direct egress.
+
+Server recheck:
+
+- Copied the local full `credentials.json` to
+  `/opt/sub2api/kiro-rs/config/credentials.json` after backing up the previous
+  server credential file.
+- Restarted `kiro-rs`.
+- Forced token refresh through the server `kiro-rs` admin API.
+- Server direct `kiro-rs` smoke with `claude-sonnet-4-6` still returned
+  `INVALID_MODEL_ID`.
+
+Conclusion:
+
+- Do not describe this as “kiro.rs cannot access Claude.”
+- The more accurate statement is that local `kiro.rs` with the local proxy
+  egress can access Claude, while the current US server direct egress cannot.
+- A separate `kiro.rs` fix is still needed because its admin add-credential
+  path drops `accessToken`, `profileArn`, and `expiresAt`; direct file import
+  preserves those fields.
+
 ## 2026-05-19 Kiro Gateway runtime validation
 
 Reference refresh:

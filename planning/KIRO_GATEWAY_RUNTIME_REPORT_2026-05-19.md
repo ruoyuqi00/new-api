@@ -17,14 +17,22 @@
 
 ## 关键判断
 
-当前短期运行路径选择 `kiro-gateway`，不是直接用 `kiro.rs` 承担模型请求。
+当前短期服务器运行路径选择 `kiro-gateway`，不是直接用服务器上的 `kiro-rs` 承担公网 Kiro 模型请求。
 
 原因：
 
-- `kiro.rs` 当前主请求路径仍指向 `https://q.<region>.amazonaws.com/generateAssistantResponse`，实测 Claude/Kiro 模型会返回 `INVALID_MODEL_ID`。
+- 服务器上的 `kiro-rs` 当前主请求路径指向 `https://q.<region>.amazonaws.com/generateAssistantResponse`，在服务器直连出口下实测 Claude/Kiro 模型会返回 `INVALID_MODEL_ID`。
 - `kiro-gateway` 当前配置使用 `https://runtime.<region>.kiro.dev/generateAssistantResponse`，更贴近当前 Kiro 运行面。
 - `kiro-gateway` 的模型解析策略更适合短期接入：先规范化模型名，再尽量透传给 Kiro 上游，让上游最终判定是否可用。
 - 本轮 Kiro Pro 凭据可被 `kiro-gateway` 使用，且 open-model 类模型已通过 Sub2API 公网入口验证。
+
+重要修正：
+
+- 本地 `D:\wflogin\kiro.rs-master` 并不是不能访问 Claude。2026-05-19 复测本地服务：
+  - `GET /v1/models` 返回 Claude 模型列表。
+  - `POST /v1/messages` 使用 `claude-sonnet-4-6` 返回 HTTP 200 和文本 `ok`。
+- 本地配置包含 `proxyUrl: http://127.0.0.1:7897`，而服务器 `kiro-rs` 直连上游。
+- 因此当前差异更准确地说是“服务器出口/导入方式/运行配置未复刻本地可用姿势”，不是“kiro.rs 代码绝对不支持 Claude”。
 
 ## 服务器部署状态
 
@@ -172,16 +180,18 @@ schedulable: true
 - 它有较完整的 Rust 版 Anthropic `/v1/messages` 和 `/cc/v1/messages` 结构。
 - 它的 admin credential 管理、refresh token 分类、region 字段、machine id 等逻辑可以继续参考。
 - 本 fork 已经有 Sub2API -> `kiro.rs` admin import bridge，可以作为后续“凭据导入控制面”的参考。
+- 本地 `kiro.rs-master` 已验证可以用 `claude-sonnet-4-6` 成功请求，证明这条路径仍值得继续融合。
 
-但短期模型请求不走 `kiro.rs`：
+但短期服务器公网模型请求暂不走 `kiro.rs`：
 
-- 当前 `kiro.rs` 运行面的模型请求路径落后于 Kiro 当前线上接口。
-- 直接改 `kiro.rs` 到 `runtime.<region>.kiro.dev` 需要补齐 profile ARN、模型透传、错误分类、payload 限制和流式解析回归测试。
+- 服务器直连出口下 `kiro-rs` 的 Claude 请求仍返回 `INVALID_MODEL_ID`，即使复制本地完整 credential 文件并强制刷新 token 后仍失败。
+- `kiro.rs` admin 添加接口会丢弃 `accessToken`、`profileArn`、`expiresAt`，这会导致通过 admin import 导入的凭据不等价于本地完整 `credentials.json`。
+- 若要让服务器也走 `kiro.rs` 的 Claude 路径，需要提供和本地相同或等价的可用代理出口，或继续定位 Kiro 上游对 VPS 出口的模型门控差异。
 
 ## 下一步
 
-1. 把 `kiro-gateway` 的 runtime endpoint、模型 resolver、credential file 写回能力整理成最小 patch 计划。
-2. 在本 fork 中增加一个“Sub2API Kiro runtime upstream 创建/更新”管理入口，避免以后手工 SQL 插入账号。
-3. 继续观察 `hank9999/kiro.rs` 是否切换到 `runtime.<region>.kiro.dev`；若上游完成，可考虑回到 `kiro.rs`。
+1. 给 `kiro.rs` admin 添加接口补齐 `accessToken`、`profileArn`、`expiresAt` 字段，避免导入后凭据降级。
+2. 给服务器 `kiro-rs` 增加可配置代理出口验证；优先复刻本地 `proxyUrl` 能力，而不是直接否定 `kiro.rs`。
+3. 把 `kiro-gateway` 的 runtime endpoint、模型 resolver、credential file 写回能力整理成最小 patch 计划。
 4. 继续观察 `Jwadow/kiro-gateway` 新 tag；每次更新后必须重新 smoke 四个已公开模型。
-5. 单独排查 Kiro Pro 账号为什么 Claude 系列仍返回不可用，确认是订阅、区域、模型名、请求 payload 还是官方策略导致。
+5. 单独排查服务器出口下 Kiro Pro 账号为什么 Claude 系列仍返回不可用，确认是出口 IP、区域、模型名、请求 payload 还是官方策略导致。

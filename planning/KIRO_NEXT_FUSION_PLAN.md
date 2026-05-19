@@ -21,6 +21,15 @@
   - `minimax-m2.5`
   - `qwen3-coder-next`
 
+Kiro correction:
+
+- 本地 `D:\wflogin\kiro.rs-master` 已验证可以通过 `claude-sonnet-4-6` 返回 HTTP 200。
+- 本地 `kiro.rs-master` 使用本机代理出口；服务器 `kiro-rs` 直连出口仍返回 `INVALID_MODEL_ID`。
+- 后续不能再把问题简化为“kiro.rs 不支持 Claude”，应拆成：
+  - admin import 是否保留完整 credential metadata。
+  - 服务器出口是否等价于本地代理出口。
+  - `q.<region>.amazonaws.com` 与 `runtime.<region>.kiro.dev` 两条路径分别支持哪些模型。
+
 ## 阶段 1：把 Kiro 接入从手工操作变成管理动作
 
 目标：
@@ -99,6 +108,7 @@ auto-kiro           investigation
 
 patch `kiro.rs` 的最小路线：
 
+- [ ] 修复 admin `POST /api/admin/credentials` 丢弃 `accessToken`、`profileArn`、`expiresAt` 的问题。
 - [ ] 新增 runtime endpoint 配置，默认 `runtime.<region>.kiro.dev`。
 - [ ] 保留旧 endpoint 作为 fallback 或可配置项。
 - [ ] 调整模型 ID 规范化，支持 dot 格式：`claude-sonnet-4.6`。
@@ -106,6 +116,7 @@ patch `kiro.rs` 的最小路线：
 - [ ] 增加 open models：`deepseek-3.2`、`glm-5`、`minimax-m2.5`、`qwen3-coder-next`。
 - [ ] 补 profile ARN header 逻辑和缺失错误提示。
 - [ ] 增加 direct smoke 测试和 `/v1/models` 回归测试。
+- [ ] 增加代理出口 smoke：直连、服务器代理、本地代理三种路径分别记录结果。
 
 暂不做的事：
 
