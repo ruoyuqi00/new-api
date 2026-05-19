@@ -605,6 +605,25 @@ Exposure check:
 - Caddy has no `windsurf-api`, `kiro-rs`, `kiro-gateway`, `3003`, `8990`, or
   `8000` routes.
 
+## 2026-05-19 post-push verification
+
+- Pushed commit `76633539` to
+  `https://github.com/ruoyuqi00/sub2api-provider-adapters.git`.
+- Confirmed local fork is clean and aligned with `origin/main`.
+- Server compose status:
+  - `sub2api` healthy on `127.0.0.1:8080->8080`.
+  - `windsurf-api`, `kiro-rs`, and `kiro-gateway` are running without public
+    port mappings.
+- Internal adapter status:
+  - Windsurf: `total: 1`, `active: 1`, tier `pro`.
+  - Kiro: `total: 1`, `available: 1`, `with_profile_arn: 1`,
+    `auth_methods: ["social"]`.
+- External public-domain smoke from local machine through
+  `https://api.vyywcw.cn/v1/messages` returned HTTP 200 for:
+  - `claude-sonnet-4.6`
+  - `qwen3-coder-next`
+  - `deepseek-3.2`
+
 Operational note:
 
 - Browser admin login should use the current remembered password.
