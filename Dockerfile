@@ -20,7 +20,7 @@ FROM ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Install a pinned pnpm version. pnpm 10+ can fail CI-style installs when
+# Install a pinned pnpm v9. pnpm 10+ can fail CI-style installs when
 # dependency build scripts have not been approved interactively.
 ARG PNPM_VERSION=9.15.9
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
