@@ -1,5 +1,66 @@
 # Operations Log
 
+## 2026-05-19 Kiro Gateway runtime validation
+
+Reference refresh:
+
+- Official Sub2API upstream advanced to `14f54be0`; merged into the private
+  fork after committing the Kiro credential metadata import support.
+- `hank9999/kiro.rs` remained at observed HEAD `f1bbe9f`, latest observed tag
+  `v2026.3.1`.
+- `Jwadow/kiro-gateway` remained at observed HEAD `a5292ca`, latest observed
+  tag `v2.3`.
+- `dwgx/WindsurfAPI` remained at observed HEAD `c028576`, tag `v2.0.96`.
+
+Server changes:
+
+- Added `kiro-gateway` to `/opt/sub2api/docker-compose.yml` as an
+  internal-only service.
+- Compose backup before the change:
+  `/opt/sub2api-backups/docker-compose-20260519-042547-pre-kiro-gateway.yml`.
+- Removed the previous ad-hoc `sub2api-kiro-gateway` container and recreated it
+  through Docker Compose.
+- Kept `kiro-gateway` unexposed publicly: no host port and no Caddy route.
+- Persisted runtime paths:
+  - `/opt/sub2api/kiro-gateway/creds`
+  - `/opt/sub2api/kiro-gateway/debug_logs`
+  - `/opt/sub2api/kiro-gateway/state`
+
+Kiro account handling:
+
+- The user-provided Kiro credential was treated as a secret and stored only on
+  the server runtime path, not in Git.
+- The credential initialized successfully in `kiro-gateway`.
+- Claude-family Kiro models remain disabled in Sub2API mapping because direct
+  runtime smoke still returns model/subscription errors.
+
+Sub2API upstream account:
+
+- Added database account `kiro-gateway-internal-anthropic`.
+- Platform/type: `anthropic` / `apikey`.
+- Base URL: `http://kiro-gateway:8000`.
+- Added to group `windsurf-smoke`.
+- Enabled only these smoke-passed Kiro models:
+  - `deepseek-3.2`
+  - `glm-5`
+  - `minimax-m2.5`
+  - `qwen3-coder-next`
+
+Validation:
+
+- `kiro-gateway` health became healthy after compose start.
+- Internal `GET http://kiro-gateway:8000/v1/models` returned 13 model IDs.
+- Internal Sub2API smoke with `qwen3-coder-next` returned HTTP 200 and text
+  `ok`.
+- Public Sub2API smoke through `https://api.vyywcw.cn/v1/messages` with
+  `deepseek-3.2` returned HTTP 200 and text `ok`.
+
+Operational note:
+
+- Do not widen Kiro model mapping until a model-specific smoke passes.
+- If the Kiro runtime account fails, disable or remove only
+  `kiro-gateway-internal-anthropic`; Windsurf uses a separate internal account.
+
 This log records local upstream checks, server maintenance, and deployment notes
 for the private fork. Do not store secrets here.
 

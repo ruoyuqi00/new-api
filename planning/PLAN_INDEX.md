@@ -1,5 +1,12 @@
 # Sub2API Provider Adapter Planning Index
 
+## 2026-05-19 Kiro Gateway Runtime Docs
+
+- `KIRO_GATEWAY_RUNTIME_REPORT_2026-05-19.md`
+  - 记录本轮 Kiro gateway 服务器部署、参考项目、已验证模型、暂不启用的模型和短期技术判断。
+- `KIRO_NEXT_FUSION_PLAN.md`
+  - 记录 Kiro 后续融合升级计划，包括管理接口、模型 smoke、kiro.rs patch 方向、统一 adapter 抽象和回滚要求。
+
 记录日期：2026-05-16
 
 这个目录是 `sub2api-provider-adapters` 私人 fork 的工程计划区。它的作用是把后续 Windsurf、Kiro、服务器部署、接口调研、测试验收、回滚策略都固化成可执行文档，避免只靠聊天记录推进。

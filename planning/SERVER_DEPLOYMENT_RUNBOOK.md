@@ -1,5 +1,70 @@
 # Server Deployment Runbook
 
+## 2026-05-19 Current Kiro Gateway runtime
+
+The server now has two Kiro-related internal services:
+
+- `kiro-rs`: kept as the credential/admin import reference and Rust proxy experiment.
+- `kiro-gateway`: active runtime adapter for the Kiro models that passed smoke.
+
+Only Sub2API is public. Do not publish `kiro-gateway:8000` or `kiro-rs:8990`
+to the host, and do not add Caddy routes for either service.
+
+Current active Kiro runtime account in Sub2API:
+
+```text
+name: kiro-gateway-internal-anthropic
+platform: anthropic
+type: apikey
+base_url: http://kiro-gateway:8000
+group: windsurf-smoke
+```
+
+Currently enabled Kiro model mapping:
+
+```text
+deepseek-3.2
+glm-5
+minimax-m2.5
+qwen3-coder-next
+```
+
+Safe internal Kiro Gateway checks:
+
+```bash
+cd /opt/sub2api
+docker compose ps kiro-gateway
+docker compose logs --tail=100 kiro-gateway
+
+set -a
+. ./.env
+set +a
+
+docker run --rm --network sub2api_sub2api-network curlimages/curl:8.16.0 \
+  -sS -m 20 \
+  -H "Authorization: Bearer $KIRO_API_KEY" \
+  http://kiro-gateway:8000/v1/models
+```
+
+Safe public Sub2API Kiro smoke:
+
+```bash
+curl -sS https://api.vyywcw.cn/v1/messages \
+  -H "authorization: Bearer <sub2api-test-key>" \
+  -H "content-type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "deepseek-3.2",
+    "max_tokens": 32,
+    "messages": [{"role": "user", "content": "reply with ok"}],
+    "stream": false
+  }'
+```
+
+Do not add Claude-family Kiro models to Sub2API mapping until direct and public
+smoke both pass. As of 2026-05-19, Claude-family Kiro requests still fail with
+model/subscription errors even though the credential plan reports `KIRO PRO`.
+
 记录日期：2026-05-16
 
 ## Server metadata
