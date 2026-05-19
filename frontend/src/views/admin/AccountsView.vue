@@ -104,6 +104,12 @@
                       </span>
                       <span class="flex-1 text-left">{{ t('admin.accounts.windsurfImport') }}</span>
                     </button>
+                    <button class="account-tools-menu-item" @click="openKiroImport">
+                      <span class="account-tools-menu-icon bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300">
+                        <Icon name="cloud" size="sm" />
+                      </span>
+                      <span class="flex-1 text-left">{{ t('admin.accounts.kiroImport') }}</span>
+                    </button>
                     <button class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
                       <span class="account-tools-menu-icon bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
                         <Icon name="download" size="sm" />
@@ -357,6 +363,7 @@
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <WindsurfImportModal :show="showWindsurfImport" @close="showWindsurfImport = false" @imported="handleWindsurfImported" />
+    <KiroImportModal :show="showKiroImport" @close="showKiroImport = false" @imported="handleKiroImported" />
     <BulkEditAccountModal
       :show="showBulkEdit"
       :account-ids="selIds"
@@ -403,6 +410,7 @@ import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActions
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import WindsurfImportModal from '@/components/admin/account/WindsurfImportModal.vue'
+import KiroImportModal from '@/components/admin/account/KiroImportModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
@@ -473,6 +481,7 @@ const showEdit = ref(false)
 const showSync = ref(false)
 const showImportData = ref(false)
 const showWindsurfImport = ref(false)
+const showKiroImport = ref(false)
 const showExportDataDialog = ref(false)
 const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
@@ -853,6 +862,7 @@ const isAnyModalOpen = computed(() => {
     showSync.value ||
     showImportData.value ||
     showWindsurfImport.value ||
+    showKiroImport.value ||
     showExportDataDialog.value ||
     showBulkEdit.value ||
     showTempUnsched.value ||
@@ -990,6 +1000,11 @@ const openImportData = () => {
 const openWindsurfImport = () => {
   closeAccountToolsDropdown()
   showWindsurfImport.value = true
+}
+
+const openKiroImport = () => {
+  closeAccountToolsDropdown()
+  showKiroImport.value = true
 }
 
 const openExportDataDialogFromMenu = () => {
@@ -1405,6 +1420,7 @@ const handleBulkUpdated = () => {
 }
 const handleDataImported = () => { showImportData.value = false; reload() }
 const handleWindsurfImported = () => { showWindsurfImport.value = false; reload() }
+const handleKiroImported = () => { showKiroImport.value = false; reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({

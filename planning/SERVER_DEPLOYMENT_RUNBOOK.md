@@ -558,3 +558,104 @@ docker compose logs --tail=200 windsurf-api
 
 After every WindsurfAPI update, re-run the account list check and smoke
 `gemini-2.5-flash` plus `claude-sonnet-4.6`.
+
+### Internal Kiro adapter deployment
+
+Target shape:
+
+```text
+sub2api -> http://kiro-rs:8990 -> kiro.rs -> Kiro/AWS upstream
+```
+
+Do not publish port `8990` and do not add a Caddy route for `kiro-rs`.
+
+Server files:
+
+```text
+/opt/sub2api/kiro-rs/config/config.json
+/opt/sub2api/kiro-rs/config/credentials.json
+```
+
+`config.json` shape:
+
+```json
+{
+  "host": "0.0.0.0",
+  "port": 8990,
+  "apiKey": "<internal-model-request-key>",
+  "adminApiKey": "<internal-admin-key>",
+  "tlsBackend": "rustls",
+  "region": "us-east-1",
+  "defaultEndpoint": "ide"
+}
+```
+
+`credentials.json` can start as an empty array:
+
+```json
+[]
+```
+
+Compose service should be internal only:
+
+```yaml
+  kiro-rs:
+    image: ghcr.io/hank9999/kiro-rs:latest
+    restart: unless-stopped
+    volumes:
+      - ./kiro-rs/config:/app/config
+```
+
+Sub2API environment:
+
+```env
+KIRO_ADAPTER_INTERNAL_BASE_URL=http://kiro-rs:8990
+KIRO_ADAPTER_ADMIN_API_KEY=<same-as-config-adminApiKey>
+KIRO_ADAPTER_TIMEOUT_SECONDS=30
+```
+
+Safe health checks:
+
+```bash
+cd /opt/sub2api
+docker compose ps kiro-rs
+docker compose logs --tail=100 kiro-rs
+docker compose exec -T sub2api wget -q -T 5 -O - http://kiro-rs:8990/v1/models || true
+```
+
+Import smoke after adding a real credential through Sub2API admin UI:
+
+```bash
+cd /opt/sub2api
+set -a
+. ./.env
+set +a
+
+docker compose exec -T -e KIRO_KEY="$KIRO_API_KEY" kiro-rs sh -lc '
+wget -q -T 30 -O - \
+  --header="content-type: application/json" \
+  --header="x-api-key: $KIRO_KEY" \
+  --post-data="{\"model\":\"claude-sonnet-4-6\",\"max_tokens\":32,\"messages\":[{\"role\":\"user\",\"content\":\"reply with ok\"}]}" \
+  http://127.0.0.1:8990/v1/messages
+'
+```
+
+If direct Kiro smoke passes, create or enable the Sub2API upstream account:
+
+```json
+{
+  "platform": "anthropic",
+  "type": "apikey",
+  "name": "kiro-internal-anthropic",
+  "credentials": {
+    "api_key": "<KIRO_API_KEY>",
+    "base_url": "http://kiro-rs:8990"
+  },
+  "extra": {
+    "anthropic_passthrough": true
+  }
+}
+```
+
+Potential follow-up: evaluate whether Claude Code clients should route through
+`/cc/v1/messages`; standard Sub2API Anthropic passthrough uses `/v1/messages`.

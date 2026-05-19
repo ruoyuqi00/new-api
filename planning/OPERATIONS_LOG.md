@@ -301,3 +301,65 @@ Operational note:
   on a fresh local checkout. For local verification, using
   `npm_config_dangerously_allow_all_builds=true` avoids committing a generated
   `pnpm-workspace.yaml` approval file.
+
+## 2026-05-19 Kiro adapter import bridge
+
+Reference check:
+
+- `hank9999/kiro.rs` latest observed HEAD: `f1bbe9f`.
+- `Jwadow/kiro-gateway` latest observed HEAD: `a5292ca`; latest observed tag
+  line includes `v2.3`.
+- `dwgx/WindsurfAPI` remained at `c028576`, tag `v2.0.96`.
+- Official Sub2API upstream had advanced again; merged `upstream/main` and
+  resolved the only conflict in `Dockerfile` by keeping the fork's pinned
+  `PNPM_VERSION=9.15.9` while absorbing upstream's pnpm-v9 build fix.
+
+Code changes:
+
+- Added `POST /api/v1/admin/accounts/import/kiro`.
+- Added admin UI entry `Import Kiro`.
+- Added Kiro import modal with modes:
+  - refresh token lines.
+  - Kiro API key lines.
+  - full JSON object or account array.
+- Backend forwards each credential to internal `kiro.rs`
+  `POST /api/admin/credentials`.
+- Backend accepts snake_case and kiro.rs camelCase fields.
+- Backend returns per-item import results and redacts nested secrets.
+- Added local mirrors:
+  - `D:\wflogin\_github_research\kiro.rs-latest`
+  - `D:\wflogin\_github_research\kiro-gateway`
+- Added `planning/KIRO_STAGE_B_IMPORT_ENDPOINT.md`.
+
+Validation:
+
+```powershell
+go test ./internal/handler/admin -run Kiro
+go test ./internal/handler/admin
+go test ./internal/server
+
+$env:npm_config_dangerously_allow_all_builds='true'
+corepack pnpm exec vitest run src/components/admin/account/__tests__/kiroImport.spec.ts src/components/admin/account/__tests__/windsurfImport.spec.ts
+corepack pnpm exec vue-tsc --noEmit
+corepack pnpm exec vite build
+```
+
+Result:
+
+```text
+Kiro backend tests passed.
+Admin handler tests passed.
+Server route package passed.
+Frontend parser tests passed: 12 tests across Kiro and Windsurf.
+vue-tsc passed.
+vite build passed with existing chunk/dynamic import warnings.
+```
+
+Deployment note:
+
+- This code path requires a private internal Kiro adapter service and these
+  Sub2API env vars:
+  - `KIRO_ADAPTER_INTERNAL_BASE_URL=http://kiro-rs:8990`
+  - `KIRO_ADAPTER_ADMIN_API_KEY=<kiro-rs adminApiKey>`
+  - `KIRO_ADAPTER_TIMEOUT_SECONDS=30`
+- Do not expose `kiro-rs` through Caddy or Docker host ports.

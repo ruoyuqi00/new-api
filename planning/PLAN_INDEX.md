@@ -29,6 +29,8 @@
   - WindsurfAPI 作为内网上游的部署、账号导入、Sub2API 接入、后续原生化设计。
 - `KIRO_INTEGRATION_SPEC.md`
   - Kiro proxy 作为内网上游的部署、凭据结构、Sub2API 接入、后续原生化设计。
+- `KIRO_STAGE_B_IMPORT_ENDPOINT.md`
+  - 已落地的 Sub2API 管理员 Kiro 凭据导入接口、环境变量、调用示例、测试记录和下一步。
 - `SERVER_DEPLOYMENT_RUNBOOK.md`
   - 服务器部署、备份、升级、回滚、安全检查、上线步骤。
 - `TEST_ACCEPTANCE_MATRIX.md`
@@ -79,3 +81,8 @@
 
 - `WINDSURF_STAGE_A_IMPORT_ENDPOINT.md`
   - 已落地的 Sub2API 管理员 Windsurf 批量导入接口、环境变量、调用示例、测试记录和下一步。
+
+## 2026-05-19 新增文档
+
+- `KIRO_STAGE_B_IMPORT_ENDPOINT.md`
+  - 已落地的 Sub2API 管理员 Kiro 凭据导入接口、内网 adapter 转发协议、脱敏策略和部署要求。

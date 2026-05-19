@@ -1179,6 +1179,74 @@ export interface WindsurfImportResult {
   upstream?: unknown
 }
 
+export interface KiroImportAccount {
+  refresh_token?: string
+  refreshToken?: string
+  kiro_api_key?: string
+  kiroApiKey?: string
+  api_key?: string
+  apiKey?: string
+  apikey?: string
+  auth_method?: string
+  authMethod?: string
+  client_id?: string
+  clientId?: string
+  client_secret?: string
+  clientSecret?: string
+  priority?: number
+  region?: string
+  auth_region?: string
+  authRegion?: string
+  api_region?: string
+  apiRegion?: string
+  machine_id?: string
+  machineId?: string
+  email?: string
+  proxy_url?: string
+  proxyUrl?: string
+  proxy_username?: string
+  proxyUsername?: string
+  proxy_password?: string
+  proxyPassword?: string
+  endpoint?: string
+}
+
+export interface KiroImportRequest {
+  refresh_token?: string
+  refreshToken?: string
+  refresh_tokens?: string[]
+  refreshTokens?: string[]
+  kiro_api_key?: string
+  kiroApiKey?: string
+  api_key?: string
+  apiKey?: string
+  apikey?: string
+  api_keys?: string[]
+  apiKeys?: string[]
+  kiro_api_keys?: string[]
+  kiroApiKeys?: string[]
+  raw?: string
+  accounts?: KiroImportAccount[]
+}
+
+export interface KiroImportItem {
+  index: number
+  kind: string
+  upstream_status?: number
+  success: boolean
+  error?: string
+  upstream?: unknown
+}
+
+export interface KiroImportResult {
+  total: number
+  forwarded: number
+  succeeded: number
+  failed: number
+  duplicate_count: number
+  items: KiroImportItem[]
+}
+
 // ==================== Usage & Redeem Types ====================
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'

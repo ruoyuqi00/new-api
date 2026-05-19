@@ -247,3 +247,88 @@ Native implementation tasks:
 - How should Kiro request usage be normalized into Sub2API billing?
 - Should social/idc/api_key be separate account types or a credential field?
 
+## 2026-05-19 update
+
+Reference refresh:
+
+- `hank9999/kiro.rs`: latest observed HEAD `f1bbe9f`, local mirror
+  `D:\wflogin\_github_research\kiro.rs-latest`.
+- `Jwadow/kiro-gateway`: latest observed HEAD `a5292ca`, latest observed tag
+  line includes `v2.3`; local mirror `D:\wflogin\_github_research\kiro-gateway`.
+- Official Kiro docs now include API-key/headless CLI direction:
+  `https://kiro.dev/docs/kiro-cli/api-keys/`.
+
+Implemented in this fork:
+
+- Added `POST /api/v1/admin/accounts/import/kiro`.
+- Added admin UI entry `Import Kiro`.
+- Supported import modes:
+  - refresh token lines, including optional `email----refreshToken`.
+  - Kiro API key lines, including optional `email----ksk_xxx`.
+  - full JSON object or account array.
+- Backend forwards each credential to the internal adapter endpoint
+  `POST /api/admin/credentials`.
+- Backend accepts both snake_case and kiro.rs camelCase fields.
+- Backend redacts `refreshToken`, `kiroApiKey`, `clientSecret`,
+  `proxyPassword`, authorization headers, and nested token/password fields in
+  upstream responses.
+- Backend returns per-item results so partial import failures are visible
+  without printing secrets.
+
+Runtime config expected by Sub2API:
+
+```env
+KIRO_ADAPTER_INTERNAL_BASE_URL=http://kiro-rs:8990
+KIRO_ADAPTER_ADMIN_API_KEY=<kiro-rs adminApiKey>
+KIRO_ADAPTER_TIMEOUT_SECONDS=30
+```
+
+Compatible aliases:
+
+```env
+PROVIDER_ADAPTERS_KIRO_INTERNAL_BASE_URL=http://kiro-rs:8990
+PROVIDER_ADAPTERS_KIRO_ADMIN_API_KEY=<kiro-rs adminApiKey>
+PROVIDER_ADAPTERS_KIRO_TIMEOUT_SECONDS=30
+```
+
+Runtime config expected by `kiro.rs`:
+
+```json
+{
+  "host": "0.0.0.0",
+  "port": 8990,
+  "apiKey": "<internal-api-key-for-model-requests>",
+  "adminApiKey": "<internal-admin-key-for-import>",
+  "tlsBackend": "rustls",
+  "region": "us-east-1",
+  "defaultEndpoint": "ide"
+}
+```
+
+Security rule:
+
+- Do not publish `8990` to the host.
+- Do not add a Caddy route for `kiro-rs`.
+- Keep `apiKey`, `adminApiKey`, and imported credentials in server files only.
+
+Validation run locally:
+
+```powershell
+go test ./internal/handler/admin -run Kiro
+go test ./internal/handler/admin
+go test ./internal/server
+
+$env:npm_config_dangerously_allow_all_builds='true'
+corepack pnpm exec vitest run src/components/admin/account/__tests__/kiroImport.spec.ts src/components/admin/account/__tests__/windsurfImport.spec.ts
+corepack pnpm exec vue-tsc --noEmit
+corepack pnpm exec vite build
+```
+
+Next server validation after deployment:
+
+- `docker compose ps kiro-rs` should show running/healthy enough to accept
+  `GET /v1/models`.
+- `POST /api/v1/admin/accounts/import/kiro` should return a per-item result.
+- After at least one real Kiro credential is imported, direct internal
+  `/v1/messages` should pass before creating or enabling the Sub2API upstream
+  account.

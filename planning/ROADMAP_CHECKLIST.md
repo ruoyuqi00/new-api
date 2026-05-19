@@ -249,3 +249,22 @@
 - [x] 已确认 `dwgx/WindsurfAPI` 仍停留在 `v2.0.96`，暂无新 tag。
 - [x] 已补充前端 Windsurf 导入解析单测和 TypeScript 类型检查。
 - [ ] 待部署下一版 fork 镜像后，在服务器后台页面确认 `导入 Windsurf` 入口可见。
+
+## 2026-05-19 readable update: Kiro Stage B
+
+- [x] Fetched latest official Sub2API upstream and merged it into the private fork.
+- [x] Confirmed `dwgx/WindsurfAPI` is still `c028576` / `v2.0.96`.
+- [x] Mirrored `hank9999/kiro.rs` latest HEAD `f1bbe9f` under `_github_research/kiro.rs-latest`.
+- [x] Mirrored `Jwadow/kiro-gateway` latest HEAD `a5292ca` under `_github_research/kiro-gateway`.
+- [x] Added Sub2API admin endpoint `POST /api/v1/admin/accounts/import/kiro`.
+- [x] Added admin UI `Import Kiro` modal.
+- [x] Kiro import supports refreshToken, Kiro API key, optional `email----credential`, and full JSON.
+- [x] Kiro import forwards to internal `kiro.rs` `POST /api/admin/credentials`.
+- [x] Kiro import redacts nested secrets and returns per-item results.
+- [x] Added backend and frontend tests for Kiro import parsing/forwarding/redaction.
+- [x] Added `planning/KIRO_STAGE_B_IMPORT_ENDPOINT.md`.
+- [ ] Deploy new fork image to the US server.
+- [ ] Add internal-only `kiro-rs` service on the US server.
+- [ ] Verify `Import Kiro` UI on the deployed admin page.
+- [ ] Import one real Kiro credential and smoke direct internal `/v1/messages`.
+- [ ] Create/enable the Sub2API `kiro-internal-anthropic` upstream only after direct smoke passes.

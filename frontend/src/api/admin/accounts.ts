@@ -20,6 +20,8 @@ import type {
   CodexSessionImportResult,
   WindsurfImportRequest,
   WindsurfImportResult,
+  KiroImportRequest,
+  KiroImportResult,
   CheckMixedChannelRequest,
   CheckMixedChannelResponse
 } from '@/types'
@@ -572,6 +574,22 @@ export async function importWindsurf(
   return data
 }
 
+export async function importKiro(
+  payload: KiroImportRequest,
+  options?: { idempotencyKey?: string }
+): Promise<KiroImportResult> {
+  const headers: Record<string, string> = {}
+  if (options?.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey
+  }
+  const { data } = await apiClient.post<KiroImportResult>(
+    '/admin/accounts/import/kiro',
+    payload,
+    { headers }
+  )
+  return data
+}
+
 /**
  * Get Antigravity default model mapping from backend
  * @returns Default model mapping (from -> to)
@@ -690,6 +708,7 @@ export const accountsAPI = {
   importData,
   importCodexSession,
   importWindsurf,
+  importKiro,
   getAntigravityDefaultModelMapping,
   batchClearError,
   batchRefresh,
