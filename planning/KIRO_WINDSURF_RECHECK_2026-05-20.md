@@ -19,6 +19,10 @@ secrets out of this file.
   `INVALID_MODEL_ID`.
 - Windsurf's current deployed adapter is still aligned with the newest public
   reference. No source/image update was found in the checked upstreams.
+- A follow-up GitHub workaround scan tested `pi-kiro` and `open-kiro` style
+  `KIRO_CLI`/AmazonQ-For-CLI request fingerprints on the live server. They did
+  not unlock Claude/Opus for the current credential. See
+  `planning/KIRO_GITHUB_WORKAROUND_SCAN_2026-05-20.md`.
 - Kiro needs one of two next inputs before Claude/Sonnet/Opus should be exposed
   through Sub2API:
   1. a fresh export from the exact IDE/CLI environment that can use Claude; or

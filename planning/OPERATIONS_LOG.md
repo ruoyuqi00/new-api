@@ -850,3 +850,41 @@ Conclusion:
   local proxy/runtime egress context and possibly the exact fresh IDE export
   source. Do not expose Kiro Claude/Opus through public Sub2API until a direct
   server smoke returns 200.
+
+## 2026-05-20 GitHub workaround scan
+
+Checked and tested the newest practical GitHub workaround ideas:
+
+- `pi-kiro` `v0.1.3` / commit `438327370eb86a35ba7ac89aa1249e3c2a18ec85`
+  uses `origin=KIRO_CLI` and AmazonQ-For-CLI style request headers.
+- `open-kiro` Go module `v0.0.0-20260324032827-cf5db84025da` uses Kiro CLI
+  style `ListAvailableModels` and POSTs to the Q service root.
+- Kiro-account-manager `v1.6.6` remains the latest checked reference and keeps
+  the relevant identity/machine metadata preservation ideas.
+
+Live server probes were added to `tools/kiro_server_probe.py` for these styles:
+
+- `--client-style open-kiro`
+- `--client-style pi-cli`
+- `--client-style kam-amazonq`
+
+Results:
+
+- `open-kiro` style: same five models; `qwen3-coder-next` succeeds; Claude,
+  Opus, and Haiku still return `INVALID_MODEL_ID`.
+- `pi-cli` style: same five models; `qwen3-coder-next` succeeds; Claude, Opus,
+  and Haiku still return `INVALID_MODEL_ID`.
+- Hidden/alias tests for `claude-opus-4.7`, `claude-opus-4.6-1m`,
+  `claude-sonnet-4.6-1m`, `claude-opus-4-20250918`,
+  `MODEL_PLACEHOLDER_M26`, and `auto` also return `INVALID_MODEL_ID`.
+- Kiro-account-manager's AmazonQCLI `SendMessageStreaming` shape is not a
+  direct drop-in replacement for the current Anthropic/Sub2API path; the simple
+  generated payload returns `Improperly formed request`.
+
+Conclusion:
+
+- No GitHub project currently provides a header-only or model-name-only fix for
+  this imported server credential.
+- The next meaningful Kiro test is a fresh Builder ID or IdC OIDC credential
+  export from a runtime that can currently use Claude/Opus.
+- See `planning/KIRO_GITHUB_WORKAROUND_SCAN_2026-05-20.md`.

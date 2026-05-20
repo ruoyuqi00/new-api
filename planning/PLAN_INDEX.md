@@ -7,6 +7,9 @@
     model discovery results, upstream project HEADs, the official Kiro
     five-model symptom reference, and the next acceptance gate before exposing
     Kiro Claude-family models.
+- `KIRO_GITHUB_WORKAROUND_SCAN_2026-05-20.md`
+  - GitHub workaround scan for Kiro Claude/Opus `INVALID_MODEL_ID`, including
+    `pi-kiro`, `open-kiro`, Kiro-account-manager, and live server probe results.
 - `PROVIDER_ACCOUNT_OPERATIONS_GUIDE.md`
   - Current production workflow for importing Windsurf/Kiro credentials,
     verifying public Sub2API access, checking adapter privacy, and updating the
