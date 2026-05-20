@@ -1,5 +1,32 @@
 # Operations Log
 
+## 2026-05-20 Provider adapter protocol research
+
+- Mirrored or refreshed additional reference projects:
+  - `jlcodes99/cockpit-tools` at `f6c92cbbdd86357405a0589ee0a09bae855d26e2`.
+  - `chaogei/Kiro-account-manager` at
+    `7ad57fd26e67b3ea91b780b2ca983c78737ed88a` / `v1.6.6`.
+  - `pfcoperez/windsurfinabox` at
+    `86a7da7821413497756bc53f85508eeeb8b18945`.
+  - `dwgx/WindsurfAPI` at `c028576a56b9fa19f84810643610cae4af824238` /
+    `v2.0.96`.
+- Confirmed `dwgx/WindsurfAPI v2.0.96` already includes the important
+  `auth1_ -> WindsurfPostAuth -> devin-session-token$ as apiKey` workaround
+  after the old Windsurf one-time-token path became unreliable.
+- Pulled `windsurf-api` and `kiro-gateway` images on the server and recreated
+  if needed; both containers remained running/healthy with no public host ports.
+- Re-tested Kiro official model discovery from the server with the current
+  Kiro social credential and profile ARN. `ListAvailableModels` returned only:
+  `deepseek-3.2`, `minimax-m2.5`, `minimax-m2.1`, `glm-5`, and
+  `qwen3-coder-next`.
+- Direct server calls to Kiro `q.<region>.amazonaws.com/generateAssistantResponse`
+  for `claude-opus-4.7`, `claude-opus-4.6`, and `claude-sonnet-4.6` still
+  returned `INVALID_MODEL_ID`; `qwen3-coder-next` returned HTTP 200.
+- Changing `x-amzn-kiro-agent-mode` between `spec` and `vibe`, and testing
+  `AI_EDITOR`/`MD_IDE` origins, did not make Claude-family models appear in the
+  official model list.
+- Added `planning/PROVIDER_ADAPTER_PROTOCOL_RESEARCH_2026-05-20.md`.
+
 ## 2026-05-20 Provider mixed group and Kiro model expansion
 
 Changes:

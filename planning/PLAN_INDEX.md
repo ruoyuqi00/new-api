@@ -6,6 +6,9 @@
   - Current production workflow for importing Windsurf/Kiro credentials,
     verifying public Sub2API access, checking adapter privacy, and updating the
     server later.
+- `PROVIDER_ADAPTER_PROTOCOL_RESEARCH_2026-05-20.md`
+  - Latest research on Windsurf Devin Auth, Kiro official model discovery, and
+    the external projects to track before opening more provider models.
 
 ## 2026-05-19 Kiro Gateway Runtime Docs
 
