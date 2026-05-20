@@ -627,6 +627,70 @@ Exposure check:
 Operational note:
 
 - Browser admin login should use the current remembered password.
+
+## 2026-05-20 upstream main merge and server rollout
+
+Reference refresh:
+
+- `Wei-Shaw/sub2api` upstream was merged through `3d22dd34`.
+- `dwgx/WindsurfAPI` remained at `c028576`, tag `v2.0.96`.
+- `guanxiaol/WindsurfPoolAPI` remained at `a8d2f4c`, tag `v2.0.7`.
+- `hank9999/kiro.rs` remained at `f1bbe9f`, tag `v2026.3.1`.
+- `Jwadow/kiro-gateway` remained at `a5292ca`, tag `v2.3`.
+
+Validation before deploy:
+
+- `go test ./internal/handler/admin -run "Windsurf|Kiro|AvailableModels|SyncUpstream"` passed.
+- `go test ./internal/server ./internal/pkg/apicompat ./internal/pkg/openai_compat` passed.
+- `go test ./internal/handler/admin` passed.
+- `go test ./internal/service -run "Upstream|OpenAI|Gateway|AccountCredentials|AdminService|Windsurf|Kiro|Pricing|Channel|Gemini"` passed.
+- `go test ./...` passed after using a temporary `GOPROXY=https://goproxy.cn,direct`
+  because local access to `proxy.golang.org` timed out over IPv6.
+- `corepack pnpm exec vitest run src/components/admin/account/__tests__/kiroImport.spec.ts src/components/admin/account/__tests__/windsurfImport.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts` passed.
+- `corepack pnpm build` passed with only Vite chunk/dynamic-import warnings.
+
+Server rollout:
+
+- Built server image `sub2api-provider-adapters:66940db0`.
+- Backed up compose and database before switching:
+  - `/opt/sub2api-backups/docker-compose-20260520-094723-pre-66940db0.yml`
+  - `/opt/sub2api-backups/sub2api-db-20260520-094723-pre-66940db0.dump`
+- Updated `/opt/sub2api/docker-compose.yml` to use
+  `sub2api-provider-adapters:66940db0`.
+- Restarted only the `sub2api` service. Adapter services were not rebuilt.
+
+Post-deploy verification:
+
+- `sub2api` is healthy on `127.0.0.1:8080->8080`.
+- Internal adapter ports remain un published:
+  - `sub2api-windsurf-api`: `{"3003/tcp":null}`
+  - `sub2api-kiro-rs`: `{"8990/tcp":null}`
+  - `sub2api-kiro-gateway`: `{"8000/tcp":null}`
+- Internal adapter status:
+  - Windsurf: `total: 1`, `active: 1`, tier `pro`.
+  - Kiro: `total: 1`, `available: 1`, `with_profile_arn: 1`,
+    `auth_methods: ["social"]`.
+- Public smoke through `https://api.vyywcw.cn/v1/messages` returned HTTP 200
+  for:
+  - `claude-sonnet-4.6`
+  - `claude-opus-4.6`
+  - `qwen3-coder-next`
+  - `deepseek-3.2`
+
+Opus 4.7 alias note:
+
+- Windsurf already exposed effort-specific Opus 4.7 model keys such as
+  `claude-opus-4-7-low` and `claude-opus-4-7-medium`.
+- Added migration `140_windsurf_opus47_aliases.sql` so user-facing dotted
+  aliases map to the Windsurf keys.
+- Manually applied the same aliases on the current server before the migration
+  image was rebuilt.
+- Public smoke returned HTTP 200 for:
+  - `claude-opus-4.7`
+  - `claude-opus-4-7`
+  - `claude-opus-4.7-medium`
+- High/max Opus 4.7 effort keys can still hit upstream rate limits depending
+  on current account quota and Windsurf upstream state.
 - The server `.env` `ADMIN_PASSWORD` no longer matches the live admin password,
   so CLI admin import smoke through `POST /api/v1/admin/accounts/import/kiro`
   was skipped after a 401 login response. Do not store the current admin
