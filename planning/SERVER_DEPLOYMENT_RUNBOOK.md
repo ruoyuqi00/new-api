@@ -44,7 +44,7 @@ name: kiro-gateway-internal-anthropic
 platform: anthropic
 type: apikey
 base_url: http://kiro-gateway:8000
-group: windsurf-smoke
+group: provider-mixed
 ```
 
 Currently enabled Kiro model mapping:
@@ -52,8 +52,20 @@ Currently enabled Kiro model mapping:
 ```text
 deepseek-3.2
 glm-5
+minimax-m2.1
 minimax-m2.5
 qwen3-coder-next
+```
+
+The `provider-mixed` group is exclusive (`is_exclusive=true`) and has model
+routing enabled:
+
+```text
+qwen3-coder-next -> kiro-gateway-internal-anthropic
+deepseek-3.2     -> kiro-gateway-internal-anthropic
+glm-5            -> kiro-gateway-internal-anthropic
+minimax-m2.1     -> kiro-gateway-internal-anthropic
+minimax-m2.5     -> kiro-gateway-internal-anthropic
 ```
 
 Safe internal Kiro Gateway checks:

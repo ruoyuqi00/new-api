@@ -45,6 +45,16 @@ Current Caddy adapter paths:
 - `/kiro-admin*` -> `kiro-rs:8990` `/admin`
 - `/admin/assets/*`, `/admin/vite.svg`, `/api/admin/*` -> `kiro-rs:8990`
 
+Current external Sub2API group/key boundary:
+
+- Group: `provider-mixed`
+- Group type: exclusive (`is_exclusive=true`), not public.
+- Public API key name: `server-provider-mixed`
+- The group contains both `windsurf-internal-anthropic` and
+  `kiro-gateway-internal-anthropic`.
+- The group has model routing enabled for Kiro Gateway models so overlapping
+  model names do not randomly select the Windsurf account.
+
 ## Current Provider Runtime Status
 
 Windsurf:
@@ -64,6 +74,9 @@ Kiro:
 - Smoke models:
   - `qwen3-coder-next`
   - `deepseek-3.2`
+  - `glm-5`
+  - `minimax-m2.1`
+  - `minimax-m2.5`
 
 Do not expose Claude-family Kiro models until server-side and public smoke both
 pass. Local `kiro.rs` can use Claude with the local proxy path, but the US

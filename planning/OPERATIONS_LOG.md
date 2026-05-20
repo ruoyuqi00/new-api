@@ -1,5 +1,40 @@
 # Operations Log
 
+## 2026-05-20 Provider mixed group and Kiro model expansion
+
+Changes:
+
+- Confirmed group `windsurf-smoke` was already exclusive (`is_exclusive=true`),
+  so it was not public to all users.
+- Renamed group `windsurf-smoke` to `provider-mixed`.
+- Renamed public API key label `server-windsurf-smoke` to
+  `server-provider-mixed`.
+- Enabled group model routing for Kiro Gateway models:
+  - `qwen3-coder-next`
+  - `deepseek-3.2`
+  - `glm-5`
+  - `minimax-m2.1`
+  - `minimax-m2.5`
+- Added `minimax-m2.1` to the Sub2API Kiro Gateway upstream account
+  `model_mapping`.
+
+Validation:
+
+- Direct Kiro Gateway smoke returned HTTP 200 for:
+  - `qwen3-coder-next`
+  - `deepseek-3.2`
+  - `glm-5`
+  - `minimax-m2.1`
+  - `minimax-m2.5`
+- Direct Kiro Gateway smoke returned HTTP 400
+  `Invalid model ID or insufficient subscription level to use it` for the
+  Kiro Claude-family model IDs, so those were not opened in Sub2API.
+- Public Sub2API `/v1/messages` smoke through `https://api.vyywcw.cn/` returned
+  HTTP 200 for all five Kiro Gateway models above.
+- Public Sub2API `/v1/models` includes `minimax-m2.1`, `minimax-m2.5`,
+  `qwen3-coder-next`, `deepseek-3.2`, `glm-5`, and Windsurf
+  `claude-sonnet-4.6`.
+
 ## 2026-05-19 Sub2API image a147caa0 deployment
 
 Deployment:
