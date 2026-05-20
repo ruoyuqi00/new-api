@@ -2,6 +2,11 @@
 
 ## 2026-05-19 Provider Account Operations
 
+- `KIRO_WINDSURF_RECHECK_2026-05-20.md`
+  - Latest live server recheck for Kiro/Windsurf, including sanitized Kiro
+    model discovery results, upstream project HEADs, the official Kiro
+    five-model symptom reference, and the next acceptance gate before exposing
+    Kiro Claude-family models.
 - `PROVIDER_ACCOUNT_OPERATIONS_GUIDE.md`
   - Current production workflow for importing Windsurf/Kiro credentials,
     verifying public Sub2API access, checking adapter privacy, and updating the

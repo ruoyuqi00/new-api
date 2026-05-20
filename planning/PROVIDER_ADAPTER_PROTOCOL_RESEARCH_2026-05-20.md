@@ -146,6 +146,13 @@ the current exported credential. This points to one of two likely causes:
 2. Kiro gates advanced models by network exit, region, machine identity, or a
    related runtime signal.
 
+Follow-up recheck:
+
+- See `KIRO_WINDSURF_RECHECK_2026-05-20.md` for the latest sanitized live
+  server probe, exact endpoint matrix, and official Kiro issue reference for
+  the same five-model symptom.
+- A reusable sanitized probe script now lives at `tools/kiro_server_probe.py`.
+
 ## Kiro Upgrade Plan
 
 Stage 1: credential parity test.

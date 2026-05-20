@@ -1,5 +1,24 @@
 # Operations Log
 
+## 2026-05-20 Kiro/Windsurf recheck after user-provided account context
+
+- Rechecked upstream HEADs with `git ls-remote`; `dwgx/WindsurfAPI`,
+  `Jwadow/kiro-gateway`, `hank9999/kiro.rs`, and
+  `chaogei/Kiro-account-manager` remain at the previously documented heads.
+- Re-tested the live server Kiro credential without printing secrets. The
+  credential has refresh/access token material and a social profile ARN, but no
+  persisted `machineId`, `provider`, `clientId`, or `clientSecret`.
+- Official Kiro `ListAvailableModels` from the US server still returned only:
+  `deepseek-3.2`, `minimax-m2.5`, `minimax-m2.1`, `glm-5`, and
+  `qwen3-coder-next`.
+- Direct generate smoke returned HTTP 200 for `qwen3-coder-next` on
+  `codewhisperer`, `q`, and `runtime` endpoints; `claude-sonnet-4.6` and
+  `claude-opus-4.6` returned `INVALID_MODEL_ID` on those endpoints.
+- Added `tools/kiro_server_probe.py`, a dependency-free sanitized probe script
+  for future server-side Kiro model discovery and generate smoke.
+- Added `planning/KIRO_WINDSURF_RECHECK_2026-05-20.md` with current conclusions,
+  references, and the acceptance gate before exposing Kiro Claude-family models.
+
 ## 2026-05-20 Provider adapter protocol research
 
 - Mirrored or refreshed additional reference projects:

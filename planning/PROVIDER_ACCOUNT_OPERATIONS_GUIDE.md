@@ -281,6 +281,18 @@ wget -q -T 20 -O - \
 The response is designed to show counts, hashes, email labels, and status. It
 must not include raw access tokens or refresh tokens.
 
+Run a sanitized Kiro capability probe from the server:
+
+```bash
+cd /opt/sub2api
+python3 /tmp/kiro_server_probe.py \
+  --creds /opt/sub2api/kiro-gateway/creds/kiro-auth-token.json
+```
+
+Copy `tools/kiro_server_probe.py` from this repository to the temporary server
+path before running it. The probe prints token hashes, model ids, endpoint
+names, HTTP status codes, and short error summaries only.
+
 ## Updating Later
 
 Sub2API fork:
