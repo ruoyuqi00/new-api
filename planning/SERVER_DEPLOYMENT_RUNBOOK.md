@@ -113,6 +113,52 @@ Latest recorded rollback files:
 
 记录日期：2026-05-16
 
+## 2026-05-20 Provider adapter admin entry
+
+Current deployed Sub2API fork image:
+
+```text
+sub2api-provider-adapters:70c970c7
+```
+
+The Sub2API admin UI now has a provider adapter page:
+
+```text
+https://api.vyywcw.cn/admin/provider-adapters
+```
+
+It shows the sanitized Sub2API admin proxy status for Windsurf/Kiro and links to
+the native adapter admin UIs:
+
+```text
+https://api.vyywcw.cn/windsurf-dashboard
+https://api.vyywcw.cn/kiro-admin
+```
+
+The native UIs are same-domain Caddy path proxies. Adapter container ports are
+still not host-published:
+
+```text
+/sub2api-windsurf-api {"3003/tcp":null}
+/sub2api-kiro-rs {"8990/tcp":null}
+/sub2api-kiro-gateway {"8000/tcp":null}
+```
+
+Unauthenticated public checks should remain protected:
+
+```text
+https://api.vyywcw.cn/api/v1/admin/provider-adapters/windsurf/accounts -> 401
+https://api.vyywcw.cn/dashboard/api/accounts -> 401
+https://api.vyywcw.cn/api/admin/credentials -> 401
+```
+
+Server-side admin proxy smoke with the Sub2API admin API key returned:
+
+```text
+/api/v1/admin/provider-adapters/windsurf/accounts=200
+/api/v1/admin/provider-adapters/kiro/credentials=200
+```
+
 ## Server metadata
 
 Current production target:
@@ -263,7 +309,9 @@ docker compose logs --tail=200 kiro-rs
 
 ## Caddy exposure checklist
 
-Caddy must expose only Sub2API.
+Caddy must keep raw adapter ports private. The current production exception is
+path-level same-domain admin UI proxying for Windsurf and Kiro, with each native
+admin API still protected by its own password/API key.
 
 Check:
 
@@ -276,9 +324,15 @@ docker compose port kiro-rs 8990 || true
 
 Expected:
 
-- No public Caddy route to WindsurfAPI.
-- No public Caddy route to Kiro proxy.
-- No public port mapping for internal adapters, unless bound to `127.0.0.1` for debugging.
+- Caddy may show `/windsurf-dashboard*`, `/dashboard/api/*`, `/dashboard/i18n/*`,
+  `/dashboard/data/*`, `/kiro-admin*`, `/admin/assets/*`, `/admin/vite.svg`, and
+  `/api/admin/*`.
+- No public host port mapping for internal adapters, unless bound to `127.0.0.1`
+  for short-lived debugging.
+- Public unauthenticated `https://api.vyywcw.cn/dashboard/api/accounts` returns
+  `401`.
+- Public unauthenticated `https://api.vyywcw.cn/api/admin/credentials` returns
+  `401`.
 
 ## Import Windsurf accounts
 

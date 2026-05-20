@@ -1,6 +1,6 @@
 # Provider Account Operations Guide
 
-Last updated: 2026-05-19
+Last updated: 2026-05-20
 
 This guide covers the live `vyywcw.cn` deployment. Do not copy provider
 tokens, API keys, account passwords, SSH passwords, or `.env` values into this
@@ -8,10 +8,25 @@ file.
 
 ## Current Public Entry
 
-Only Sub2API is public:
+Sub2API is the primary public entry:
 
 - `https://api.vyywcw.cn/`
 - `https://www.vyywcw.cn/`
+
+Provider adapter admin entry in Sub2API:
+
+- `https://api.vyywcw.cn/admin/provider-adapters`
+- Sidebar label: `适配器后台`
+- Account page path: `账号管理` -> `更多操作` -> `适配器后台`
+
+Native adapter admin UIs are exposed through same-domain Caddy paths so the
+entry can live inside the Sub2API admin page:
+
+- Windsurf console: `https://api.vyywcw.cn/windsurf-dashboard`
+- Kiro admin: `https://api.vyywcw.cn/kiro-admin`
+
+Those native UIs keep their own auth. Windsurf dashboard/API calls require the
+dashboard password, and Kiro admin API calls require the Kiro admin API key.
 
 Internal adapters stay inside the Docker network:
 
@@ -19,8 +34,16 @@ Internal adapters stay inside the Docker network:
 - `kiro-rs:8990`
 - `kiro-gateway:8000`
 
-Docker currently publishes none of those adapter ports to the host, and Caddy
-has no route for them.
+Docker currently publishes none of those adapter ports to the host. Caddy only
+adds path-level reverse proxies for the native admin UIs and their supporting
+asset/API paths; it does not publish raw container ports.
+
+Current Caddy adapter paths:
+
+- `/windsurf-dashboard*` -> `windsurf-api:3003` `/dashboard`
+- `/dashboard/api/*`, `/dashboard/i18n/*`, `/dashboard/data/*` -> `windsurf-api:3003`
+- `/kiro-admin*` -> `kiro-rs:8990` `/admin`
+- `/admin/assets/*`, `/admin/vite.svg`, `/api/admin/*` -> `kiro-rs:8990`
 
 ## Current Provider Runtime Status
 
@@ -183,7 +206,7 @@ cd /opt/sub2api
 docker compose ps
 ```
 
-Confirm adapters are internal only:
+Confirm adapter container ports are not host-published:
 
 ```bash
 docker inspect sub2api-windsurf-api sub2api-kiro-rs sub2api-kiro-gateway \
@@ -196,6 +219,30 @@ Expected:
 /sub2api-windsurf-api {"3003/tcp":null}
 /sub2api-kiro-rs {"8990/tcp":null}
 /sub2api-kiro-gateway {"8000/tcp":null}
+```
+
+Confirm public admin paths and unauthenticated protection:
+
+```bash
+curl -sS -o /dev/null -w 'sub2api=%{http_code}\n' https://api.vyywcw.cn/
+curl -sS -o /dev/null -w 'adapter_page=%{http_code}\n' https://api.vyywcw.cn/admin/provider-adapters
+curl -sS -o /dev/null -w 'windsurf_ui=%{http_code}\n' https://api.vyywcw.cn/windsurf-dashboard
+curl -sS -o /dev/null -w 'kiro_ui=%{http_code}\n' https://api.vyywcw.cn/kiro-admin
+curl -sS -o /dev/null -w 'sub2api_adapter_unauth=%{http_code}\n' https://api.vyywcw.cn/api/v1/admin/provider-adapters/windsurf/accounts
+curl -sS -o /dev/null -w 'windsurf_native_unauth=%{http_code}\n' https://api.vyywcw.cn/dashboard/api/accounts
+curl -sS -o /dev/null -w 'kiro_native_unauth=%{http_code}\n' https://api.vyywcw.cn/api/admin/credentials
+```
+
+Expected public status:
+
+```text
+sub2api=200
+adapter_page=200
+windsurf_ui=200
+kiro_ui=200
+sub2api_adapter_unauth=401
+windsurf_native_unauth=401
+kiro_native_unauth=401
 ```
 
 Check `kiro-rs` credential status without printing tokens:
