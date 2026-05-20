@@ -651,12 +651,14 @@ Validation before deploy:
 
 Server rollout:
 
-- Built server image `sub2api-provider-adapters:66940db0`.
+- Built initial server image `sub2api-provider-adapters:66940db0`, then rebuilt
+  final image `sub2api-provider-adapters:da09f930` after adding the Opus 4.7
+  alias migration.
 - Backed up compose and database before switching:
   - `/opt/sub2api-backups/docker-compose-20260520-094723-pre-66940db0.yml`
   - `/opt/sub2api-backups/sub2api-db-20260520-094723-pre-66940db0.dump`
 - Updated `/opt/sub2api/docker-compose.yml` to use
-  `sub2api-provider-adapters:66940db0`.
+  `sub2api-provider-adapters:da09f930`.
 - Restarted only the `sub2api` service. Adapter services were not rebuilt.
 
 Post-deploy verification:
@@ -684,7 +686,8 @@ Opus 4.7 alias note:
 - Added migration `140_windsurf_opus47_aliases.sql` so user-facing dotted
   aliases map to the Windsurf keys.
 - Manually applied the same aliases on the current server before the migration
-  image was rebuilt.
+  image was rebuilt. The final image then applied
+  `140_windsurf_opus47_aliases.sql` idempotently.
 - Public smoke returned HTTP 200 for:
   - `claude-opus-4.7`
   - `claude-opus-4-7`
