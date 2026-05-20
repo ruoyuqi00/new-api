@@ -370,7 +370,6 @@
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <WindsurfImportModal :show="showWindsurfImport" @close="showWindsurfImport = false" @imported="handleWindsurfImported" />
     <KiroImportModal :show="showKiroImport" @close="showKiroImport = false" @imported="handleKiroImported" />
-    <ProviderAdaptersModal :show="showProviderAdapters" @close="showProviderAdapters = false" />
     <BulkEditAccountModal
       :show="showBulkEdit"
       :account-ids="selIds"
@@ -397,6 +396,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -418,7 +418,6 @@ import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import WindsurfImportModal from '@/components/admin/account/WindsurfImportModal.vue'
 import KiroImportModal from '@/components/admin/account/KiroImportModal.vue'
-import ProviderAdaptersModal from '@/components/admin/account/ProviderAdaptersModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
@@ -440,6 +439,7 @@ import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, Admi
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const router = useRouter()
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
@@ -490,7 +490,6 @@ const showSync = ref(false)
 const showImportData = ref(false)
 const showWindsurfImport = ref(false)
 const showKiroImport = ref(false)
-const showProviderAdapters = ref(false)
 const showExportDataDialog = ref(false)
 const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
@@ -872,7 +871,6 @@ const isAnyModalOpen = computed(() => {
     showImportData.value ||
     showWindsurfImport.value ||
     showKiroImport.value ||
-    showProviderAdapters.value ||
     showExportDataDialog.value ||
     showBulkEdit.value ||
     showTempUnsched.value ||
@@ -1019,7 +1017,7 @@ const openKiroImport = () => {
 
 const openProviderAdapters = () => {
   closeAccountToolsDropdown()
-  showProviderAdapters.value = true
+  router.push('/admin/provider-adapters')
 }
 
 const openExportDataDialogFromMenu = () => {

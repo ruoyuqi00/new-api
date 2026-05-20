@@ -489,6 +489,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/provider-adapters/:provider?',
+    name: 'AdminProviderAdapters',
+    component: () => import('@/views/admin/ProviderAdaptersView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Provider Adapters',
+      titleKey: 'admin.accounts.providerAdaptersTitle',
+      descriptionKey: 'admin.accounts.providerAdaptersHint'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),
