@@ -1294,6 +1294,16 @@ export interface KiroImportResult {
   items: KiroImportItem[]
 }
 
+export interface ProviderAdapterAdminResponse {
+  provider: string
+  endpoint: string
+  path: string
+  ok: boolean
+  upstream_status: number
+  fetched_at: string
+  data?: unknown
+}
+
 // ==================== Usage & Redeem Types ====================
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'

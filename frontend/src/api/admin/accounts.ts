@@ -22,6 +22,7 @@ import type {
   WindsurfImportResult,
   KiroImportRequest,
   KiroImportResult,
+  ProviderAdapterAdminResponse,
   CheckMixedChannelRequest,
   CheckMixedChannelResponse
 } from '@/types'
@@ -607,6 +608,21 @@ export async function importKiro(
   return data
 }
 
+export async function getWindsurfAdapterHealth(): Promise<ProviderAdapterAdminResponse> {
+  const { data } = await apiClient.get<ProviderAdapterAdminResponse>('/admin/provider-adapters/windsurf/health')
+  return data
+}
+
+export async function getWindsurfAdapterAccounts(): Promise<ProviderAdapterAdminResponse> {
+  const { data } = await apiClient.get<ProviderAdapterAdminResponse>('/admin/provider-adapters/windsurf/accounts')
+  return data
+}
+
+export async function getKiroAdapterCredentials(): Promise<ProviderAdapterAdminResponse> {
+  const { data } = await apiClient.get<ProviderAdapterAdminResponse>('/admin/provider-adapters/kiro/credentials')
+  return data
+}
+
 /**
  * Get Antigravity default model mapping from backend
  * @returns Default model mapping (from -> to)
@@ -727,6 +743,9 @@ export const accountsAPI = {
   importCodexSession,
   importWindsurf,
   importKiro,
+  getWindsurfAdapterHealth,
+  getWindsurfAdapterAccounts,
+  getKiroAdapterCredentials,
   getAntigravityDefaultModelMapping,
   batchClearError,
   batchRefresh,

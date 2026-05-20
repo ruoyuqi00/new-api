@@ -29,6 +29,9 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h)
 
+		// Provider adapter admin views
+		registerProviderAdapterRoutes(admin, h)
+
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 
@@ -320,6 +323,22 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/exchange-setup-token-code", h.Admin.OAuth.ExchangeSetupTokenCode)
 		accounts.POST("/cookie-auth", h.Admin.OAuth.CookieAuth)
 		accounts.POST("/setup-token-cookie-auth", h.Admin.OAuth.SetupTokenCookieAuth)
+	}
+}
+
+func registerProviderAdapterRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	adapters := admin.Group("/provider-adapters")
+	{
+		windsurf := adapters.Group("/windsurf")
+		{
+			windsurf.GET("/health", h.Admin.Account.GetWindsurfAdapterHealth)
+			windsurf.GET("/accounts", h.Admin.Account.GetWindsurfAdapterAccounts)
+		}
+
+		kiro := adapters.Group("/kiro")
+		{
+			kiro.GET("/credentials", h.Admin.Account.GetKiroAdapterCredentials)
+		}
 	}
 }
 
