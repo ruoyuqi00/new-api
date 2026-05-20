@@ -813,3 +813,40 @@ Opus 4.7 alias note:
   so CLI admin import smoke through `POST /api/v1/admin/accounts/import/kiro`
   was skipped after a 401 login response. Do not store the current admin
   password in Git or docs.
+
+## 2026-05-20 Kiro Opus clarification
+
+User corrected that the target path is still the old IDE/refresh-token method,
+not Kiro `ksk_...` API key import.
+
+Current evidence:
+
+- Local historical validation is still important: `D:\wflogin\kiro.rs-master`
+  used `endpoint=ide`, a fixed `machineId`, and local proxy egress
+  `http://127.0.0.1:7897`; on 2026-05-19 that local runtime returned HTTP 200
+  for `claude-sonnet-4-6`.
+- Server `kiro-rs` now has the fixed local `machineId` and `endpoint=ide` in
+  `/opt/sub2api/kiro-rs/config/credentials.json`.
+- Re-running the sanitized server probe with the fixed local `machineId` still
+  returns only five official Kiro models:
+  `deepseek-3.2`, `minimax-m2.5`, `minimax-m2.1`, `glm-5`,
+  `qwen3-coder-next`.
+- Direct server generate smoke through `q.<region>.amazonaws.com` returns HTTP
+  200 for `qwen3-coder-next`, but HTTP 400 `INVALID_MODEL_ID` for
+  `claude-opus-4.5`, `claude-opus-4.6`, `claude-opus-4.7`,
+  `claude-sonnet-4.5`, `claude-sonnet-4.6`, and `claude-haiku-4.5`.
+- Direct internal `kiro-rs /v1/messages` with `claude-opus-4-6` returns 502 at
+  the proxy layer; the `kiro-rs` logs show the upstream reason is the same Kiro
+  `INVALID_MODEL_ID` response.
+
+Conclusion:
+
+- Do not treat this as "Kiro/kiro.rs no longer supports Opus in general".
+- The narrower, verified statement is: with the current imported Kiro Pro
+  credential on the US server, the old IDE/refresh-token server path is not
+  currently accepted for Claude-family models, even after restoring the local
+  fixed `machineId`.
+- The remaining material difference from the previously working local runtime is
+  local proxy/runtime egress context and possibly the exact fresh IDE export
+  source. Do not expose Kiro Claude/Opus through public Sub2API until a direct
+  server smoke returns 200.

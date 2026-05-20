@@ -12,6 +12,11 @@ secrets out of this file.
   hard evidence is narrower: official Kiro model discovery for the imported
   credential returns only five non-Claude models, and official generate calls
   reject Claude-family model ids with `INVALID_MODEL_ID`.
+- The user clarified that the desired Kiro path is the old IDE/refresh-token
+  method, not Kiro `ksk_...` API-key import. Re-testing that old path with the
+  local fixed `machineId` still leaves the server-side result unchanged:
+  `qwen3-coder-next` succeeds, while Opus/Sonnet/Haiku return
+  `INVALID_MODEL_ID`.
 - Windsurf's current deployed adapter is still aligned with the newest public
   reference. No source/image update was found in the checked upstreams.
 - Kiro needs one of two next inputs before Claude/Sonnet/Opus should be exposed
