@@ -63,6 +63,10 @@ Windsurf:
 - Sub2API upstream account: `windsurf-internal-anthropic`
 - Public smoke passed through `https://api.vyywcw.cn/v1/messages`
 - Smoke model: `claude-sonnet-4.6`
+- Current account capability status: 81 dashboard-ok models exposed through
+  Sub2API, plus usable aliases. Deprecated direct-smoke failures such as
+  `gpt-4o-mini` and `grok-3-mini` are intentionally pruned from
+  `/v1/models`.
 
 Kiro:
 

@@ -35,6 +35,40 @@ Validation:
   `qwen3-coder-next`, `deepseek-3.2`, `glm-5`, and Windsurf
   `claude-sonnet-4.6`.
 
+## 2026-05-20 Windsurf model exposure sync
+
+Findings:
+
+- The Windsurf dashboard reported one active Trial/Pro account.
+- Dashboard capability summary: 110 total model entries, 81 marked `ok`, and
+  29 not usable.
+- The Sub2API Windsurf account previously exposed a broader 128-entry
+  `model_mapping`, including models that the current Windsurf account did not
+  have entitlement for.
+
+Changes:
+
+- Synced `windsurf-internal-anthropic` `model_mapping` to the dashboard `ok`
+  capabilities plus usable aliases.
+- Removed deprecated direct-smoke failures:
+  - `gpt-4o-mini`
+  - `grok-3-mini`
+
+Validation:
+
+- Public Sub2API `/v1/messages` returned HTTP 200 for sampled Windsurf models:
+  - `claude-sonnet-4.6`
+  - `claude-opus-4.6`
+  - `gpt-5.2`
+  - `gemini-2.5-pro`
+  - `o3`
+  - `swe-1.5-fast`
+- Direct Windsurf calls for `gpt-4o-mini` and `grok-3-mini` returned HTTP 410
+  `model_deprecated`, so they are intentionally not exposed through
+  `/v1/models`.
+- Public Sub2API `/v1/models` now reports 86 total models for the
+  `provider-mixed` key and no longer includes `gpt-4o-mini` or `grok-3-mini`.
+
 ## 2026-05-19 Sub2API image a147caa0 deployment
 
 Deployment:
