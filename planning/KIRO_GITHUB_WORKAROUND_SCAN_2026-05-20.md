@@ -118,3 +118,34 @@ The most likely remaining variables are:
    Sub2API can still expose Claude models through Windsurf-backed groups while
    keeping Kiro's open models separate.
 
+## 2026-05-21 Update
+
+The direct CLI / CodeWhisperer route is still limited, and the checked
+reference projects have not added a complete Web Portal fix:
+
+- `tickernelz/opencode-kiro-auth`: latest observed HEAD/tag remains `v1.10.1`
+  at `d0d9b18c8031abe29fe27c91d505a4f2ff24e9a0`.
+- `hongyilyu/pi-kiro`: latest observed HEAD/tag remains `v0.1.3` at
+  `438327370eb86a35ba7ac89aa1249e3c2a18ec85`.
+
+The working workaround is now confirmed separately: use Kiro Web Portal RPC,
+not the CLI/API-key route. `StreamSendMessage` succeeds for Claude/Opus when
+the request includes `sessionId = spaceId` and the CSRF/IdP/cookie state is
+kept consistent.
+
+See `planning/KIRO_WEB_PORTAL_ADAPTER_2026-05-21.md` and
+`adapters/kiro-web/README.md` for the deployed adapter details.
+
+## 2026-05-21 Follow-up
+
+Additional reference check:
+
+- `Jwadow/kiro-gateway`: latest observed HEAD `a5292ca04c7c6231e0b47673ac3f981f5a706e1e`;
+  tags are available through the `v2.3` family.
+- This is worth tracking because the server already runs a `kiro-gateway`
+  container, but the Claude/Opus fix validated today still depends on our
+  separate Web Portal adapter and its `sessionId = spaceId` request shape.
+
+The Web Portal adapter is now wired into Sub2API through a new internal
+`platform=openai` / `type=apikey` account and validated publicly at
+`https://api.vyywcw.cn/v1/chat/completions`.

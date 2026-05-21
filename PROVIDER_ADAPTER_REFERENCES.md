@@ -353,3 +353,58 @@ docker compose logs --tail=100 windsurf-api
 - Kiro 第一选择：`hank9999/kiro.rs` / 本地 `kiro.rs-master`。
 - Sub2API fork 保持跟进官方 `Wei-Shaw/sub2api`。
 - 后续协议变化时，先更新参考项目，确认兼容接口是否还能工作，再决定是否把变化吸收到我们的 fork。
+## 2026-05-21 Kiro Web Portal Update
+
+The Kiro short-term choice has changed for Claude/Opus models:
+
+- Keep `kiro.rs` for its admin UI, credential storage, and old API-key/CLI
+  route coverage.
+- Use the new internal `kiro-web-adapter` for Claude-family Kiro Web models.
+- Public traffic still enters through Sub2API only.
+
+Current internal URL:
+
+```text
+http://kiro-web-adapter:8991
+```
+
+Current implementation and deployment notes:
+
+- `adapters/kiro-web/README.md`
+- `planning/KIRO_WEB_PORTAL_ADAPTER_2026-05-21.md`
+
+The checked references did not yet solve this path directly:
+
+- `tickernelz/opencode-kiro-auth` latest observed `v1.10.1`
+- `hongyilyu/pi-kiro` latest observed `v0.1.3`
+- `Jwadow/kiro-gateway` latest observed HEAD `a5292ca0`, latest tag family
+  through `v2.3`; useful gateway reference but not a replacement for the
+  validated Web Portal adapter yet.
+
+The decisive behavior came from the official Kiro Web frontend: new sessions
+send `sessionId` equal to the newly created `spaceId`. Mirroring that behavior
+lets `StreamSendMessage` call `claude-opus-4.7`, `claude-opus-4.6`, and
+`claude-sonnet-4.6` successfully with the tested Kiro Pro account.
+
+## 2026-05-21 Server Wiring Result
+
+The server now keeps all public traffic on Sub2API:
+
+```text
+https://api.vyywcw.cn/
+```
+
+Sub2API routes internally to:
+
+- `windsurf-api:3003` for Windsurf-backed Anthropic-compatible requests;
+- `kiro-gateway:8000` for the older Kiro gateway open-model path;
+- `kiro-web-adapter:8991` for Kiro Web Claude/Opus/Sonnet requests.
+
+The Kiro Web route is exposed to users as OpenAI Chat Completions through the
+existing `provider-mixed` group. The public checks passed for:
+
+- `claude-sonnet-4.6`;
+- `claude-opus-4.7`;
+- streaming `claude-sonnet-4.6`.
+
+See `planning/SUB2API_KIRO_WEB_WIRING_2026-05-21.md`.

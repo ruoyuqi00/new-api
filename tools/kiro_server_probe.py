@@ -76,6 +76,7 @@ def request(
     headers: dict[str, str] | None = None,
     body: dict[str, Any] | None = None,
     timeout: int = 45,
+    max_read: int = 1024 * 1024,
 ) -> tuple[int | str, dict[str, str], bytes]:
     payload = None
     req_headers = dict(headers or {})
@@ -85,9 +86,9 @@ def request(
     req = urllib.request.Request(url, data=payload, method=method, headers=req_headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, dict(resp.headers), resp.read(4096)
+            return resp.status, dict(resp.headers), resp.read(max_read)
     except urllib.error.HTTPError as exc:
-        return exc.code, dict(exc.headers), exc.read(4096)
+        return exc.code, dict(exc.headers), exc.read(max_read)
     except Exception as exc:  # pragma: no cover - operational diagnostic path
         return "ERR", {}, f"{type(exc).__name__}: {exc}".encode("utf-8", "replace")
 
@@ -115,6 +116,50 @@ def refresh_access_token(
     if not refresh_token:
         print("refresh: skipped no_refresh_token")
         return None
+    client_id = pick(creds, "clientId", "client_id")
+    client_secret = pick(creds, "clientSecret", "client_secret")
+    if client_id and client_secret:
+        url = f"https://oidc.{region}.amazonaws.com/token"
+        status, _, raw = request(
+            "POST",
+            url,
+            {"Content-Type": "application/json", "User-Agent": "pi-kiro"},
+            {
+                "clientId": client_id,
+                "clientSecret": client_secret,
+                "refreshToken": refresh_token,
+                "grantType": "refresh_token",
+            },
+        )
+        if status != 200:
+            print(
+                "refresh:",
+                json.dumps(
+                    {
+                        "provider": "aws-sso-oidc",
+                        "status": status,
+                        "body_head": raw[:240].decode("utf-8", "replace"),
+                    },
+                    ensure_ascii=True,
+                ),
+            )
+            return None
+        data = json.loads(raw.decode("utf-8"))
+        access_token = pick(data, "accessToken", "access_token")
+        print(
+            "refresh:",
+            json.dumps(
+                {
+                    "provider": "aws-sso-oidc",
+                    "status": status,
+                    "has_access": bool(access_token),
+                    "access_sha12": sha12(access_token),
+                    "expiresIn": pick(data, "expiresIn", "expires_in"),
+                },
+                ensure_ascii=True,
+            ),
+        )
+        return data
     url = f"https://prod.{region}.auth.desktop.kiro.dev/refreshToken"
     headers = {
         "Accept": "application/json, text/plain, */*",
@@ -162,6 +207,22 @@ def kiro_headers(
     amz_target: str = "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
     streaming: bool = True,
 ) -> dict[str, str]:
+    if client_style == "kam-ide":
+        return {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": (
+                "aws-sdk-js/1.0.34 ua/2.1 os/linux#server "
+                f"lang/js md/nodejs#22.22.0 api/codewhispererstreaming#1.0.34 m/E "
+                f"KiroIDE-{kiro_version}-{machine_id}"
+            ),
+            "x-amz-user-agent": f"aws-sdk-js/1.0.34 KiroIDE {kiro_version} {machine_id}",
+            "x-amzn-kiro-agent-mode": agent_mode,
+            "amz-sdk-invocation-id": str(uuid.uuid4()),
+            "amz-sdk-request": "attempt=1; max=3",
+        }
+
     if client_style == "open-kiro":
         api_name = "codewhispererstreaming" if streaming else "codewhispererruntime"
         ua = (
@@ -248,15 +309,18 @@ def list_models(
     kiro_version: str,
     agent_mode: str,
     client_style: str,
+    list_origin: str | None,
+    include_profile: bool,
 ) -> list[str]:
     names: list[str] = []
+    origin = list_origin or ("KIRO_CLI" if client_style in {"open-kiro", "pi-cli"} else "AI_EDITOR")
     if client_style in {"open-kiro", "pi-cli"}:
-        params = {"origin": "KIRO_CLI"}
-        if profile_arn:
+        params = {"origin": origin}
+        if profile_arn and include_profile:
             params["profileArn"] = profile_arn
         url = f"https://q.{region}.amazonaws.com/?{urllib.parse.urlencode(params)}"
-        body = {"origin": "KIRO_CLI"}
-        if profile_arn:
+        body = {"origin": origin}
+        if profile_arn and include_profile:
             body["profileArn"] = profile_arn
         headers = kiro_headers(
             access_token,
@@ -291,15 +355,27 @@ def list_models(
                 names.append(str(model)[:160])
         print(
             "list_models:",
-            json.dumps({"style": client_style, "status": 200, "count": len(names), "models": names}, ensure_ascii=True),
+            json.dumps(
+                {
+                    "style": client_style,
+                    "origin": origin,
+                    "include_profile": include_profile,
+                    "status": 200,
+                    "count": len(names),
+                    "models": names,
+                },
+                ensure_ascii=True,
+            ),
         )
         return names
 
     headers = kiro_headers(access_token, machine_id, kiro_version, agent_mode, client_style)
+    if client_style == "kam-ide":
+        headers["x-amzn-codewhisperer-optout"] = "true"
     next_token: str | None = None
     for _ in range(10):
-        params = {"origin": "AI_EDITOR", "maxResults": "50"}
-        if profile_arn:
+        params = {"origin": origin, "maxResults": "50"}
+        if profile_arn and include_profile:
             params["profileArn"] = profile_arn
         if next_token:
             params["nextToken"] = next_token
@@ -328,7 +404,20 @@ def list_models(
         next_token = body.get("nextToken")
         if not next_token:
             break
-    print("list_models:", json.dumps({"status": 200, "count": len(names), "models": names}, ensure_ascii=True))
+    print(
+        "list_models:",
+        json.dumps(
+            {
+                "style": client_style,
+                "origin": origin,
+                "include_profile": include_profile,
+                "status": 200,
+                "count": len(names),
+                "models": names,
+            },
+            ensure_ascii=True,
+        ),
+    )
     return names
 
 
@@ -341,6 +430,9 @@ def smoke_generate(
     kiro_version: str,
     agent_mode: str,
     client_style: str,
+    generate_origin: str | None,
+    payload_style: str,
+    include_profile: bool,
     model: str,
 ) -> None:
     if endpoint == "codewhisperer":
@@ -358,9 +450,10 @@ def smoke_generate(
     else:
         base = f"https://q.{region}.amazonaws.com"
         path = "/generateAssistantResponse"
-    origin = "AmazonQ" if endpoint == "sendmsg" or client_style == "kam-amazonq" else (
+    origin = generate_origin or ("AmazonQ" if endpoint == "sendmsg" or client_style == "kam-amazonq" else (
         "KIRO_CLI" if client_style in {"open-kiro", "pi-cli"} else "AI_EDITOR"
-    )
+    ))
+    origin_for_payload = None if origin == "OMIT" else origin
     amz_target = (
         "AmazonQDeveloperStreamingService.SendMessage"
         if endpoint == "sendmsg" or client_style == "kam-amazonq"
@@ -369,22 +462,27 @@ def smoke_generate(
     payload = {
         "conversationState": {
             "chatTriggerType": "MANUAL",
-            **({"agentTaskType": agent_mode} if origin == "KIRO_CLI" else {}),
+            **({"agentTaskType": agent_mode} if origin_for_payload == "KIRO_CLI" else {}),
             "conversationId": str(uuid.uuid4()),
             "currentMessage": {
                 "userInputMessage": {
                     "content": "reply ok",
                     "modelId": model,
-                    "origin": origin,
                     "userInputMessageContext": {},
                 }
             },
             "history": [],
         }
     }
-    if origin == "KIRO_CLI":
+    if origin_for_payload:
+        payload["conversationState"]["currentMessage"]["userInputMessage"]["origin"] = origin_for_payload
+    if payload_style == "kam":
+        payload["conversationState"]["agentContinuationId"] = str(uuid.uuid4())
+        payload["conversationState"]["agentTaskType"] = agent_mode
+        payload["inferenceConfig"] = {"maxTokens": 16, "temperature": 0.0}
+    if origin_for_payload == "KIRO_CLI":
         payload["agentMode"] = agent_mode
-    if profile_arn:
+    if profile_arn and include_profile:
         payload["profileArn"] = profile_arn
     headers = kiro_headers(access_token, machine_id, kiro_version, agent_mode, client_style, amz_target)
     status, resp_headers, raw = request(
@@ -401,6 +499,9 @@ def smoke_generate(
             {
                 "endpoint": endpoint,
                 "style": client_style,
+                "origin": origin,
+                "payload_style": payload_style,
+                "include_profile": include_profile,
                 "model": model,
                 "status": status,
                 "content_type": content_type,
@@ -421,9 +522,13 @@ def main() -> int:
     parser.add_argument(
         "--client-style",
         default="ide",
-        choices=["ide", "pi-cli", "open-kiro", "kam-amazonq"],
+        choices=["ide", "kam-ide", "pi-cli", "open-kiro", "kam-amazonq"],
         help="Request fingerprint to use for list/generate probes.",
     )
+    parser.add_argument("--list-origin", help="Override origin used for ListAvailableModels.")
+    parser.add_argument("--generate-origin", help="Override origin used for generateAssistantResponse.")
+    parser.add_argument("--payload-style", default="simple", choices=["simple", "kam"])
+    parser.add_argument("--omit-profile-arn", action="store_true", help="Do not send profileArn in list/generate calls.")
     parser.add_argument("--refresh", action="store_true", help="Refresh even if access token is still valid.")
     parser.add_argument("--write-refreshed", action="store_true", help="Write refreshed token fields back to creds.")
     parser.add_argument("--model", action="append", dest="models")
@@ -490,7 +595,18 @@ def main() -> int:
         print("error: no access token available", file=sys.stderr)
         return 2
 
-    list_models(region, access_token, profile_arn, machine_id, args.kiro_version, args.agent_mode, args.client_style)
+    include_profile = not args.omit_profile_arn
+    list_models(
+        region,
+        access_token,
+        profile_arn,
+        machine_id,
+        args.kiro_version,
+        args.agent_mode,
+        args.client_style,
+        args.list_origin,
+        include_profile,
+    )
     default_endpoints = ["qroot"] if args.client_style == "open-kiro" else ["q"]
     if args.client_style == "kam-amazonq":
         default_endpoints = ["sendmsg"]
@@ -507,6 +623,9 @@ def main() -> int:
                 args.kiro_version,
                 args.agent_mode,
                 args.client_style,
+                args.generate_origin,
+                args.payload_style,
+                include_profile,
                 model,
             )
             time.sleep(0.2)
