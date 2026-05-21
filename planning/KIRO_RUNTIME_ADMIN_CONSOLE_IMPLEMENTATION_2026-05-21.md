@@ -40,6 +40,15 @@ GET /api/v1/admin/provider-adapters/kiro/credentials
 
 这些接口当前是只读接口，主要用于把 Kiro Runtime 的状态拉进 Sub2API 后台。后续如果替换底层实现为 KAM/Kiro-Go 风格服务，Sub2API 前端可以保持同一组接口不变。
 
+### API key 分工
+
+Kiro adapter 里至少存在两类 key，不能混用：
+
+- `KIRO_ADAPTER_ADMIN_API_KEY`：用于 `/api/admin/*`，例如 credentials 管理和导入。
+- `KIRO_ADAPTER_INTERNAL_API_KEY`：用于 runtime API，例如 `/v1/models`。
+
+如果底层 adapter 只有一把 key，可以让 `KIRO_ADAPTER_INTERNAL_API_KEY` 回退到 admin key；但在当前服务器部署里，`/v1/models` 需要普通 runtime key，否则会返回 401。
+
 ## 已新增前端能力
 
 涉及文件：
@@ -127,4 +136,3 @@ frontend: npm run build
 3. 如果 Kiro Runtime 页面可以看到账号但模型为空，下一步优先补模型发现接口兼容。
 4. 如果模型能看到但外部调用失败，下一步做 direct smoke 和 public smoke 双层验证。
 5. 再往后才做写操作：导入、刷新 token、禁用账号、同步模型到 Sub2API。
-

@@ -317,16 +317,24 @@ func fetchKiroAdapterAdmin(ctx context.Context, endpoint, path string) (Provider
 }
 
 func fetchKiroAdapterAdminWithConfig(ctx context.Context, cfg kiroAdapterConfig, endpoint, path string) (ProviderAdapterAdminResponse, error) {
+	apiKey := cfg.AdminAPIKey
+	if isKiroRuntimeAPIPath(path) {
+		apiKey = firstNonEmptyAdapterString(cfg.InternalAPIKey, cfg.AdminAPIKey)
+	}
 	return fetchProviderAdapterAdminJSON(ctx, providerAdapterAdminFetchConfig{
 		Provider:      "kiro",
 		Endpoint:      endpoint,
 		BaseURL:       cfg.InternalBaseURL,
-		APIKey:        cfg.AdminAPIKey,
+		APIKey:        apiKey,
 		Path:          path,
 		Timeout:       cfg.Timeout,
 		Sanitize:      sanitizeKiroAdapterResponse,
 		SensitiveKeys: kiroSensitiveKeys,
 	})
+}
+
+func isKiroRuntimeAPIPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/")
 }
 
 func adapterProbeFromResponse(result ProviderAdapterAdminResponse) *adapterProbeState {

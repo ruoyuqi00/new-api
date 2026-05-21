@@ -54,6 +54,7 @@ var kiroSensitiveKeys = []string{
 type kiroAdapterConfig struct {
 	InternalBaseURL string
 	AdminAPIKey     string
+	InternalAPIKey  string
 	Timeout         time.Duration
 }
 
@@ -570,7 +571,8 @@ func loadKiroAdapterConfigFromEnv() kiroAdapterConfig {
 	}
 	return kiroAdapterConfig{
 		InternalBaseURL: firstEnv(envKiroAdapterBaseURL, envProviderAdaptersKiroBaseURL),
-		AdminAPIKey:     firstEnv(envKiroAdapterAdminAPIKey, envKiroAdapterInternalAPIKey, envProviderAdaptersKiroAPIKey),
+		AdminAPIKey:     firstEnv(envKiroAdapterAdminAPIKey, envProviderAdaptersKiroAPIKey),
+		InternalAPIKey:  firstEnv(envKiroAdapterInternalAPIKey, envKiroAdapterAdminAPIKey, envProviderAdaptersKiroAPIKey),
 		Timeout:         timeout,
 	}
 }
