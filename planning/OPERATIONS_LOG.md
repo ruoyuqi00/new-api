@@ -1,5 +1,18 @@
 # Operations Log
 
+## 2026-05-21 KAM/Kiro-Go routing research
+
+- Rechecked `chaogei/Kiro-account-manager`: latest observed HEAD
+  `7ad57fd26e67b3ea91b780b2ca983c78737ed88a`, tag/package version `v1.6.6`.
+- Added `Quorinex/Kiro-Go` as a new Kiro reference: latest observed HEAD
+  `68110f30e01b4789b1baf7c40b992e4d71c68619`, version `1.0.8`.
+- `Kiro-Go` passed `go test ./...` locally.
+- Current conclusion: KAM is stronger than old `kiro.rs` for account-pool
+  strategy, route fallback, token refresh locking, model discovery, and request
+  lifecycle handling. Kiro-Go is easier to borrow from for a server-side Go
+  implementation.
+- Added `planning/KIRO_KAM_ROUTE_RESEARCH_2026-05-21.md`.
+
 ## 2026-05-20 Kiro/Windsurf recheck after user-provided account context
 
 - Rechecked upstream HEADs with `git ls-remote`; `dwgx/WindsurfAPI`,

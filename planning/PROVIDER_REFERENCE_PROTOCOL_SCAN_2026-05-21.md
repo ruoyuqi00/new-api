@@ -33,7 +33,8 @@ this update window.
 | `Jwadow/kiro-gateway` | `main`/`HEAD` = `a5292ca`, tag `v2.3` | No new commit/tag | Keep current older gateway for open-model path only. |
 | `tickernelz/opencode-kiro-auth` | `master`/`HEAD` = `d0d9b18`, tag `v1.10.1` | No new commit/tag | Still useful for Kiro CLI/Builder ID/IdC login ideas, not for our Web Portal route. |
 | `hongyilyu/pi-kiro` | `master`/`HEAD` = `43832737`, tag `v0.1.3` | No new commit/tag | Still CLI-style route. |
-| `chaogei/Kiro-account-manager` | `main`/`HEAD` = `7ad57fd`, tag `v1.6.6` | No new commit/tag | Still useful for local-account metadata preservation, no new server-side route. |
+| `chaogei/Kiro-account-manager` | `main`/`HEAD` = `7ad57fd`, tag `v1.6.6` | No new commit/tag, but deeper inspection completed | Strongest Kiro IDE/Amazon Q account-pool reference: round-robin/sticky, circuit breaker, token refresh lock, endpoint fallback, model discovery. Reimplement ideas rather than copying AGPL code. |
+| `Quorinex/Kiro-Go` | `main`/`HEAD` = `68110f3`, version `1.0.8` | New reference added | Go service reference for weighted round-robin, model-aware account routing, usage/overage handling, Docker deployment. `go test ./...` passed locally. |
 | `jlcodes99/cockpit-tools` | `main`/`HEAD` = `2b14843`, tag `v0.24.3` | Yes, but not Windsurf/Kiro provider protocol | Local mirror fast-forwarded. No deployed adapter change needed. |
 
 ## Windsurf Findings
@@ -82,6 +83,9 @@ Current action:
 - Do not switch the deployed Kiro traffic back to `kiro.rs` or `kiro-gateway`
   for Claude/Opus unless those projects add Web Portal support or our adapter
   fails a fresh smoke test.
+- Borrow KAM/Kiro-Go routing ideas for the next internal Kiro runtime upgrade:
+  account state, model-aware routing, refresh single-flight, quota/cooldown
+  handling, and sticky session affinity.
 
 ## Cockpit-tools Delta
 
@@ -120,6 +124,7 @@ git ls-remote https://github.com/Jwadow/kiro-gateway.git HEAD refs/heads/* refs/
 git ls-remote https://github.com/tickernelz/opencode-kiro-auth.git HEAD refs/heads/* refs/tags/*
 git ls-remote https://github.com/hongyilyu/pi-kiro.git HEAD refs/heads/* refs/tags/*
 git ls-remote https://github.com/chaogei/Kiro-account-manager.git HEAD refs/heads/* refs/tags/*
+git ls-remote https://github.com/Quorinex/Kiro-Go.git HEAD refs/heads/* refs/tags/*
 git ls-remote https://github.com/jlcodes99/cockpit-tools.git HEAD refs/heads/* refs/tags/*
 ```
 
@@ -165,4 +170,5 @@ git diff --name-only HEAD..origin/main -- `
 - https://github.com/tickernelz/opencode-kiro-auth
 - https://github.com/hongyilyu/pi-kiro
 - https://github.com/chaogei/Kiro-account-manager
+- https://github.com/Quorinex/Kiro-Go
 - https://github.com/jlcodes99/cockpit-tools

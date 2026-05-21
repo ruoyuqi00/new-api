@@ -17,6 +17,10 @@
 - `PROVIDER_ADAPTER_PROTOCOL_RESEARCH_2026-05-20.md`
   - Latest research on Windsurf Devin Auth, Kiro official model discovery, and
     the external projects to track before opening more provider models.
+- `KIRO_KAM_ROUTE_RESEARCH_2026-05-21.md`
+  - KAM/Kiro-Go routing research: account-pool strategy, concurrent token
+    refresh locking, model-aware routing, endpoint fallback, and the recommended
+    migration path for our internal Kiro runtime.
 
 ## 2026-05-19 Kiro Gateway Runtime Docs
 
