@@ -961,5 +961,7 @@ Potential merge touch points with private adapter work:
 - Migration numbering collision: private `140_windsurf_opus47_aliases.sql`
   versus official `140_extend_user_provider_default_grants_check.sql` and
   `141_subscription_expiry_notify_enabled.sql`.
+  Resolved during merge by renaming the private migration to
+  `142_windsurf_opus47_aliases.sql`.
 
 Details: `planning/SUB2API_UPSTREAM_SCAN_2026-05-21.md`.

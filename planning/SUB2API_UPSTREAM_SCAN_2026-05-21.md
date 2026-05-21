@@ -78,7 +78,7 @@ and upstream changes:
 - `frontend/src/i18n/locales/zh.ts`
 - `frontend/src/types/index.ts`
 
-There is also a migration-number collision risk:
+There was also a migration-number collision risk before merge:
 
 - Our private fork added `backend/migrations/140_windsurf_opus47_aliases.sql`.
 - Official upstream added
@@ -86,9 +86,9 @@ There is also a migration-number collision risk:
 - Official upstream also added
   `backend/migrations/141_subscription_expiry_notify_enabled.sql`.
 
-When merging, renumber the private Windsurf alias migration to the next free
-number, or verify the migration runner can tolerate non-unique numeric prefixes.
-Do not deploy with ambiguous migration ordering.
+During the merge, the private Windsurf alias migration was renamed to
+`backend/migrations/142_windsurf_opus47_aliases.sql` so it runs after the two
+official migrations.
 
 ## Provider Adapter Impact
 
