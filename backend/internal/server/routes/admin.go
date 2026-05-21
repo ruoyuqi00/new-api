@@ -338,6 +338,10 @@ func registerProviderAdapterRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 		kiro := adapters.Group("/kiro")
 		{
 			kiro.GET("/credentials", h.Admin.Account.GetKiroAdapterCredentials)
+			kiro.GET("/runtime/status", h.Admin.Account.GetKiroRuntimeStatus)
+			kiro.GET("/runtime/accounts", h.Admin.Account.GetKiroRuntimeAccounts)
+			kiro.GET("/runtime/models", h.Admin.Account.GetKiroRuntimeModels)
+			kiro.GET("/runtime/routing", h.Admin.Account.GetKiroRuntimeRouting)
 		}
 	}
 }

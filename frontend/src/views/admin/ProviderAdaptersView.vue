@@ -27,12 +27,19 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import ProviderAdaptersPanel from '@/components/admin/account/ProviderAdaptersPanel.vue'
 
-type ProviderAdapterEndpointKey = 'windsurfHealth' | 'windsurfAccounts' | 'kiroCredentials'
+type ProviderAdapterEndpointKey =
+  | 'windsurfHealth'
+  | 'windsurfAccounts'
+  | 'kiroCredentials'
+  | 'kiroRuntimeStatus'
+  | 'kiroRuntimeAccounts'
+  | 'kiroRuntimeModels'
+  | 'kiroRuntimeRouting'
 
 const route = useRoute()
 const { t } = useI18n()
 
 const initialActiveKey = computed<ProviderAdapterEndpointKey>(() => {
-  return route.params.provider === 'kiro' ? 'kiroCredentials' : 'windsurfAccounts'
+  return route.params.provider === 'kiro' ? 'kiroRuntimeStatus' : 'windsurfAccounts'
 })
 </script>

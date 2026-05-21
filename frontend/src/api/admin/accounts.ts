@@ -23,6 +23,10 @@ import type {
   KiroImportRequest,
   KiroImportResult,
   ProviderAdapterAdminResponse,
+  KiroRuntimeStatusResponse,
+  KiroRuntimeAccountsResponse,
+  KiroRuntimeModelsResponse,
+  KiroRuntimeRouting,
   CheckMixedChannelRequest,
   CheckMixedChannelResponse
 } from '@/types'
@@ -623,6 +627,26 @@ export async function getKiroAdapterCredentials(): Promise<ProviderAdapterAdminR
   return data
 }
 
+export async function getKiroRuntimeStatus(): Promise<KiroRuntimeStatusResponse> {
+  const { data } = await apiClient.get<KiroRuntimeStatusResponse>('/admin/provider-adapters/kiro/runtime/status')
+  return data
+}
+
+export async function getKiroRuntimeAccounts(): Promise<KiroRuntimeAccountsResponse> {
+  const { data } = await apiClient.get<KiroRuntimeAccountsResponse>('/admin/provider-adapters/kiro/runtime/accounts')
+  return data
+}
+
+export async function getKiroRuntimeModels(): Promise<KiroRuntimeModelsResponse> {
+  const { data } = await apiClient.get<KiroRuntimeModelsResponse>('/admin/provider-adapters/kiro/runtime/models')
+  return data
+}
+
+export async function getKiroRuntimeRouting(): Promise<KiroRuntimeRouting> {
+  const { data } = await apiClient.get<KiroRuntimeRouting>('/admin/provider-adapters/kiro/runtime/routing')
+  return data
+}
+
 /**
  * Get Antigravity default model mapping from backend
  * @returns Default model mapping (from -> to)
@@ -746,6 +770,10 @@ export const accountsAPI = {
   getWindsurfAdapterHealth,
   getWindsurfAdapterAccounts,
   getKiroAdapterCredentials,
+  getKiroRuntimeStatus,
+  getKiroRuntimeAccounts,
+  getKiroRuntimeModels,
+  getKiroRuntimeRouting,
   getAntigravityDefaultModelMapping,
   batchClearError,
   batchRefresh,

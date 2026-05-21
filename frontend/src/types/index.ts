@@ -1304,6 +1304,96 @@ export interface ProviderAdapterAdminResponse {
   data?: unknown
 }
 
+export interface KiroRuntimeSummary {
+  accounts_total: number
+  accounts_available: number
+  accounts_cooldown: number
+  accounts_quota_exhausted: number
+  accounts_with_profile_arn: number
+  models_discovered: number
+  models_smoke_passed: number
+  models_public_enabled: number
+}
+
+export interface KiroRuntimeRouting {
+  default_strategy: string
+  session_sticky: boolean
+  model_aware_routing: boolean
+  auto_switch_on_quota: boolean
+  allow_overage: boolean
+  capabilities: string[]
+}
+
+export interface KiroRuntimeProbeState {
+  ok: boolean
+  upstream_status: number
+  path: string
+  error?: string
+}
+
+export interface KiroRuntimeStatusResponse {
+  provider: string
+  runtime: string
+  engine: string
+  status: string
+  configured: boolean
+  public_entry_only: boolean
+  fetched_at: string
+  summary: KiroRuntimeSummary
+  credentials?: KiroRuntimeProbeState
+  models?: KiroRuntimeProbeState
+  routing: KiroRuntimeRouting
+}
+
+export interface KiroRuntimeAccount {
+  id: string
+  label: string
+  email?: string
+  auth_method?: string
+  engine: string
+  region?: string
+  plan_name?: string
+  plan_tier?: string
+  profile_arn_present: boolean
+  token_status: string
+  runtime_status: string
+  usage_current?: number
+  usage_limit?: number
+  usage_reset_at?: number
+  error_count?: number
+  cooldown_until?: number
+  last_used_at?: number
+  supported_model_count: number
+}
+
+export interface KiroRuntimeAccountsResponse {
+  provider: string
+  runtime: string
+  fetched_at: string
+  total: number
+  accounts: KiroRuntimeAccount[]
+  raw?: unknown
+}
+
+export interface KiroRuntimeModel {
+  id: string
+  display_name?: string
+  source: string
+  supported_account_count: number
+  last_smoke_status: string
+  public_enabled: boolean
+  disabled_reason?: string
+}
+
+export interface KiroRuntimeModelsResponse {
+  provider: string
+  runtime: string
+  fetched_at: string
+  total: number
+  models: KiroRuntimeModel[]
+  raw?: unknown
+}
+
 // ==================== Usage & Redeem Types ====================
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
