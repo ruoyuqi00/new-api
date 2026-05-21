@@ -888,3 +888,78 @@ Conclusion:
 - The next meaningful Kiro test is a fresh Builder ID or IdC OIDC credential
   export from a runtime that can currently use Claude/Opus.
 - See `planning/KIRO_GITHUB_WORKAROUND_SCAN_2026-05-20.md`.
+
+## 2026-05-21 reference protocol scan
+
+Rechecked upstream reference projects for protocol-sensitive updates that could
+affect official account import, token refresh, or model routing:
+
+- `dwgx/WindsurfAPI` remains `c028576a56b9fa19f84810643610cae4af824238` /
+  `v2.0.96`.
+- `guanxiaol/WindsurfPoolAPI` remains
+  `a8d2f4cf0c4c36d021debfe0428ec497660c55e6` / `v2.0.7`.
+- `hank9999/kiro.rs` remains
+  `f1bbe9f1d14b962211592c661792d48a9855e32e` / `v2026.3.1`.
+- `Jwadow/kiro-gateway` remains
+  `a5292ca04c7c6231e0b47673ac3f981f5a706e1e` / `v2.3`.
+- `tickernelz/opencode-kiro-auth` remains
+  `d0d9b18c8031abe29fe27c91d505a4f2ff24e9a0` / `v1.10.1`.
+- `hongyilyu/pi-kiro` remains
+  `438327370eb86a35ba7ac89aa1249e3c2a18ec85` / `v0.1.3`.
+- `chaogei/Kiro-account-manager` remains
+  `7ad57fd26e67b3ea91b780b2ca983c78737ed88a` / `v1.6.6`.
+- `jlcodes99/cockpit-tools` advanced to
+  `2b148437ef19812ffbea50d62ccc5f52a47caaf2`, latest tag `v0.24.3`.
+
+Impact:
+
+- No deployed Windsurf/Kiro adapter update is required from this scan.
+- `cockpit-tools` changes are Antigravity/Codex local routing and path
+  detection, not Windsurf/Kiro provider protocol.
+- `kiro.rs` non-default refactor branches were fetched and inspected; they
+  improve IDE endpoint layering and pool behavior but do not add the Kiro Web
+  Portal `CreateSpace` / `StreamSendMessage` path.
+- Keep the deployed Kiro Web adapter as the Claude/Opus source of truth.
+
+Details: `planning/PROVIDER_REFERENCE_PROTOCOL_SCAN_2026-05-21.md`.
+
+## 2026-05-21 Sub2API upstream scan
+
+Fetched official `Wei-Shaw/sub2api` without merging.
+
+- Previous private-fork merge base:
+  `3d22dd34d3de9076804858f979f60fccdf9f2de1`.
+- Latest official upstream `main`:
+  `35901a174b281367ca4c9655dfc14e2c2347c7ae`.
+- Latest observed official tag: `v0.1.129`.
+- Official `backend/cmd/server/VERSION`: `0.1.129`.
+- Private fork version before merge: `0.1.127`.
+- Private branch is `40` commits ahead and `64` commits behind official
+  upstream.
+
+No merge or server deployment was performed.
+
+Notable upstream areas:
+
+- OpenAI Responses / Chat Completions bridge fixes.
+- OpenAI image `n` pass-through and moderation error surfacing.
+- Codex OAuth user-agent rewrite and reused refresh-token handling.
+- Scheduler cache cleanup on account deletion and errored-account unscheduling.
+- Bedrock Claude Code compatibility transformations.
+- API Key daily usage detail.
+- Redeem-code batch update.
+- Email template editor and notification-email services.
+- Content-audit keyword blocking.
+- OIDC verified-email fast path.
+
+Potential merge touch points with private adapter work:
+
+- `backend/internal/server/routes/admin.go`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/zh.ts`
+- `frontend/src/types/index.ts`
+- Migration numbering collision: private `140_windsurf_opus47_aliases.sql`
+  versus official `140_extend_user_provider_default_grants_check.sql` and
+  `141_subscription_expiry_notify_enabled.sql`.
+
+Details: `planning/SUB2API_UPSTREAM_SCAN_2026-05-21.md`.
