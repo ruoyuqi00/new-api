@@ -21,6 +21,9 @@
   - KAM/Kiro-Go routing research: account-pool strategy, concurrent token
     refresh locking, model-aware routing, endpoint fallback, and the recommended
     migration path for our internal Kiro runtime.
+- `KIRO_RUNTIME_ADMIN_CONSOLE_PLAN_2026-05-21.md`
+  - Kiro Runtime 管理后台改造方案：页面结构、接口草案、数据结构、
+    smoke/sync 流程、参考项目优先级和分阶段验收标准。
 
 ## 2026-05-19 Kiro Gateway Runtime Docs
 

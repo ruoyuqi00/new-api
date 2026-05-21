@@ -28,6 +28,24 @@ GetUserInfo -> GetUserUsageAndLimits -> CreateSpace -> StreamSendMessage
 内部 Kiro service 或 Sub2API provider adapter 中，而不是把 KAM Electron
 程序直接塞进服务器部署。
 
+## Reference Policy
+
+从 2026-05-21 开始，后续 Kiro 开发不要再默认把 `kiro.rs` 当主参考。
+新的参考顺序如下：
+
+1. 本 fork 的 Sub2API adapter 和 `adapters/kiro-web`：决定公网行为和
+   Claude/Opus Web Portal 路线。
+2. `Quorinex/Kiro-Go`：优先参考服务端结构、Go 账号池、Docker 部署和
+   模型感知路由。
+3. `chaogei/Kiro-account-manager`：优先参考账号池策略、失败分级、
+   token refresh single-flight、session sticky 和模型发现行为。
+4. `Jwadow/kiro-gateway`：仅保留为线上 open-model fallback/reference。
+5. `hank9999/kiro.rs`：降级为 legacy 参考，只在旧 IDE/API key 行为、
+   历史回归或回滚场景中使用。
+
+如果未来有人要基于 `kiro.rs` 做新功能，必须先说明为什么 KAM/Kiro-Go
+不能覆盖该场景。
+
 ## 本次检查到的参考项目
 
 | 项目 | 当前观察版本 | 许可证 | 本地镜像 | 作用 |

@@ -9,6 +9,15 @@ keys, or SSH credentials in this file.
 
 No deployed adapter update is required from this scan.
 
+The Kiro reference policy has changed after the KAM/Kiro-Go review:
+
+- Use our Sub2API private adapter and `adapters/kiro-web` as the source of truth
+  for public behavior and the current Web Portal route.
+- Use `Quorinex/Kiro-Go` and `chaogei/Kiro-account-manager` as the primary
+  references for the next Kiro runtime/account-pool upgrade.
+- Treat `hank9999/kiro.rs` as a legacy/reference project, not the default base
+  for new Kiro runtime work.
+
 The three primary runtime references stayed at the previously recorded versions:
 
 - `dwgx/WindsurfAPI`: still `c028576a56b9fa19f84810643610cae4af824238`, tag `v2.0.96`.

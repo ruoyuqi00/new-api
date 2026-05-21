@@ -12,6 +12,11 @@
   lifecycle handling. Kiro-Go is easier to borrow from for a server-side Go
   implementation.
 - Added `planning/KIRO_KAM_ROUTE_RESEARCH_2026-05-21.md`.
+- Added `planning/KIRO_RUNTIME_ADMIN_CONSOLE_PLAN_2026-05-21.md`.
+- Updated the reference policy: future Kiro runtime work should prefer
+  Sub2API private adapter + `kiro-web`, Kiro-Go, and KAM. `kiro.rs` is now
+  legacy/reference unless a task specifically requires its old IDE/API-key
+  behavior.
 
 ## 2026-05-20 Kiro/Windsurf recheck after user-provided account context
 
