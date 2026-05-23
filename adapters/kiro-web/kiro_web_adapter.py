@@ -34,6 +34,8 @@ from typing import Any, Iterable, Iterator
 PORTAL_BASE = "https://app.kiro.dev/service/KiroWebPortalService/operation"
 DEFAULT_CREDS = "/config/credentials.json"
 DEFAULT_API_KEY_FILE = "/config/generated-kiro-api-key.txt"
+DEFAULT_MODEL_CONTEXT_TOKENS = 200000
+DEFAULT_TOKEN_BUFFER_RESERVE = 50000
 
 DEFAULT_MODELS = [
     "auto",
@@ -50,6 +52,40 @@ DEFAULT_MODELS = [
     "minimax-m2.1",
     "glm-5",
 ]
+
+
+def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+TOKEN_BUFFER_RESERVE = env_int(
+    "KIRO_TOKEN_BUFFER_RESERVE",
+    DEFAULT_TOKEN_BUFFER_RESERVE,
+    5000,
+    150000,
+)
+
+MODEL_CONTEXT_TOKENS = {
+    "auto": DEFAULT_MODEL_CONTEXT_TOKENS,
+    "claude-opus-4.7": DEFAULT_MODEL_CONTEXT_TOKENS,
+    "claude-opus-4.6": DEFAULT_MODEL_CONTEXT_TOKENS,
+    "claude-sonnet-4.6": DEFAULT_MODEL_CONTEXT_TOKENS,
+    "claude-opus-4.5": DEFAULT_MODEL_CONTEXT_TOKENS,
+    "claude-sonnet-4.5": DEFAULT_MODEL_CONTEXT_TOKENS,
+    "claude-sonnet-4": DEFAULT_MODEL_CONTEXT_TOKENS,
+    "claude-haiku-4.5": DEFAULT_MODEL_CONTEXT_TOKENS,
+}
+
+
+class KiroCredentialAuthError(RuntimeError):
+    """Raised when a stored credential is no longer accepted upstream."""
 
 
 def now_utc() -> dt.datetime:
@@ -89,6 +125,51 @@ def parse_expiry(value: Any) -> dt.datetime | None:
             parsed = parsed.replace(tzinfo=dt.timezone.utc)
         return parsed.astimezone(dt.timezone.utc)
     return None
+
+
+def auth_failure_from_response(status: int, message: str) -> bool:
+    lower = message.lower()
+    if status in (401, 403):
+        return True
+    return any(
+        marker in lower
+        for marker in (
+            "bad credentials",
+            "invalid_grant",
+            "invalid grant",
+            "invalid_token",
+            "invalid token",
+            "token expired",
+            "token has expired",
+            "unauthorized",
+        )
+    )
+
+
+def estimate_tokens_from_string(value: str) -> int:
+    if not value:
+        return 0
+    return int((len(value.encode("utf-8")) / 3.5) + 0.999)
+
+
+def model_context_tokens(model: str) -> int:
+    return MODEL_CONTEXT_TOKENS.get(map_model(model), DEFAULT_MODEL_CONTEXT_TOKENS)
+
+
+def trim_prompt_for_model(prompt: str, model: str) -> str:
+    limit = max(8000, model_context_tokens(model) - TOKEN_BUFFER_RESERVE)
+    if estimate_tokens_from_string(prompt) <= limit:
+        return prompt
+
+    marker = (
+        "[Earlier conversation was omitted by the adapter to fit the "
+        f"{map_model(model)} context window.]\n\n"
+    )
+    marker_bytes = len(marker.encode("utf-8"))
+    available_bytes = max(1024, int(limit * 3.5) - marker_bytes)
+    encoded = prompt.encode("utf-8")
+    tail = encoded[-available_bytes:].decode("utf-8", "ignore")
+    return marker + tail.lstrip()
 
 
 def cbor_uint(major: int, value: int) -> bytes:
@@ -487,21 +568,25 @@ class KiroWebClient:
         self.lock = threading.Lock()
         self.session_cache: dict[str, PortalSession] = {}
 
-    def load_credential(self) -> tuple[dict[str, Any], int | None, Any]:
+    def load_credentials(self) -> tuple[list[tuple[dict[str, Any], int | None]], Any]:
         loaded = json.loads(self.creds_path.read_text(encoding="utf-8"))
         candidates = loaded if isinstance(loaded, list) else [loaded]
         if not isinstance(candidates, list):
             raise RuntimeError("credentials file must contain an object or object array")
-        usable: list[tuple[dict[str, Any], int]] = []
+        usable: list[tuple[dict[str, Any], int | None]] = []
         for idx, item in enumerate(candidates):
             if isinstance(item, dict) and not item.get("disabled"):
                 if pick(item, "refreshToken", "refresh_token", "accessToken", "access_token"):
-                    usable.append((item, idx))
+                    usable.append((dict(item), idx if isinstance(loaded, list) else None))
         if not usable:
             raise RuntimeError("no enabled Kiro credential with token material")
         usable.sort(key=lambda pair: int(pair[0].get("priority") or 0))
+        return usable, loaded
+
+    def load_credential(self) -> tuple[dict[str, Any], int | None, Any]:
+        usable, loaded = self.load_credentials()
         cred, idx = usable[0]
-        return dict(cred), idx if isinstance(loaded, list) else None, loaded
+        return dict(cred), idx, loaded
 
     def persist_credential(self, updated: dict[str, Any], index: int | None, loaded: Any) -> None:
         if index is None:
@@ -513,22 +598,49 @@ class KiroWebClient:
         tmp.write_text(json.dumps(to_write, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.creds_path)
 
-    def ensure_access_token(self) -> dict[str, Any]:
+    def disable_credential(self, cred: dict[str, Any], index: int | None, loaded: Any, reason: str) -> None:
+        updated = dict(cred)
+        updated["disabled"] = True
+        updated["disabled_reason"] = reason[:500]
+        updated["disabled_at"] = now_utc().isoformat()
+        self.persist_credential(updated, index, loaded)
+
+    def ensure_access_token(self, force_refresh: bool = False) -> dict[str, Any]:
         with self.lock:
-            cred, idx, loaded = self.load_credential()
-            access_token = pick(cred, "accessToken", "access_token")
-            expires_at = parse_expiry(pick(cred, "expiresAt", "expires_at"))
-            if access_token and expires_at and expires_at > now_utc() + dt.timedelta(minutes=5):
-                return cred
-            refresh_token = pick(cred, "refreshToken", "refresh_token")
-            if not refresh_token:
-                if access_token:
+            usable, loaded = self.load_credentials()
+            last_error: Exception | None = None
+            for cred, idx in usable:
+                access_token = pick(cred, "accessToken", "access_token")
+                expires_at = parse_expiry(pick(cred, "expiresAt", "expires_at"))
+                if (
+                    not force_refresh
+                    and access_token
+                    and expires_at
+                    and expires_at > now_utc() + dt.timedelta(minutes=5)
+                ):
                     return cred
-                raise RuntimeError("credential has no refresh token")
-            refreshed = self.refresh_social_token(cred, refresh_token)
-            self.persist_credential(refreshed, idx, loaded)
-            self.session_cache.clear()
-            return refreshed
+                refresh_token = pick(cred, "refreshToken", "refresh_token")
+                if not refresh_token:
+                    if access_token and not force_refresh:
+                        return cred
+                    last_error = RuntimeError("credential has no refresh token")
+                    continue
+                try:
+                    refreshed = self.refresh_social_token(cred, refresh_token)
+                except KiroCredentialAuthError as exc:
+                    self.disable_credential(cred, idx, loaded, str(exc))
+                    self.session_cache.clear()
+                    last_error = exc
+                    continue
+                except Exception as exc:
+                    last_error = exc
+                    continue
+                self.persist_credential(refreshed, idx, loaded)
+                self.session_cache.clear()
+                return refreshed
+            if last_error:
+                raise RuntimeError(f"no Kiro credential could be refreshed: {last_error}") from last_error
+            raise RuntimeError("no enabled Kiro credential with token material")
 
     def refresh_social_token(self, cred: dict[str, Any], refresh_token: str) -> dict[str, Any]:
         region = str(pick(cred, "authRegion", "auth_region", "region") or "us-east-1")
@@ -546,7 +658,13 @@ class KiroWebClient:
         }
         status, _, raw = http_json_request("POST", url, headers, body=body, timeout=60)
         if status < 200 or status >= 300:
-            raise RuntimeError(f"Kiro token refresh failed with status {status}")
+            message = raw.decode("utf-8", "replace")[:500] if raw else ""
+            detail = f"Kiro token refresh failed with status {status}"
+            if message:
+                detail = f"{detail}: {message}"
+            if auth_failure_from_response(status, message):
+                raise KiroCredentialAuthError(detail)
+            raise RuntimeError(detail)
         decoded = json.loads(raw.decode("utf-8"))
         updated = dict(cred)
         access_token = pick(decoded, "accessToken", "access_token")
@@ -668,58 +786,66 @@ class KiroWebClient:
         }
 
     def prepare_session(self) -> PortalSession:
-        cred = self.ensure_access_token()
-        access_token = pick(cred, "accessToken", "access_token")
-        if not access_token:
-            raise RuntimeError("credential has no access token")
-        cache_key = sha256_hex(access_token)[:24]
-        cached = self.session_cache.get(cache_key)
-        if cached and cached.expires_at > time.time() + 120:
-            return cached
+        last_error: Exception | None = None
+        for force_refresh in (False, True):
+            cred = self.ensure_access_token(force_refresh=force_refresh)
+            access_token = pick(cred, "accessToken", "access_token")
+            if not access_token:
+                last_error = RuntimeError("credential has no access token")
+                continue
+            cache_key = sha256_hex(access_token)[:24]
+            cached = self.session_cache.get(cache_key)
+            if not force_refresh and cached and cached.expires_at > time.time() + 120:
+                return cached
 
-        visitor_id = str(pick(cred, "visitorId", "visitor_id") or uuid.uuid4())
-        profile_arn = pick(cred, "profileArn", "profile_arn")
-        provider = pick(cred, "idp", "provider", "authProvider", "auth_provider")
-        idps = [str(provider)] if provider else []
-        for candidate in ("Google", "Github", "BuilderId"):
-            if candidate not in idps:
-                idps.append(candidate)
+            visitor_id = str(pick(cred, "visitorId", "visitor_id") or uuid.uuid4())
+            profile_arn = pick(cred, "profileArn", "profile_arn")
+            provider = pick(cred, "idp", "provider", "authProvider", "auth_provider")
+            idps = [str(provider)] if provider else []
+            for candidate in ("Google", "Github", "BuilderId"):
+                if candidate not in idps:
+                    idps.append(candidate)
 
-        working_idp: str | None = None
-        for idp in idps:
-            tmp = PortalSession(
+            working_idp: str | None = None
+            for idp in idps:
+                tmp = PortalSession(
+                    access_token=access_token,
+                    idp=idp,
+                    csrf_token=None,
+                    cookie_header=None,
+                    user_id=None,
+                    visitor_id=visitor_id,
+                    profile_arn=profile_arn,
+                    expires_at=time.time() + 600,
+                )
+                try:
+                    self.portal_call(tmp, "GetUserInfo", {"origin": "KIRO_IDE"}, timeout=30)
+                    working_idp = idp
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    continue
+            if not working_idp:
+                self.session_cache.pop(cache_key, None)
+                continue
+
+            meta = self.fetch_index_meta(access_token, working_idp, visitor_id)
+            session = PortalSession(
                 access_token=access_token,
-                idp=idp,
-                csrf_token=None,
-                cookie_header=None,
-                user_id=None,
+                idp=working_idp,
+                csrf_token=meta.get("csrf_token"),
+                cookie_header=meta.get("cookie_header"),
+                user_id=meta.get("user_id"),
                 visitor_id=visitor_id,
                 profile_arn=profile_arn,
-                expires_at=time.time() + 600,
+                expires_at=time.time() + 900,
             )
-            try:
-                self.portal_call(tmp, "GetUserInfo", {"origin": "KIRO_IDE"}, timeout=30)
-                working_idp = idp
-                break
-            except Exception:
-                continue
-        if not working_idp:
-            raise RuntimeError("Kiro portal authentication failed")
-
-        meta = self.fetch_index_meta(access_token, working_idp, visitor_id)
-        session = PortalSession(
-            access_token=access_token,
-            idp=working_idp,
-            csrf_token=meta.get("csrf_token"),
-            cookie_header=meta.get("cookie_header"),
-            user_id=meta.get("user_id"),
-            visitor_id=visitor_id,
-            profile_arn=profile_arn,
-            expires_at=time.time() + 900,
-        )
-        self.warm_portal_session(session)
-        self.session_cache[cache_key] = session
-        return session
+            self.warm_portal_session(session)
+            self.session_cache[cache_key] = session
+            return session
+        if last_error:
+            raise RuntimeError(f"Kiro portal authentication failed: {last_error}") from last_error
+        raise RuntimeError("Kiro portal authentication failed")
 
     def warm_portal_session(self, session: PortalSession) -> None:
         # The official web app touches usage and provider state before creating a
@@ -751,6 +877,7 @@ class KiroWebClient:
     def send_message_events(self, prompt: str, model: str) -> Iterator[dict[str, Any]]:
         session = self.prepare_session()
         space_id = self.create_space(session)
+        prompt = trim_prompt_for_model(prompt, model)
         body = {
             "spaceId": space_id,
             "sessionId": space_id,

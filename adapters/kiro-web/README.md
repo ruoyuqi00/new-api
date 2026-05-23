@@ -45,6 +45,7 @@ By default the key is read from `/config/generated-kiro-api-key.txt`.
 | `KIRO_ADAPTER_API_KEY` | unset | Overrides key file |
 | `KIRO_ADAPTER_HOST` | `0.0.0.0` | Bind host |
 | `KIRO_ADAPTER_PORT` | `8991` | Bind port |
+| `KIRO_TOKEN_BUFFER_RESERVE` | `50000` | Prompt trimming reserve below model context window |
 
 ## Docker Compose Snippet
 
@@ -75,6 +76,7 @@ Run from inside the adapter container after copying the smoke script:
 
 ```bash
 python3 /tmp/kiro_web_adapter_smoke.py --model claude-opus-4.7
+python3 /tmp/kiro_web_adapter_smoke.py --model claude-opus-4.6
 python3 /tmp/kiro_web_adapter_smoke.py --model claude-sonnet-4.6
 python3 /tmp/kiro_web_adapter_smoke.py --mode openai --model claude-sonnet-4.6
 python3 /tmp/kiro_web_adapter_smoke.py --stream --mode openai --model claude-sonnet-4.6
@@ -98,6 +100,15 @@ On 2026-05-21, the deployed server confirmed:
 - `claude-sonnet-4.6` Anthropic-compatible streaming returned 200.
 - `claude-opus-4.7` can sometimes return a Kiro upstream "high volume of
   traffic" message; that is upstream model load, not adapter authentication.
+
+On 2026-05-23, public Sub2API testing confirmed:
+
+- canonical model `claude-opus-4.6` returned 200 through
+  `https://api.vyywcw.cn/v1/messages`.
+- direct adapter calls to `claude-opus-4.6` also returned 200 through both
+  Anthropic-compatible and OpenAI-compatible endpoints.
+- `claude-opus-4-6` should not be treated as the canonical public model name;
+  use `claude-opus-4.6` unless a client explicitly owns an alias mapping.
 
 ## Sub2API Wiring
 
@@ -128,6 +139,10 @@ Validated through the public Sub2API domain on 2026-05-21:
 - `claude-opus-4.7`
 - streaming `claude-sonnet-4.6`
 
+Validated through the public Sub2API domain on 2026-05-23:
+
+- `claude-opus-4.6`
+
 ## Current Limitations
 
 - Text-only prompt conversion for the first production cut.
@@ -137,3 +152,14 @@ Validated through the public Sub2API domain on 2026-05-21:
 - Model traffic errors from Kiro are currently passed through as text.
 - This service is intentionally internal-only; Sub2API remains the public
   gateway for keys, groups, routing, and quotas.
+
+## Upstream Sync Notes
+
+The 2026-05-23 audit is recorded in
+`docs/KIRO_UPSTREAM_AUDIT_2026-05-23.md`. Changes absorbed from the newer
+reference projects:
+
+- auto-disable stored credentials when refresh returns a hard auth failure;
+- force-refresh once when the portal session cannot authenticate;
+- trim very large prompts against a conservative model context budget before
+  calling `StreamSendMessage`.
