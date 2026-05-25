@@ -35,6 +35,7 @@ PORTAL_BASE = "https://app.kiro.dev/service/KiroWebPortalService/operation"
 DEFAULT_CREDS = "/config/credentials.json"
 DEFAULT_API_KEY_FILE = "/config/generated-kiro-api-key.txt"
 DEFAULT_MODEL_CONTEXT_TOKENS = 200000
+DEFAULT_MAX_OUTPUT_TOKENS = 64000
 DEFAULT_TOKEN_BUFFER_RESERVE = 20000
 
 DEFAULT_MODELS = [
@@ -72,6 +73,17 @@ def env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_json_object(name: str) -> dict[str, Any]:
+    raw = os.environ.get(name)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 ENABLE_TOKEN_BUFFER_RESERVE = env_bool("KIRO_ENABLE_TOKEN_BUFFER_RESERVE", False)
 TOKEN_BUFFER_RESERVE = env_int(
     "KIRO_TOKEN_BUFFER_RESERVE",
@@ -80,16 +92,22 @@ TOKEN_BUFFER_RESERVE = env_int(
     150000,
 )
 
-MODEL_CONTEXT_TOKENS = {
-    "auto": DEFAULT_MODEL_CONTEXT_TOKENS,
-    "claude-opus-4.7": DEFAULT_MODEL_CONTEXT_TOKENS,
-    "claude-opus-4.6": DEFAULT_MODEL_CONTEXT_TOKENS,
-    "claude-sonnet-4.6": DEFAULT_MODEL_CONTEXT_TOKENS,
-    "claude-opus-4.5": DEFAULT_MODEL_CONTEXT_TOKENS,
-    "claude-sonnet-4.5": DEFAULT_MODEL_CONTEXT_TOKENS,
-    "claude-sonnet-4": DEFAULT_MODEL_CONTEXT_TOKENS,
-    "claude-haiku-4.5": DEFAULT_MODEL_CONTEXT_TOKENS,
+MODEL_CAPABILITIES = {
+    "auto": {"context_window": DEFAULT_MODEL_CONTEXT_TOKENS, "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS},
+    "claude-opus-4.7": {"context_window": DEFAULT_MODEL_CONTEXT_TOKENS, "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS},
+    "claude-opus-4.6": {"context_window": 1000000, "max_output_tokens": 128000},
+    "claude-sonnet-4.6": {"context_window": 200000, "max_output_tokens": 64000},
+    "claude-opus-4.5": {"context_window": 200000, "max_output_tokens": 64000},
+    "claude-sonnet-4.5": {"context_window": 200000, "max_output_tokens": 64000},
+    "claude-sonnet-4": {"context_window": 1000000, "max_output_tokens": 64000},
+    "claude-haiku-4.5": {"context_window": 200000, "max_output_tokens": 64000},
+    "qwen3-coder-next": {"context_window": 1048576, "max_output_tokens": 65536},
+    "deepseek-3.2": {"context_window": 128000, "max_output_tokens": 8192},
+    "minimax-m2.5": {"context_window": 1048576, "max_output_tokens": 65536},
+    "minimax-m2.1": {"context_window": 1048576, "max_output_tokens": 65536},
+    "glm-5": {"context_window": 128000, "max_output_tokens": 32768},
 }
+MODEL_CAPABILITY_OVERRIDES = env_json_object("KIRO_MODEL_CAPABILITIES_JSON")
 
 
 class KiroCredentialAuthError(RuntimeError):
@@ -160,8 +178,35 @@ def estimate_tokens_from_string(value: str) -> int:
     return int((len(value.encode("utf-8")) / 3.5) + 0.999)
 
 
+def model_capabilities(model: str) -> dict[str, int]:
+    canonical = map_model(model)
+    base = dict(
+        MODEL_CAPABILITIES.get(
+            canonical,
+            {
+                "context_window": DEFAULT_MODEL_CONTEXT_TOKENS,
+                "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
+            },
+        )
+    )
+    override = MODEL_CAPABILITY_OVERRIDES.get(canonical) or MODEL_CAPABILITY_OVERRIDES.get(model)
+    if isinstance(override, int):
+        base["context_window"] = override
+    elif isinstance(override, dict):
+        for key in ("context_window", "max_input_tokens", "max_output_tokens"):
+            raw_value = override.get(key)
+            if isinstance(raw_value, int) and raw_value > 0:
+                target = "context_window" if key == "max_input_tokens" else key
+                base[target] = raw_value
+    return base
+
+
 def model_context_tokens(model: str) -> int:
-    return MODEL_CONTEXT_TOKENS.get(map_model(model), DEFAULT_MODEL_CONTEXT_TOKENS)
+    return model_capabilities(model)["context_window"]
+
+
+def model_max_output_tokens(model: str) -> int:
+    return model_capabilities(model)["max_output_tokens"]
 
 
 def trim_prompt_for_model(prompt: str, model: str) -> str:
@@ -1012,6 +1057,8 @@ class Handler(BaseHTTPRequestHandler):
                                 "object": "model",
                                 "created": now,
                                 "owned_by": "kiro-web",
+                                "context_window": model_context_tokens(model),
+                                "max_output_tokens": model_max_output_tokens(model),
                             }
                             for model in DEFAULT_MODELS
                         ],

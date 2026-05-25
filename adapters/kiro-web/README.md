@@ -47,6 +47,26 @@ By default the key is read from `/config/generated-kiro-api-key.txt`.
 | `KIRO_ADAPTER_PORT` | `8991` | Bind port |
 | `KIRO_ENABLE_TOKEN_BUFFER_RESERVE` | unset | Set to `1` to enable conservative prompt trimming |
 | `KIRO_TOKEN_BUFFER_RESERVE` | `20000` | Prompt trimming reserve below model context window when trimming is enabled |
+| `KIRO_MODEL_CAPABILITIES_JSON` | unset | Optional JSON object to override per-model `context_window` and `max_output_tokens` |
+
+Context handling is model-aware but conservative:
+
+- `claude-opus-4.6` follows the current upstream model metadata with a
+  `1,000,000` token context window and `128,000` max output tokens.
+- Other advertised Kiro models have explicit context/output metadata instead
+  of sharing one hidden default. Claude values follow the current upstream
+  Sub2API model-pricing metadata where available; Kiro-only models use
+  conservative adapter defaults that can be overridden without code changes.
+- Prompt trimming is disabled by default. With the default deployment the
+  adapter forwards the full request and lets Kiro enforce the real upstream
+  context limit. Set `KIRO_ENABLE_TOKEN_BUFFER_RESERVE=1` only if you want the
+  adapter to trim oversized prompts before forwarding them.
+
+Example override:
+
+```bash
+KIRO_MODEL_CAPABILITIES_JSON='{"claude-opus-4.7":{"context_window":1000000,"max_output_tokens":128000},"glm-5":{"context_window":1048576}}'
+```
 
 ## Docker Compose Snippet
 
