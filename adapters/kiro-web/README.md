@@ -45,7 +45,8 @@ By default the key is read from `/config/generated-kiro-api-key.txt`.
 | `KIRO_ADAPTER_API_KEY` | unset | Overrides key file |
 | `KIRO_ADAPTER_HOST` | `0.0.0.0` | Bind host |
 | `KIRO_ADAPTER_PORT` | `8991` | Bind port |
-| `KIRO_TOKEN_BUFFER_RESERVE` | `50000` | Prompt trimming reserve below model context window |
+| `KIRO_ENABLE_TOKEN_BUFFER_RESERVE` | unset | Set to `1` to enable conservative prompt trimming |
+| `KIRO_TOKEN_BUFFER_RESERVE` | `20000` | Prompt trimming reserve below model context window when trimming is enabled |
 
 ## Docker Compose Snippet
 
@@ -161,5 +162,5 @@ reference projects:
 
 - auto-disable stored credentials when refresh returns a hard auth failure;
 - force-refresh once when the portal session cannot authenticate;
-- trim very large prompts against a conservative model context budget before
-  calling `StreamSendMessage`.
+- optionally trim very large prompts against a conservative model context
+  budget before calling `StreamSendMessage`.

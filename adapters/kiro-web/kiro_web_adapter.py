@@ -35,7 +35,7 @@ PORTAL_BASE = "https://app.kiro.dev/service/KiroWebPortalService/operation"
 DEFAULT_CREDS = "/config/credentials.json"
 DEFAULT_API_KEY_FILE = "/config/generated-kiro-api-key.txt"
 DEFAULT_MODEL_CONTEXT_TOKENS = 200000
-DEFAULT_TOKEN_BUFFER_RESERVE = 50000
+DEFAULT_TOKEN_BUFFER_RESERVE = 20000
 
 DEFAULT_MODELS = [
     "auto",
@@ -65,6 +65,14 @@ def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_TOKEN_BUFFER_RESERVE = env_bool("KIRO_ENABLE_TOKEN_BUFFER_RESERVE", False)
 TOKEN_BUFFER_RESERVE = env_int(
     "KIRO_TOKEN_BUFFER_RESERVE",
     DEFAULT_TOKEN_BUFFER_RESERVE,
@@ -157,6 +165,9 @@ def model_context_tokens(model: str) -> int:
 
 
 def trim_prompt_for_model(prompt: str, model: str) -> str:
+    if not ENABLE_TOKEN_BUFFER_RESERVE:
+        return prompt
+
     limit = max(8000, model_context_tokens(model) - TOKEN_BUFFER_RESERVE)
     if estimate_tokens_from_string(prompt) <= limit:
         return prompt
