@@ -669,9 +669,6 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 			if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
 				continue
 			}
-			if acc.Platform == PlatformOpenAI && !acc.IsProviderAdapterBridge() {
-				continue
-			}
 			filtered = append(filtered, acc)
 		}
 		return filtered, nil

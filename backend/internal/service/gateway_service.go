@@ -2273,9 +2273,6 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
 				continue
 			}
-			if acc.Platform == PlatformOpenAI && !acc.IsProviderAdapterBridge() {
-				continue
-			}
 			filtered = append(filtered, acc)
 		}
 		slog.Debug("account_scheduling_list_mixed",
@@ -2347,7 +2344,7 @@ func (s *GatewayService) isAccountAllowedForPlatform(account *Account, platform 
 		if account.Platform == platform {
 			return true
 		}
-		if platform == PlatformAnthropic && account.IsProviderAdapterBridge() {
+		if platform == PlatformAnthropic && account.Platform == PlatformOpenAI {
 			return true
 		}
 		return account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()
