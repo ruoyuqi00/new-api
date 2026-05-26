@@ -977,6 +977,10 @@ func (a *Account) IsOpenAIApiKey() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeAPIKey
 }
 
+func (a *Account) IsProviderAdapterBridge() bool {
+	return a.IsOpenAIApiKey() && strings.TrimSpace(a.GetExtraString("provider_adapter")) != ""
+}
+
 func (a *Account) GetOpenAIBaseURL() string {
 	if !a.IsOpenAI() {
 		return ""
@@ -1090,6 +1094,9 @@ func (a *Account) IsOpenAITokenExpired() bool {
 // IsMixedSchedulingEnabled 检查 antigravity 账户是否启用混合调度
 // 启用后可参与 anthropic/gemini 分组的账户调度
 func (a *Account) IsMixedSchedulingEnabled() bool {
+	if a.IsProviderAdapterBridge() {
+		return true
+	}
 	if a.Platform != PlatformAntigravity {
 		return false
 	}

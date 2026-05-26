@@ -2249,6 +2249,9 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	if useMixed {
 		platforms := []string{platform, PlatformAntigravity}
+		if platform == PlatformAnthropic {
+			platforms = append(platforms, PlatformOpenAI)
+		}
 		var accounts []Account
 		var err error
 		if groupID != nil {
@@ -2268,6 +2271,9 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 		filtered := make([]Account, 0, len(accounts))
 		for _, acc := range accounts {
 			if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
+				continue
+			}
+			if acc.Platform == PlatformOpenAI && !acc.IsProviderAdapterBridge() {
 				continue
 			}
 			filtered = append(filtered, acc)
@@ -2339,6 +2345,9 @@ func (s *GatewayService) isAccountAllowedForPlatform(account *Account, platform 
 	}
 	if useMixed {
 		if account.Platform == platform {
+			return true
+		}
+		if platform == PlatformAnthropic && account.IsProviderAdapterBridge() {
 			return true
 		}
 		return account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()
