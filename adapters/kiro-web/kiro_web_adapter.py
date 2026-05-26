@@ -1040,10 +1040,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
-            if self.path in ("/health", "/healthz"):
+            path = urllib.parse.urlsplit(self.path).path
+            if path in ("/health", "/healthz"):
                 self.write_json(200, {"status": "ok"})
                 return
-            if self.path == "/v1/models":
+            if path == "/v1/models":
                 if not self.require_auth():
                     return
                 now = int(time.time())
@@ -1065,7 +1066,7 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
                 return
-            if self.path == "/admin/usage":
+            if path == "/admin/usage":
                 if not self.require_auth():
                     return
                 usage = self.server.kiro.usage()
@@ -1080,10 +1081,11 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_auth():
                 return
             payload = self.read_json()
-            if self.path == "/v1/messages":
+            path = urllib.parse.urlsplit(self.path).path
+            if path == "/v1/messages":
                 self.handle_anthropic_messages(payload)
                 return
-            if self.path == "/v1/chat/completions":
+            if path == "/v1/chat/completions":
                 self.handle_openai_chat(payload)
                 return
             self.write_error_json(404, "not found", "not_found")
