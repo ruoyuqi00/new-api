@@ -484,11 +484,58 @@ def content_to_text(content: Any) -> str:
             elif item_type == "tool_result":
                 tool_text = content_to_text(item.get("content"))
                 if tool_text:
-                    parts.append(f"[tool_result]\n{tool_text}")
+                    tool_id = item.get("tool_use_id") or item.get("id")
+                    label = f" id={tool_id}" if tool_id else ""
+                    parts.append(f"[tool_result{label}]\n{tool_text}")
+            elif item_type == "tool_use":
+                name = item.get("name") or "tool"
+                tool_id = item.get("id")
+                label = f" id={tool_id}" if tool_id else ""
+                tool_input = item.get("input")
+                try:
+                    input_text = json.dumps(tool_input, ensure_ascii=False, separators=(",", ":"))
+                except TypeError:
+                    input_text = str(tool_input)
+                parts.append(f"[tool_use name={name}{label}]\n{input_text}")
+            elif item_type in {"thinking", "redacted_thinking"}:
+                thinking = item.get("thinking") or item.get("text") or "[redacted]"
+                if isinstance(thinking, str) and thinking.strip():
+                    parts.append(f"[{item_type}]\n{thinking.strip()}")
             elif item_type == "image":
                 parts.append("[image omitted]")
         return "\n".join(part for part in parts if part)
     return ""
+
+
+def message_metadata_to_text(message: dict[str, Any]) -> str:
+    parts: list[str] = []
+
+    if message.get("name"):
+        parts.append(f"name={message['name']}")
+    if message.get("tool_call_id"):
+        parts.append(f"tool_call_id={message['tool_call_id']}")
+
+    function_call = message.get("function_call")
+    if isinstance(function_call, dict):
+        try:
+            parts.append(
+                "[function_call]\n"
+                + json.dumps(function_call, ensure_ascii=False, separators=(",", ":"))
+            )
+        except TypeError:
+            parts.append(f"[function_call]\n{function_call}")
+
+    tool_calls = message.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        try:
+            parts.append(
+                "[tool_calls]\n"
+                + json.dumps(tool_calls, ensure_ascii=False, separators=(",", ":"))
+            )
+        except TypeError:
+            parts.append(f"[tool_calls]\n{tool_calls}")
+
+    return "\n".join(part for part in parts if part)
 
 
 def anthropic_prompt(payload: dict[str, Any]) -> str:
@@ -506,8 +553,10 @@ def anthropic_prompt(payload: dict[str, Any]) -> str:
             continue
         role = str(message.get("role") or "user")
         text = content_to_text(message.get("content")).strip()
-        if text:
-            parts.append(f"{role.capitalize()}:\n{text}")
+        meta = message_metadata_to_text(message).strip()
+        message_parts = [part for part in (meta, text) if part]
+        if message_parts:
+            parts.append(f"{role.capitalize()}:\n" + "\n".join(message_parts))
     return "\n\n".join(parts).strip() or "Hello"
 
 
@@ -518,8 +567,10 @@ def openai_prompt(payload: dict[str, Any]) -> str:
             continue
         role = str(message.get("role") or "user")
         text = content_to_text(message.get("content")).strip()
-        if text:
-            parts.append(f"{role.capitalize()}:\n{text}")
+        meta = message_metadata_to_text(message).strip()
+        message_parts = [part for part in (meta, text) if part]
+        if message_parts:
+            parts.append(f"{role.capitalize()}:\n" + "\n".join(message_parts))
     return "\n\n".join(parts).strip() or "Hello"
 
 
