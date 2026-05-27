@@ -28,9 +28,10 @@ Client
 
 | 项目 | 地址 | 本地位置 | 当前观察版本 | 用途 | 结论 |
 | --- | --- | --- | --- | --- | --- |
-| Sub2API upstream | https://github.com/Wei-Shaw/sub2api | `D:\wflogin\sub2api` / `D:\wflogin\sub2api-fork` | `upstream/main` = `6e66edb chore: update sponsors` | 我们 fork 的主项目 | 持续跟进，所有原生改动都落在 fork |
+| Sub2API upstream | https://github.com/Wei-Shaw/sub2api | `D:\wflogin\sub2api-private` | `upstream/main` = `a3916351 更新 OpenAI 使用密钥配置`，latest tag `v0.1.131` | 我们 fork 的主项目 | 已合并到私有 fork；继续优先跟进官方 main |
 | WindsurfAPI | https://github.com/dwgx/WindsurfAPI | `D:\wflogin\_github_research\WindsurfAPI` | `master` = `41a36b9 release: 2.0.97`, latest tag `v2.0.97` | Windsurf internal upstream | Deployed internally with Cascade caller reuse enabled |
 | WindsurfPoolAPI | https://github.com/guanxiaol/WindsurfPoolAPI | `D:\wflogin\_github_research\WindsurfPoolAPI` | `main` = `a8d2f4c v2.0.7`，最高 tag `v2.0.7` | Windsurf 备选参考 | 作为协议/实现对照，不作为第一部署选择 |
+| cockpit-tools | https://github.com/jlcodes99/cockpit-tools | `D:\wflogin\_github_research\cockpit-tools` | `origin/main` = `866f526`，latest tag `v0.24.9` | 桌面账号管理、额度展示、CLIProxyAPI 结构参考 | 不直接替换服务端；优先学习账号导入容错、额度缓存、模型映射和 per-client upstream key |
 | kiro.rs | https://github.com/hank9999/kiro.rs | `D:\wflogin\kiro.rs-master` | 远端 `master` = `f1bbe9f`，最高观察 tag `v2026.3.1` | Kiro Anthropic 兼容代理主参考 | 短期以内网上游接入，长期可拆 token/provider 逻辑 |
 | kiro-gateway | https://github.com/jwadow/kiro-gateway | 未克隆，远端可跟踪 | 远端 `main` = `6544d1f`，最高观察 tag `v2.3` | Kiro 备选参考 | 用于对照认证、路由、模型映射变化 |
 | 本地 Windsurf Electron 工具 | `D:\wflogin\windsurf-register-free-2\windsurf-auto-free-main` | 本地 | 非服务端项目 | 账号登录/刷新逻辑参考 | 不直接部署到 API 网关路径 |
