@@ -518,6 +518,18 @@ docker compose up -d windsurf-api
 docker compose logs --tail=200 windsurf-api
 ```
 
+For the current private deployment, keep these `windsurf-api` environment
+variables in compose:
+
+```yaml
+- CASCADE_REUSE_BY_CALLER=1
+- CASCADE_POOL_MAX=5
+- CASCADE_REUSE_HASH_SYSTEM=0
+```
+
+They were added with `dwgx/WindsurfAPI v2.0.97` to improve Cascade reuse for
+single-admin Claude Code style sessions.
+
 Sub2API official sync in local fork:
 
 ```powershell
@@ -734,7 +746,8 @@ docker compose logs --tail=200 windsurf-api
 ```
 
 After every WindsurfAPI update, re-run the account list check and smoke
-`gemini-2.5-flash` plus `claude-sonnet-4.6`.
+`ws-gemini-2.5-flash`, `ws-claude-sonnet-4.6`, and `ws-claude-opus-4.6`
+through public Sub2API.
 
 ### Internal Kiro adapter deployment
 

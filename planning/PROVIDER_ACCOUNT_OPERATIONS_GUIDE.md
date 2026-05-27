@@ -54,19 +54,38 @@ Current external Sub2API group/key boundary:
   `kiro-gateway-internal-anthropic`.
 - The group has model routing enabled for Kiro Gateway models so overlapping
   model names do not randomly select the Windsurf account.
+- Windsurf-specific public aliases use the `ws-` prefix so calls can be forced
+  to Windsurf instead of Kiro when model names overlap.
 
 ## Current Provider Runtime Status
 
 Windsurf:
 
 - Internal service: `sub2api-windsurf-api`
+- Runtime version: `dwgx/WindsurfAPI v2.0.97`
 - Sub2API upstream account: `windsurf-internal-anthropic`
 - Public smoke passed through `https://api.vyywcw.cn/v1/messages`
-- Smoke model: `claude-sonnet-4.6`
+- Smoke models:
+  - `ws-claude-sonnet-4.6`
+  - `ws-claude-opus-4.6`
+- Cache/reuse settings:
+  - `CASCADE_REUSE_BY_CALLER=1`
+  - `CASCADE_POOL_MAX=5`
+  - `CASCADE_REUSE_HASH_SYSTEM=0`
 - Current account capability status: the Windsurf dashboard reports 81 `ok`
   models. Sub2API exposure is synced from that set plus usable aliases, with
   direct-smoke deprecated failures such as `gpt-4o-mini` and `grok-3-mini`
   intentionally pruned from `/v1/models`.
+
+Force-Windsurf aliases currently exposed through Sub2API:
+
+- `ws-claude-sonnet-4.6`
+- `ws-claude-sonnet-4.6-thinking`
+- `ws-claude-opus-4.6`
+- `ws-claude-opus-4.6-thinking`
+- `ws-gemini-2.5-flash`
+- `ws-gpt-5.1`
+- `ws-gpt-5.2`
 
 Kiro:
 
@@ -144,12 +163,17 @@ curl -sS https://api.vyywcw.cn/v1/messages \
   -H "content-type: application/json" \
   -H "anthropic-version: 2023-06-01" \
   -d '{
-    "model": "claude-sonnet-4.6",
+    "model": "ws-claude-sonnet-4.6",
     "max_tokens": 32,
+    "metadata": {"user_id": "stable-session-id"},
     "messages": [{"role": "user", "content": "reply with ok"}],
     "stream": false
   }'
 ```
+
+For cache/context reuse, keep sending full `messages` history and keep
+`metadata.user_id` stable for the same conversation. The cache reduces upstream
+work; it does not replace client-side conversation history.
 
 ### Kiro Import Modes
 

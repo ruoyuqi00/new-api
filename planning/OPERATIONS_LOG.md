@@ -983,3 +983,36 @@ Potential merge touch points with private adapter work:
   `142_windsurf_opus47_aliases.sql`.
 
 Details: `planning/SUB2API_UPSTREAM_SCAN_2026-05-21.md`.
+
+## 2026-05-27 Windsurf cache and Sub2API route update
+
+Updated the live internal Windsurf adapter from `dwgx/WindsurfAPI v2.0.96`
+to `v2.0.97` (`41a36b9176633a9e67eb7ca87d725b5eb98564b8`) because upstream
+added Cascade reuse optimization that directly addresses the observed
+`reuse MISS` / 0% cache hit behavior.
+
+Server changes:
+
+- Backed up compose to `/opt/sub2api/docker-compose.yml.bak.20260527-154627`.
+- Added `CASCADE_REUSE_BY_CALLER=1`, `CASCADE_POOL_MAX=5`, and
+  `CASCADE_REUSE_HASH_SYSTEM=0` to the `windsurf-api` service.
+- Recreated `sub2api-windsurf-api`; health confirmed `version=2.0.97`,
+  `conversationPool.maxSize=5`, and `reuseByCaller=true`.
+- Re-enabled the Sub2API upstream account `windsurf-internal-anthropic`.
+- Added forced Windsurf public aliases under `provider-mixed`:
+  `ws-claude-sonnet-4.6`, `ws-claude-sonnet-4.6-thinking`,
+  `ws-claude-opus-4.6`, `ws-claude-opus-4.6-thinking`,
+  `ws-gemini-2.5-flash`, `ws-gpt-5.1`, and `ws-gpt-5.2`.
+- Restarted Sub2API so the scheduler snapshot picked up the DB route changes.
+
+Verification:
+
+- Direct internal WindsurfAPI `/v1/messages` with `claude-sonnet-4.6`
+  returned HTTP 200.
+- Public Sub2API `/v1/messages` with `ws-claude-sonnet-4.6` returned HTTP 200.
+- A second public turn with the same conversation returned
+  `cache_read_input_tokens=1935`, and Windsurf health showed
+  `conversationPool.hits=1`.
+- Public Sub2API `/v1/messages` with `ws-claude-opus-4.6` returned HTTP 200.
+
+Details: `planning/WINDSURF_CACHE_AND_SUB2API_CALLING_2026-05-27.md`.

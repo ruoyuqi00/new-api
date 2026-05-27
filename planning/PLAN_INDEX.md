@@ -25,6 +25,11 @@
   - Kiro Runtime 管理后台改造方案：页面结构、接口草案、数据结构、
     smoke/sync 流程、参考项目优先级和分阶段验收标准。
 
+- `WINDSURF_CACHE_AND_SUB2API_CALLING_2026-05-27.md`
+  - Current Windsurf cache fix and calling guide: `WindsurfAPI v2.0.97`,
+    Cascade caller reuse settings, public `ws-` model aliases, and public
+    Sub2API smoke results showing `cache_read_input_tokens`.
+
 ## 2026-05-19 Kiro Gateway Runtime Docs
 
 - `KIRO_GATEWAY_RUNTIME_REPORT_2026-05-19.md`
@@ -86,7 +91,7 @@
 已观察版本：
 
 - Sub2API upstream: `8584b8f7 Merge pull request #2504 from yetone/fix-admin-settings-darkmode`
-- WindsurfAPI: `dwgx/WindsurfAPI`, `c028576 release: 2.0.96`, tag `v2.0.96`
+- WindsurfAPI: `dwgx/WindsurfAPI`, `41a36b9 release: 2.0.97`, tag `v2.0.97`
 - WindsurfPoolAPI: `guanxiaol/WindsurfPoolAPI`, tag `v2.0.7`
 - Kiro main reference: `hank9999/kiro.rs`, observed tag `v2026.3.1`
 - Kiro backup reference: `jwadow/kiro-gateway`, observed tag `v2.3`
