@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 // semverPattern 预编译 semver 格式校验正则
@@ -2808,7 +2809,8 @@ type TestSMTPRequest struct {
 // POST /api/v1/admin/settings/test-smtp
 func (h *SettingHandler) TestSMTPConnection(c *gin.Context) {
 	var req TestSMTPRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	raw, err := bindJSONObject(c, &req)
+	if err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
@@ -2831,11 +2833,11 @@ func (h *SettingHandler) TestSMTPConnection(c *gin.Context) {
 			req.SMTPPort = 587
 		}
 	}
-	if req.SMTPUsername == "" && savedConfig != nil {
+	if !jsonFieldPresent(raw, "smtp_username") && req.SMTPUsername == "" && savedConfig != nil {
 		req.SMTPUsername = savedConfig.Username
 	}
 	password := strings.TrimSpace(req.SMTPPassword)
-	if password == "" && savedConfig != nil {
+	if !jsonFieldPresent(raw, "smtp_password") && password == "" && savedConfig != nil {
 		password = savedConfig.Password
 	}
 	if req.SMTPHost == "" {
@@ -2851,8 +2853,7 @@ func (h *SettingHandler) TestSMTPConnection(c *gin.Context) {
 		UseTLS:   req.SMTPUseTLS,
 	}
 
-	err := h.emailService.TestSMTPConnectionWithConfig(config)
-	if err != nil {
+	if err := h.emailService.TestSMTPConnectionWithConfig(config); err != nil {
 		response.BadRequest(c, "SMTP connection test failed: "+err.Error())
 		return
 	}
@@ -2876,7 +2877,8 @@ type SendTestEmailRequest struct {
 // POST /api/v1/admin/settings/send-test-email
 func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 	var req SendTestEmailRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	raw, err := bindJSONObject(c, &req)
+	if err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
@@ -2901,11 +2903,11 @@ func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 			req.SMTPPort = 587
 		}
 	}
-	if req.SMTPUsername == "" && savedConfig != nil {
+	if !jsonFieldPresent(raw, "smtp_username") && req.SMTPUsername == "" && savedConfig != nil {
 		req.SMTPUsername = savedConfig.Username
 	}
 	password := strings.TrimSpace(req.SMTPPassword)
-	if password == "" && savedConfig != nil {
+	if !jsonFieldPresent(raw, "smtp_password") && password == "" && savedConfig != nil {
 		password = savedConfig.Password
 	}
 	if req.SMTPFrom == "" && savedConfig != nil {
@@ -2969,6 +2971,25 @@ func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Test email sent successfully"})
+}
+
+func bindJSONObject(c *gin.Context, req any) (map[string]json.RawMessage, error) {
+	var obj map[string]json.RawMessage
+	if err := c.ShouldBindBodyWith(&obj, binding.JSON); err != nil {
+		return nil, err
+	}
+	if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
+		return obj, err
+	}
+	return obj, nil
+}
+
+func jsonFieldPresent(obj map[string]json.RawMessage, field string) bool {
+	if obj == nil {
+		return false
+	}
+	_, ok := obj[field]
+	return ok
 }
 
 // GetAdminAPIKey 获取管理员 API Key 状态
