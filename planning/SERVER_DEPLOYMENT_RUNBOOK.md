@@ -3,14 +3,15 @@
 ## 2026-05-28 HTTPS mail relay status
 
 SMTP outbound from the server is blocked by the network provider, so Sub2API now
-has an internal HTTPS mail relay staged for activation.
+uses an internal SMTP-to-HTTPS relay. Sub2API sends SMTP only inside the Docker
+network, and the relay sends real mail through Resend over HTTPS.
 
 Current server state:
 
 ```text
 Sub2API image: sub2api-provider-adapters:6611e027
 mail-relay image: sub2api-mail-relay:5e5d524a
-mail-relay provider: dry-run
+mail-relay provider: resend
 public health: https://api.vyywcw.cn/health -> 200
 ```
 
@@ -27,12 +28,22 @@ Validated:
 
 - Admin `test-smtp` API works with `mail-relay:1025`, empty username/password,
   and TLS disabled.
-- Admin `send-test-email` API works in dry-run mode and the relay logs the
-  accepted message.
+- Admin `send-test-email` with saved SMTP config returns HTTP 200.
+- Relay logs show `sent mail provider=resend ... subject='[yuapi] Test Email'`.
 
-Do not switch saved production SMTP settings to `mail-relay` until
-`MAIL_RELAY_PROVIDER` is set to `resend` or `cloudflare` with the matching API
-key in `/opt/sub2api/.env`.
+Current saved Sub2API SMTP settings:
+
+```text
+SMTP Host: mail-relay
+SMTP Port: 1025
+SMTP Username: empty
+SMTP Password: empty
+From Email: no-reply@vyywcw.cn
+From Name: vyywcw
+Use TLS: false
+```
+
+The Resend API key is stored only in `/opt/sub2api/.env`.
 
 ## 2026-05-19 Kiro/Windsurf external verification
 

@@ -135,8 +135,9 @@ mail-relay provider: resend
 public health: https://api.vyywcw.cn/health -> 200
 ```
 
-The Resend API key is installed on the server, but real sending still depends
-on Resend domain verification for `vyywcw.cn`.
+The Resend API key is installed on the server. Domain verification for
+`vyywcw.cn` is complete enough for real sending, and Sub2API test emails have
+passed through the relay.
 
 Relay health:
 
@@ -151,4 +152,16 @@ No public relay port should be exposed:
 ```bash
 docker compose port mail-relay 1025 || true
 docker compose port mail-relay 8080 || true
+```
+
+Current saved Sub2API SMTP config:
+
+```text
+SMTP Host: mail-relay
+SMTP Port: 1025
+SMTP Username: empty
+SMTP Password: empty
+From Email: no-reply@vyywcw.cn
+From Name: vyywcw
+Use TLS: false
 ```

@@ -279,3 +279,36 @@ Priority     -> MX priority only
 
 After fixing the DNS records, click `Verify DNS Records` in Resend and rerun the
 Sub2API "send test email" check.
+
+## 2026-05-28 Resend verified and production switch
+
+Final production status:
+
+```text
+Sub2API image: sub2api-provider-adapters:6611e027
+mail-relay image: sub2api-mail-relay:5e5d524a
+mail-relay provider: resend
+public health: https://api.vyywcw.cn/health -> 200
+relay health: {"ok": true, "provider": "resend", ...}
+```
+
+Resend domain verification was completed sufficiently for real sending.
+Sub2API saved SMTP settings are now:
+
+```text
+SMTP Host: mail-relay
+SMTP Port: 1025
+SMTP Username: empty
+SMTP Password: empty
+From Email: no-reply@vyywcw.cn
+From Name: vyywcw
+Use TLS: false
+```
+
+Real saved-config email verification passed:
+
+- Sub2API admin `send-test-email` returned HTTP 200.
+- `mail-relay` logs showed `sent mail provider=resend ... subject='[yuapi] Test Email'`.
+
+The relay remains internal-only. `mail-relay` exposes no public host port for
+SMTP or health; Sub2API reaches it through the Docker network.

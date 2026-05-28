@@ -1016,3 +1016,29 @@ Verification:
 - Public Sub2API `/v1/messages` with `ws-claude-opus-4.6` returned HTTP 200.
 
 Details: `planning/WINDSURF_CACHE_AND_SUB2API_CALLING_2026-05-27.md`.
+
+## 2026-05-28 Sub2API mail relay activated with Resend
+
+Sub2API production email delivery is now routed through the internal
+SMTP-to-HTTPS relay:
+
+- Sub2API sends SMTP to `mail-relay:1025` inside the Docker network.
+- `mail-relay` sends through Resend over HTTPS.
+- The Resend API key is stored only in `/opt/sub2api/.env`.
+- Saved SMTP config uses empty username/password and TLS disabled because auth
+  is handled by the relay's HTTPS provider key.
+
+Verification:
+
+- `https://api.vyywcw.cn/health` returned HTTP 200.
+- `mail-relay` health returned `{"ok": true, "provider": "resend", ...}`.
+- Sub2API saved SMTP settings are `mail-relay:1025`,
+  `no-reply@vyywcw.cn`, from name `vyywcw`.
+- Real saved-config test emails returned HTTP 200 and relay logs showed
+  `sent mail provider=resend ... subject='[yuapi] Test Email'`.
+
+Operational notes:
+
+- Do not expose `mail-relay` ports publicly.
+- Rotate the Resend key from Resend dashboard, then update
+  `/opt/sub2api/.env` and restart only `mail-relay`.
