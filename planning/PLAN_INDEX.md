@@ -32,6 +32,9 @@
 - `MAIL_RELAY_HTTPS_DELIVERY_2026-05-28.md`
   - HTTPS mail relay plan for Sub2API email delivery when outbound SMTP ports
     are blocked; covers Resend now and Cloudflare Email Service later.
+- `SECRETS_LOCATION_AND_ROTATION_GUIDE.md`
+  - Safe secret location, inspection, and rotation guide. Tracks where secrets
+    live without committing plaintext passwords or API keys to Git.
 
 ## 2026-05-19 Kiro Gateway Runtime Docs
 

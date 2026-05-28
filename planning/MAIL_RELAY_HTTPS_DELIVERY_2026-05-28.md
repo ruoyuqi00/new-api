@@ -217,3 +217,65 @@ Use TLS: false
 ```
 
 Run the Sub2API "test SMTP" and "send test email" buttons after saving.
+
+## 2026-05-28 Resend activation attempt
+
+The Resend API key was installed on the server and `mail-relay` was switched
+from `dry-run` to `resend`:
+
+```text
+MAIL_RELAY_PROVIDER=resend
+MAIL_RELAY_FROM=no-reply@vyywcw.cn
+MAIL_RELAY_FROM_NAME=vyywcw
+RESEND_API_KEY=<stored in /opt/sub2api/.env>
+```
+
+Relay health passed:
+
+```text
+{"ok": true, "provider": "resend", ...}
+```
+
+Sub2API admin `test-smtp` passed with:
+
+```text
+SMTP Host: mail-relay
+SMTP Port: 1025
+SMTP Username: empty
+SMTP Password: empty
+Use TLS: false
+```
+
+Real send failed because Resend rejected the sender domain:
+
+```text
+HTTP 403: The vyywcw.cn domain is not verified.
+```
+
+Public DNS check showed these likely mistakes:
+
+```text
+send.vyywcw.cn TXT              -> p=MIGf...  (looks like DKIM public key)
+resend._domainkey.vyywcw.cn TXT -> p=MIGf...  (DKIM-looking value)
+_dmarc.vyywcw.cn TXT            -> p=MIGf...  (wrong for DMARC)
+```
+
+Only the DKIM record should look like `p=MIGf...`. The SPF TXT record should
+start with `v=spf1 ...`, and the DMARC TXT record should start with
+`v=DMARC1; ...`. In Resend, reopen:
+
+```text
+Domains -> vyywcw.cn -> DNS Records
+```
+
+Then copy each row exactly into the current DNS provider:
+
+```text
+Resend Type  -> DNS record type
+Resend Name  -> DNS host/name
+Resend Value -> DNS value
+Priority     -> MX priority only
+```
+
+After fixing the DNS records, click `Verify DNS Records` in Resend and rerun the
+Sub2API "send test email" check.
