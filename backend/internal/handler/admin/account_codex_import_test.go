@@ -336,15 +336,21 @@ func TestResolveCodexImportExpiryForNoRefreshTokenUsesEarlierRequestExpiry(t *te
 	}
 }
 
-func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
+func TestCodexIdentityKeysPreferAccessTokenFingerprint(t *testing.T) {
 	keys := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token")
+	want := "access:" + codexTokenFingerprint("token")
+	if len(keys) != 1 || keys[0] != want {
+		t.Fatalf("keys = %v, want [%s]", keys, want)
+	}
+
+	keys = buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "")
 	for _, key := range keys {
 		if strings.HasPrefix(key, "email:") {
 			t.Fatalf("strong identity should not include email fallback: %v", keys)
 		}
 	}
 
-	keys = buildCodexIdentityKeys("", "", "same@example.com", "token")
+	keys = buildCodexIdentityKeys("", "", "same@example.com", "")
 	hasEmail := false
 	for _, key := range keys {
 		if key == "email:same@example.com" {
@@ -353,6 +359,17 @@ func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
 	}
 	if !hasEmail {
 		t.Fatalf("weak identity should include email fallback: %v", keys)
+	}
+}
+
+func TestCodexBatchIdentityAllowsSameAccountWithDifferentTokens(t *testing.T) {
+	first := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token-1")
+	second := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token-2")
+	seen := map[string]int{}
+
+	markCodexIdentitySeen(seen, first, 1)
+	if duplicateIndex, ok := firstSeenCodexIdentity(seen, second); ok {
+		t.Fatalf("second token was treated as duplicate of entry %d; keys=%v seen=%v", duplicateIndex, second, seen)
 	}
 }
 

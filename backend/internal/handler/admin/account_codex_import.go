@@ -847,6 +847,9 @@ func sanitizeCodexImportCredentialExtras(input map[string]any) map[string]any {
 
 func buildCodexIdentityKeys(accountID, userID, email, accessToken string) []string {
 	keys := make([]string, 0, 4)
+	if accessToken = strings.TrimSpace(accessToken); accessToken != "" {
+		return []string{"access:" + codexTokenFingerprint(accessToken)}
+	}
 	accountID = strings.TrimSpace(accountID)
 	userID = strings.TrimSpace(userID)
 	if accountID != "" {
@@ -859,9 +862,6 @@ func buildCodexIdentityKeys(accountID, userID, email, accessToken string) []stri
 		if email = strings.ToLower(strings.TrimSpace(email)); email != "" {
 			keys = append(keys, "email:"+email)
 		}
-	}
-	if accessToken = strings.TrimSpace(accessToken); accessToken != "" {
-		keys = append(keys, "access:"+codexTokenFingerprint(accessToken))
 	}
 	return keys
 }
