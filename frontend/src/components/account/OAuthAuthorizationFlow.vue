@@ -201,6 +201,44 @@
                   {{ t('admin.accounts.oauth.keysCount', { count: parsedCodexSessionCount }) }}
                 </span>
               </label>
+              <input
+                ref="codexSessionFileInput"
+                type="file"
+                class="hidden"
+                accept="application/json,.json"
+                multiple
+                @change="handleCodexSessionFilesSelected"
+              />
+              <div class="mb-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  :disabled="loading || readingCodexSessionFiles"
+                  @click="openCodexSessionFilePicker"
+                >
+                  <Icon name="upload" size="sm" class="mr-2" />
+                  {{
+                    readingCodexSessionFiles
+                      ? t('admin.accounts.oauth.openai.codexSessionReadingFiles')
+                      : t('admin.accounts.oauth.openai.codexSessionSelectFiles')
+                  }}
+                </button>
+                <span v-if="codexSessionFileNames.length" class="text-xs text-blue-700 dark:text-blue-300">
+                  {{ t('admin.accounts.oauth.openai.codexSessionFilesLoaded', { count: codexSessionFileNames.length }) }}
+                </span>
+              </div>
+              <div
+                v-if="codexSessionFileNames.length"
+                class="mb-3 max-h-24 overflow-auto rounded-md border border-blue-200 bg-white/70 px-3 py-2 text-xs text-blue-900 dark:border-blue-700 dark:bg-gray-900/40 dark:text-blue-200"
+              >
+                <div
+                  v-for="fileName in codexSessionFileNames"
+                  :key="fileName"
+                  class="truncate"
+                >
+                  {{ fileName }}
+                </div>
+              </div>
               <textarea
                 v-model="codexSessionInput"
                 rows="8"
@@ -724,6 +762,9 @@ const sessionKeyInput = ref('')
 const refreshTokenInput = ref('')
 const sessionTokenInput = ref('')
 const codexSessionInput = ref('')
+const codexSessionFileInput = ref<HTMLInputElement | null>(null)
+const codexSessionFileNames = ref<string[]>([])
+const readingCodexSessionFiles = ref(false)
 const showHelpDialog = ref(false)
 const oauthState = ref('')
 const projectId = ref('')
@@ -831,6 +872,43 @@ const handleValidateRefreshToken = () => {
   }
 }
 
+const readCodexSessionFile = async (file: File): Promise<string> => {
+  if (typeof file.text === 'function') {
+    return file.text()
+  }
+  const buffer = await file.arrayBuffer()
+  return new TextDecoder().decode(buffer)
+}
+
+const openCodexSessionFilePicker = () => {
+  codexSessionFileInput.value?.click()
+}
+
+const handleCodexSessionFilesSelected = async (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const files = Array.from(target.files || [])
+  if (!files.length) return
+
+  readingCodexSessionFiles.value = true
+  try {
+    const chunks: string[] = []
+    const names: string[] = []
+    for (const file of files) {
+      const content = (await readCodexSessionFile(file)).trim()
+      if (!content) continue
+      chunks.push(content)
+      names.push(file.name)
+    }
+    if (!chunks.length) return
+    const current = codexSessionInput.value.trim()
+    codexSessionInput.value = [current, ...chunks].filter(Boolean).join('\n')
+    codexSessionFileNames.value = names
+  } finally {
+    readingCodexSessionFiles.value = false
+    target.value = ''
+  }
+}
+
 const handleImportCodexSession = () => {
   if (codexSessionInput.value.trim()) {
     emit('import-codex-session', codexSessionInput.value.trim())
@@ -855,6 +933,10 @@ defineExpose({
     refreshTokenInput.value = ''
     sessionTokenInput.value = ''
     codexSessionInput.value = ''
+    codexSessionFileNames.value = []
+    if (codexSessionFileInput.value) {
+      codexSessionFileInput.value.value = ''
+    }
     inputMethod.value = 'manual'
     showHelpDialog.value = false
   }
