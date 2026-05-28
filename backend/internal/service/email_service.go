@@ -460,6 +460,7 @@ func (s *EmailService) buildVerifyCodeEmailBody(code, siteName string) string {
 // TestSMTPConnectionWithConfig 使用指定配置测试SMTP连接
 func (s *EmailService) TestSMTPConnectionWithConfig(config *SMTPConfig) error {
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
+	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
 
 	if config.UseTLS {
 		tlsConfig := &tls.Config{
@@ -479,7 +480,6 @@ func (s *EmailService) TestSMTPConnectionWithConfig(config *SMTPConfig) error {
 		}
 		defer func() { _ = client.Close() }()
 
-		auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
 		if err = client.Auth(auth); err != nil {
 			return fmt.Errorf("smtp authentication failed: %w", err)
 		}
@@ -487,14 +487,26 @@ func (s *EmailService) TestSMTPConnectionWithConfig(config *SMTPConfig) error {
 		return client.Quit()
 	}
 
-	// 非TLS连接测试
-	client, err := smtp.Dial(addr)
+	dialer := &net.Dialer{Timeout: smtpDialTimeout}
+	conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("smtp connection failed: %w", err)
 	}
+	_ = conn.SetDeadline(time.Now().Add(smtpIOTimeout))
+	defer func() { _ = conn.Close() }()
+
+	client, err := smtp.NewClient(conn, config.Host)
+	if err != nil {
+		return fmt.Errorf("smtp client creation failed: %w", err)
+	}
 	defer func() { _ = client.Close() }()
 
-	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		if err = client.StartTLS(&tls.Config{ServerName: config.Host, MinVersion: tls.VersionTLS12}); err != nil {
+			return fmt.Errorf("starttls failed: %w", err)
+		}
+	}
+
 	if err = client.Auth(auth); err != nil {
 		return fmt.Errorf("smtp authentication failed: %w", err)
 	}
