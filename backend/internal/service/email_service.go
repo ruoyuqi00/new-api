@@ -468,10 +468,12 @@ func (s *EmailService) TestSMTPConnectionWithConfig(config *SMTPConfig) error {
 			// 与发送逻辑一致，显式要求 TLS 1.2+。
 			MinVersion: tls.VersionTLS12,
 		}
-		conn, err := tls.Dial("tcp", addr, tlsConfig)
+		dialer := &net.Dialer{Timeout: smtpDialTimeout}
+		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 		if err != nil {
 			return fmt.Errorf("tls connection failed: %w", err)
 		}
+		_ = conn.SetDeadline(time.Now().Add(smtpIOTimeout))
 		defer func() { _ = conn.Close() }()
 
 		client, err := smtp.NewClient(conn, config.Host)
