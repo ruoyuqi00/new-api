@@ -1,5 +1,39 @@
 # Server Deployment Runbook
 
+## 2026-05-28 HTTPS mail relay status
+
+SMTP outbound from the server is blocked by the network provider, so Sub2API now
+has an internal HTTPS mail relay staged for activation.
+
+Current server state:
+
+```text
+Sub2API image: sub2api-provider-adapters:6611e027
+mail-relay image: sub2api-mail-relay:5e5d524a
+mail-relay provider: dry-run
+public health: https://api.vyywcw.cn/health -> 200
+```
+
+The relay is internal-only:
+
+```bash
+cd /opt/sub2api
+docker compose ps mail-relay
+docker compose port mail-relay 1025 || true
+docker compose exec -T sub2api wget -qO- http://mail-relay:8080/health
+```
+
+Validated:
+
+- Admin `test-smtp` API works with `mail-relay:1025`, empty username/password,
+  and TLS disabled.
+- Admin `send-test-email` API works in dry-run mode and the relay logs the
+  accepted message.
+
+Do not switch saved production SMTP settings to `mail-relay` until
+`MAIL_RELAY_PROVIDER` is set to `resend` or `cloudflare` with the matching API
+key in `/opt/sub2api/.env`.
+
 ## 2026-05-19 Kiro/Windsurf external verification
 
 Current internal adapter images on the US server:

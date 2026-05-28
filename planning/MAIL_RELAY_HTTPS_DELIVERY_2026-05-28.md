@@ -156,3 +156,64 @@ docker compose port mail-relay 8080 || true
 ```
 
 Expected: no host port is published.
+
+## 2026-05-28 server deployment
+
+Production now has the relay service installed and Sub2API upgraded:
+
+```text
+Sub2API image: sub2api-provider-adapters:6611e027
+mail-relay image: sub2api-mail-relay:5e5d524a
+mail-relay provider: dry-run
+public health: https://api.vyywcw.cn/health -> 200
+```
+
+Validation completed on the server:
+
+- `POST /api/v1/admin/settings/test-smtp` with `mail-relay:1025`, empty
+  username/password, TLS disabled -> HTTP 200.
+- `POST /api/v1/admin/settings/send-test-email` with the same relay settings
+  -> HTTP 200.
+- `mail-relay` logs showed `dry-run accepted mail`.
+- `docker compose port mail-relay 1025` did not expose a public host port.
+
+Important: production is intentionally still using `MAIL_RELAY_PROVIDER=dry-run`
+until a Resend or Cloudflare API key is added. Do not switch Sub2API's saved
+SMTP settings to `mail-relay` for real users until a real provider key is in
+server `.env`.
+
+Current saved Sub2API SMTP settings remain the previous QQ SMTP values, because
+the upstream server blocks SMTP outbound and no HTTPS sender API key has been
+provided yet.
+
+## Activation after API key is ready
+
+For Resend:
+
+```bash
+cd /opt/sub2api
+cp .env .env.bak-mail-relay-$(date +%Y%m%d-%H%M%S)
+
+sed -i 's/^MAIL_RELAY_PROVIDER=.*/MAIL_RELAY_PROVIDER=resend/' .env
+sed -i 's/^MAIL_RELAY_FROM=.*/MAIL_RELAY_FROM=no-reply@vyywcw.cn/' .env
+sed -i 's/^MAIL_RELAY_FROM_NAME=.*/MAIL_RELAY_FROM_NAME=vyywcw/' .env
+# edit RESEND_API_KEY manually; never paste it into logs
+nano .env
+
+docker compose up -d mail-relay
+docker compose logs --tail=80 mail-relay
+```
+
+Then set Sub2API admin SMTP settings:
+
+```text
+SMTP Host: mail-relay
+SMTP Port: 1025
+SMTP Username: empty
+SMTP Password: empty
+From Email: no-reply@vyywcw.cn
+From Name: vyywcw
+Use TLS: false
+```
+
+Run the Sub2API "test SMTP" and "send test email" buttons after saving.
