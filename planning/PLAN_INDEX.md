@@ -29,6 +29,10 @@
   - Current Windsurf cache fix and calling guide: `WindsurfAPI v2.0.97`,
     Cascade caller reuse settings, public `ws-` model aliases, and public
     Sub2API smoke results showing `cache_read_input_tokens`.
+- `WINDSURF_MODEL_GROUPS_AND_RUNTIME_FIX_2026-05-28.md`
+  - Live one-model-family-per-group Windsurf setup for `opus4.6`, `opus4.7`,
+    `gpt5.5`, `gpt5.4`, and `grok`; records the Sub2API hard restriction
+    pattern and the `WindsurfAPI v2.0.97` `acct is not defined` hotfix.
 - `MAIL_RELAY_HTTPS_DELIVERY_2026-05-28.md`
   - HTTPS mail relay plan for Sub2API email delivery when outbound SMTP ports
     are blocked; covers Resend now and Cloudflare Email Service later.

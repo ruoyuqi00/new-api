@@ -1042,3 +1042,46 @@ Operational notes:
 - Do not expose `mail-relay` ports publicly.
 - Rotate the Resend key from Resend dashboard, then update
   `/opt/sub2api/.env` and restart only `mail-relay`.
+
+## 2026-05-28 Windsurf model-family groups and runtime hotfix
+
+Created five public Sub2API Windsurf groups with one API key per model family:
+
+- `windsurf-opus4.6`
+- `windsurf-opus4.7`
+- `windsurf-gpt5.5`
+- `windsurf-gpt5.4`
+- `windsurf-grok`
+
+Each key exposes only its own aliases through `/v1/models`. Cross-family calls
+are blocked by channel model restrictions, not only by soft `model_routing`.
+
+During smoke testing, `WindsurfAPI v2.0.97` generated upstream text but failed
+the non-stream success path with `acct is not defined`. The live server now uses
+a local patched image:
+
+- `sub2api-windsurf-api-acctfix:20260528`
+- server build context: `/opt/sub2api/windsurf-api-acctfix`
+- repository patch copy:
+  `provider-patches/windsurf-api/acct-scope-hotfix-20260528/`
+
+Public smoke after the fix:
+
+- `opus4.6`: HTTP 200
+- `gpt5.5-low`: HTTP 200
+- `gpt5.4-low`: HTTP 200
+- `grok`: HTTP 200
+- `opus4.7-low`: HTTP 429 from upstream rate limit during this run
+
+Also rechecked upstream versions:
+
+- `dwgx/WindsurfAPI` `master` remains
+  `41a36b9176633a9e67eb7ca87d725b5eb98564b8` / `v2.0.97`.
+- `Wei-Shaw/sub2api` `main` is
+  `89d96f4b25c6e5ead427f67b54a8aae5fdf993e4` / `v0.1.132`.
+- This private fork currently contains `upstream/main`; `rev-list
+  HEAD...upstream/main` is `68 0`, so the left-top update prompt in the admin
+  UI is probably an online-update/image-label detection issue rather than a
+  missing official merge.
+
+Details: `planning/WINDSURF_MODEL_GROUPS_AND_RUNTIME_FIX_2026-05-28.md`.
