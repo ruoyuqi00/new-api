@@ -318,6 +318,27 @@ func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
 	}
 }
 
+func TestBuildCodexCreateAccountNameUsesItemNameWhenBaseEmpty(t *testing.T) {
+	items := []*codexImportAccount{
+		{Name: "alice@example.com"},
+		{Name: "bob@example.com"},
+	}
+
+	for i, item := range items {
+		got := buildCodexCreateAccountName("", item, i+1, len(items))
+		if got != item.Name {
+			t.Fatalf("name %d = %q, want %q", i+1, got, item.Name)
+		}
+	}
+}
+
+func TestBuildCodexCreateAccountNameUsesBaseAsBatchPrefix(t *testing.T) {
+	got := buildCodexCreateAccountName("GPT batch", &codexImportAccount{Name: "alice@example.com"}, 2, 3)
+	if got != "GPT batch #2" {
+		t.Fatalf("name = %q, want GPT batch #2", got)
+	}
+}
+
 func buildCodexImportTestJWT(t *testing.T, exp time.Time, extraClaims map[string]any) string {
 	t.Helper()
 	header := map[string]any{

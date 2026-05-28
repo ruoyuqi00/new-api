@@ -50,7 +50,6 @@
         <input
           v-model="form.name"
           type="text"
-          required
           class="input"
           :placeholder="t('admin.accounts.enterAccountName')"
           data-tour="account-form-name"
@@ -3207,6 +3206,7 @@ interface OAuthFlowExposed {
   refreshToken: string
   sessionToken: string
   codexSession: string
+  codexSessionContents: string[]
   inputMethod: AuthInputMethod
   reset: () => void
 }
@@ -3591,6 +3591,10 @@ const isOAuthFlow = computed(() => {
 
 const isManualInputMethod = computed(() => {
   return oauthFlowRef.value?.inputMethod === 'manual'
+})
+
+const canContinueOAuthWithoutAccountName = computed(() => {
+  return form.platform === 'openai'
 })
 
 const expiresAtInput = computed({
@@ -4330,7 +4334,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 const handleSubmit = async () => {
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
-    if (!form.name.trim()) {
+    if (!form.name.trim() && !canContinueOAuthWithoutAccountName.value) {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
@@ -4694,8 +4698,9 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
+      const accountName = form.name || tokenInfo.email || 'OpenAI OAuth Account'
       await adminAPI.accounts.create({
-        name: form.name,
+        name: accountName,
         notes: form.notes,
         platform: 'openai',
         type: 'oauth',
@@ -4756,9 +4761,12 @@ const formatCodexImportMessages = (messages?: CodexSessionImportMessage[]) => {
     .join('\n')
 }
 
-const handleOpenAIImportCodexSession = async (content: string) => {
+const handleOpenAIImportCodexSession = async (payload: { content: string; contents?: string[] }) => {
   const oauthClient = openaiOAuth
-  const trimmed = content.trim()
+  const trimmed = payload.content.trim()
+  const contents = (payload.contents || [])
+    .map((content) => content.trim())
+    .filter(Boolean)
   if (!trimmed) {
     oauthClient.error.value = t('admin.accounts.oauth.openai.codexSessionEmpty')
     return
@@ -4775,8 +4783,9 @@ const handleOpenAIImportCodexSession = async (content: string) => {
   try {
     const extra = buildOpenAIExtra()
     const result = await adminAPI.accounts.importCodexSession({
-      content: trimmed,
-      name: form.name,
+      content: contents.length > 0 ? undefined : trimmed,
+      contents: contents.length > 0 ? contents : undefined,
+      name: form.name || undefined,
       notes: form.notes || null,
       proxy_id: form.proxy_id,
       concurrency: form.concurrency,

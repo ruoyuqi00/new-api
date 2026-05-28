@@ -721,7 +721,7 @@ const emit = defineEmits<{
   'validate-mobile-refresh-token': [refreshToken: string]
   'validate-session-token': [sessionToken: string]
   'import-access-token': [accessToken: string]
-  'import-codex-session': [content: string]
+  'import-codex-session': [payload: { content: string; contents?: string[] }]
   'update:inputMethod': [method: AuthInputMethod]
 }>()
 
@@ -763,6 +763,7 @@ const refreshTokenInput = ref('')
 const sessionTokenInput = ref('')
 const codexSessionInput = ref('')
 const codexSessionFileInput = ref<HTMLInputElement | null>(null)
+const codexSessionFileContents = ref<string[]>([])
 const codexSessionFileNames = ref<string[]>([])
 const readingCodexSessionFiles = ref(false)
 const showHelpDialog = ref(false)
@@ -792,6 +793,9 @@ const parsedRefreshTokenCount = computed(() => {
 })
 
 const parsedCodexSessionCount = computed(() => {
+  if (codexSessionFileContents.value.length > 0) {
+    return codexSessionFileContents.value.length
+  }
   const trimmed = codexSessionInput.value.trim()
   if (!trimmed) return 0
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 1
@@ -902,6 +906,7 @@ const handleCodexSessionFilesSelected = async (event: Event) => {
     if (!chunks.length) return
     const current = codexSessionInput.value.trim()
     codexSessionInput.value = [current, ...chunks].filter(Boolean).join('\n')
+    codexSessionFileContents.value = chunks
     codexSessionFileNames.value = names
   } finally {
     readingCodexSessionFiles.value = false
@@ -910,8 +915,17 @@ const handleCodexSessionFilesSelected = async (event: Event) => {
 }
 
 const handleImportCodexSession = () => {
-  if (codexSessionInput.value.trim()) {
-    emit('import-codex-session', codexSessionInput.value.trim())
+  const content = codexSessionInput.value.trim()
+  if (content) {
+    const selectedFileContent = codexSessionFileContents.value.join('\n').trim()
+    const contents =
+      codexSessionFileContents.value.length > 0 && content === selectedFileContent
+        ? [...codexSessionFileContents.value]
+        : undefined
+    emit('import-codex-session', {
+      content,
+      contents
+    })
   }
 }
 
@@ -924,6 +938,7 @@ defineExpose({
   refreshToken: refreshTokenInput,
   sessionToken: sessionTokenInput,
   codexSession: codexSessionInput,
+  codexSessionContents: codexSessionFileContents,
   inputMethod,
   reset: () => {
     authCodeInput.value = ''
@@ -933,6 +948,7 @@ defineExpose({
     refreshTokenInput.value = ''
     sessionTokenInput.value = ''
     codexSessionInput.value = ''
+    codexSessionFileContents.value = []
     codexSessionFileNames.value = []
     if (codexSessionFileInput.value) {
       codexSessionFileInput.value.value = ''
