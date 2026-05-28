@@ -3170,6 +3170,7 @@ import type {
   CheckMixedChannelResponse,
   CreateAccountRequest,
   CodexSessionImportMessage,
+  CodexSessionImportItem,
   OpenAICompactMode,
   OpenAIResponsesMode
 } from '@/types'
@@ -4761,6 +4762,16 @@ const formatCodexImportMessages = (messages?: CodexSessionImportMessage[]) => {
     .join('\n')
 }
 
+const formatCodexImportItems = (items?: CodexSessionImportItem[]) => {
+  return (items || [])
+    .map((item) => {
+      const name = item.name ? ` ${item.name}` : ''
+      const message = item.message ? ` - ${item.message}` : ''
+      return `#${item.index}${name}: ${item.action}${message}`
+    })
+    .join('\n')
+}
+
 const handleOpenAIImportCodexSession = async (payload: { content: string; contents?: string[] }) => {
   const oauthClient = openaiOAuth
   const trimmed = payload.content.trim()
@@ -4808,19 +4819,23 @@ const handleOpenAIImportCodexSession = async (payload: { content: string; conten
       failed: result.failed
     }
 
-    if (successCount > 0 && result.failed === 0) {
+    const itemText = formatCodexImportItems(result.items)
+    const errorText = formatCodexImportMessages(result.errors)
+    const warningText = formatCodexImportMessages(result.warnings)
+    oauthClient.error.value = [itemText, errorText, warningText].filter(Boolean).join('\n')
+
+    if (successCount > 0 && result.failed === 0 && result.skipped === 0) {
       appStore.showSuccess(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
       emit('created')
       handleClose()
       return
     }
 
-    const errorText = formatCodexImportMessages(result.errors)
-    const warningText = formatCodexImportMessages(result.warnings)
-    oauthClient.error.value = [errorText, warningText].filter(Boolean).join('\n')
-
     if (result.failed === 0) {
       appStore.showWarning(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
+      if (successCount > 0) {
+        emit('created')
+      }
       return
     }
 

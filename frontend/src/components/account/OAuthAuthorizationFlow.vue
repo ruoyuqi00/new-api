@@ -904,8 +904,7 @@ const handleCodexSessionFilesSelected = async (event: Event) => {
       names.push(file.name)
     }
     if (!chunks.length) return
-    const current = codexSessionInput.value.trim()
-    codexSessionInput.value = [current, ...chunks].filter(Boolean).join('\n')
+    codexSessionInput.value = chunks.join('\n')
     codexSessionFileContents.value = chunks
     codexSessionFileNames.value = names
   } finally {

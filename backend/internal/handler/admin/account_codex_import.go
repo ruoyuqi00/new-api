@@ -450,12 +450,37 @@ func flattenCodexImportValues(values []any) []any {
 			}
 			return
 		}
+		if obj, ok := value.(map[string]any); ok {
+			if nested, ok := codexImportCollectionValue(obj); ok {
+				appendValue(nested)
+				return
+			}
+		}
 		out = append(out, value)
 	}
 	for _, value := range values {
 		appendValue(value)
 	}
 	return out
+}
+
+func codexImportCollectionValue(obj map[string]any) (any, bool) {
+	for _, key := range []string{"accounts", "items", "sessions", "records", "entries", "results"} {
+		if value, ok := obj[key]; ok {
+			if arr, ok := value.([]any); ok {
+				return arr, true
+			}
+		}
+	}
+	if data, ok := obj["data"]; ok {
+		switch value := data.(type) {
+		case []any:
+			return value, true
+		case map[string]any:
+			return codexImportCollectionValue(value)
+		}
+	}
+	return nil, false
 }
 
 func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, error) {
@@ -475,6 +500,8 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 		item.AccessToken = firstCodexString(raw,
 			[]string{"tokens", "access_token"},
 			[]string{"tokens", "accessToken"},
+			[]string{"credentials", "access_token"},
+			[]string{"credentials", "accessToken"},
 			[]string{"access_token"},
 			[]string{"accessToken"},
 			[]string{"token"},
@@ -482,16 +509,24 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 		item.RefreshToken = firstCodexString(raw,
 			[]string{"tokens", "refresh_token"},
 			[]string{"tokens", "refreshToken"},
+			[]string{"credentials", "refresh_token"},
+			[]string{"credentials", "refreshToken"},
 			[]string{"refresh_token"},
 			[]string{"refreshToken"},
 		)
 		item.IDToken = firstCodexString(raw,
 			[]string{"tokens", "id_token"},
 			[]string{"tokens", "idToken"},
+			[]string{"credentials", "id_token"},
+			[]string{"credentials", "idToken"},
 			[]string{"id_token"},
 			[]string{"idToken"},
 		)
-		item.Email = firstCodexString(raw, []string{"email"}, []string{"user", "email"})
+		item.Email = firstCodexString(raw,
+			[]string{"email"},
+			[]string{"user", "email"},
+			[]string{"credentials", "email"},
+		)
 		item.AccountID = firstCodexString(raw,
 			[]string{"chatgpt_account_id"},
 			[]string{"chatgptAccountId"},
@@ -500,6 +535,8 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			[]string{"account", "id"},
 			[]string{"account", "account_id"},
 			[]string{"account", "chatgpt_account_id"},
+			[]string{"credentials", "chatgpt_account_id"},
+			[]string{"credentials", "chatgptAccountId"},
 		)
 		item.UserID = firstCodexString(raw,
 			[]string{"chatgpt_user_id"},
@@ -507,18 +544,24 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			[]string{"user_id"},
 			[]string{"userId"},
 			[]string{"user", "id"},
+			[]string{"credentials", "chatgpt_user_id"},
+			[]string{"credentials", "chatgptUserId"},
 		)
 		item.PlanType = firstCodexString(raw,
 			[]string{"plan_type"},
 			[]string{"planType"},
 			[]string{"account", "plan_type"},
 			[]string{"account", "planType"},
+			[]string{"credentials", "plan_type"},
+			[]string{"credentials", "planType"},
 		)
 		item.Organization = firstCodexString(raw,
 			[]string{"organization_id"},
 			[]string{"organizationId"},
 			[]string{"org_id"},
 			[]string{"orgId"},
+			[]string{"credentials", "organization_id"},
+			[]string{"credentials", "organizationId"},
 		)
 		item.Name = firstCodexString(raw, []string{"name"}, []string{"user", "name"})
 		authProvider := firstCodexString(raw, []string{"auth_provider"}, []string{"authProvider"})

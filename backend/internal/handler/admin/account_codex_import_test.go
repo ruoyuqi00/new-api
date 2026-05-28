@@ -83,6 +83,44 @@ func TestParseCodexSessionImportEntriesFallsBackToLineModeForMixedJSONAndToken(t
 	}
 }
 
+func TestParseCodexSessionImportEntriesExpandsAccountCollections(t *testing.T) {
+	token1 := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{
+		"email": "first@example.com",
+	})
+	token2 := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{
+		"email": "second@example.com",
+	})
+	req := CodexSessionImportRequest{
+		Content: fmt.Sprintf(`{
+			"type": "codex",
+			"accounts": [
+				{"name": "first", "credentials": {"access_token": %q, "email": "first@example.com"}},
+				{"name": "second", "credentials": {"access_token": %q, "email": "second@example.com"}}
+			]
+		}`, token1, token2),
+	}
+
+	entries, err := parseCodexSessionImportEntries(req)
+	if err != nil {
+		t.Fatalf("parseCodexSessionImportEntries error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+
+	first, err := normalizeCodexImportEntry(entries[0])
+	if err != nil {
+		t.Fatalf("normalize first error = %v", err)
+	}
+	second, err := normalizeCodexImportEntry(entries[1])
+	if err != nil {
+		t.Fatalf("normalize second error = %v", err)
+	}
+	if first.Email != "first@example.com" || second.Email != "second@example.com" {
+		t.Fatalf("emails = %q, %q", first.Email, second.Email)
+	}
+}
+
 func TestNormalizeCodexSessionJSONExtractsCredentialsAndIgnoresSessionToken(t *testing.T) {
 	accessToken := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{
 		"email": "claim@example.com",
