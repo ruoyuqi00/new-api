@@ -198,7 +198,7 @@ func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body
 		from, to, subject, body)
 
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
-	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
+	auth := smtpAuthForConfig(config)
 
 	if config.UseTLS {
 		return s.sendMailTLS(addr, auth, config.From, to, []byte(msg), config.Host)
@@ -231,8 +231,10 @@ func (s *EmailService) sendMailPlain(addr string, auth smtp.Auth, from, to strin
 		}
 	}
 
-	if err = client.Auth(auth); err != nil {
-		return fmt.Errorf("smtp auth: %w", err)
+	if auth != nil {
+		if err = client.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
 	}
 	if err = client.Mail(from); err != nil {
 		return fmt.Errorf("smtp mail: %w", err)
@@ -276,8 +278,10 @@ func (s *EmailService) sendMailTLS(addr string, auth smtp.Auth, from, to string,
 	}
 	defer func() { _ = client.Close() }()
 
-	if err = client.Auth(auth); err != nil {
-		return fmt.Errorf("smtp auth: %w", err)
+	if auth != nil {
+		if err = client.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
 	}
 
 	if err = client.Mail(from); err != nil {
@@ -460,7 +464,7 @@ func (s *EmailService) buildVerifyCodeEmailBody(code, siteName string) string {
 // TestSMTPConnectionWithConfig 使用指定配置测试SMTP连接
 func (s *EmailService) TestSMTPConnectionWithConfig(config *SMTPConfig) error {
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
-	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
+	auth := smtpAuthForConfig(config)
 
 	if config.UseTLS {
 		tlsConfig := &tls.Config{
@@ -482,8 +486,10 @@ func (s *EmailService) TestSMTPConnectionWithConfig(config *SMTPConfig) error {
 		}
 		defer func() { _ = client.Close() }()
 
-		if err = client.Auth(auth); err != nil {
-			return fmt.Errorf("smtp authentication failed: %w", err)
+		if auth != nil {
+			if err = client.Auth(auth); err != nil {
+				return fmt.Errorf("smtp authentication failed: %w", err)
+			}
 		}
 
 		return client.Quit()
@@ -509,11 +515,23 @@ func (s *EmailService) TestSMTPConnectionWithConfig(config *SMTPConfig) error {
 		}
 	}
 
-	if err = client.Auth(auth); err != nil {
-		return fmt.Errorf("smtp authentication failed: %w", err)
+	if auth != nil {
+		if err = client.Auth(auth); err != nil {
+			return fmt.Errorf("smtp authentication failed: %w", err)
+		}
 	}
 
 	return client.Quit()
+}
+
+func smtpAuthForConfig(config *SMTPConfig) smtp.Auth {
+	if config == nil {
+		return nil
+	}
+	if strings.TrimSpace(config.Username) == "" && strings.TrimSpace(config.Password) == "" {
+		return nil
+	}
+	return smtp.PlainAuth("", config.Username, config.Password, config.Host)
 }
 
 // GeneratePasswordResetToken generates a secure 32-byte random token (64 hex characters)

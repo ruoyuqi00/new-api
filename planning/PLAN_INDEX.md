@@ -29,6 +29,9 @@
   - Current Windsurf cache fix and calling guide: `WindsurfAPI v2.0.97`,
     Cascade caller reuse settings, public `ws-` model aliases, and public
     Sub2API smoke results showing `cache_read_input_tokens`.
+- `MAIL_RELAY_HTTPS_DELIVERY_2026-05-28.md`
+  - HTTPS mail relay plan for Sub2API email delivery when outbound SMTP ports
+    are blocked; covers Resend now and Cloudflare Email Service later.
 
 ## 2026-05-19 Kiro Gateway Runtime Docs
 

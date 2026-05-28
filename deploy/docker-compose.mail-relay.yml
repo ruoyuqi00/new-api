@@ -1,0 +1,45 @@
+# =============================================================================
+# Optional HTTPS Mail Relay override
+# =============================================================================
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.mail-relay.yml up -d
+#
+# Sub2API admin SMTP settings after provider API key is configured:
+#   Host: mail-relay
+#   Port: 1025
+#   Username/Password: empty
+#   Use TLS: false
+# =============================================================================
+
+services:
+  sub2api:
+    depends_on:
+      mail-relay:
+        condition: service_healthy
+
+  mail-relay:
+    build:
+      context: ../adapters/mail-relay
+    image: sub2api-mail-relay:latest
+    container_name: sub2api-mail-relay
+    restart: unless-stopped
+    environment:
+      - MAIL_RELAY_HOST=0.0.0.0
+      - MAIL_RELAY_PORT=1025
+      - MAIL_RELAY_HEALTH_PORT=8080
+      - MAIL_RELAY_PROVIDER=${MAIL_RELAY_PROVIDER:-resend}
+      - MAIL_RELAY_FROM=${MAIL_RELAY_FROM:-no-reply@example.com}
+      - MAIL_RELAY_FROM_NAME=${MAIL_RELAY_FROM_NAME:-Sub2API}
+      - MAIL_RELAY_TIMEOUT_SECONDS=${MAIL_RELAY_TIMEOUT_SECONDS:-20}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
