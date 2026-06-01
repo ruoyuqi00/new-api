@@ -978,7 +978,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	// Get available models from account configurations for the selected group platform.
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
-		availableModels = filterModelsByCustomList(availableModels, defaultModelIDsForPlatform(platform), apiKey.Group.ModelsListConfig.Models)
+		availableModels = filterModelsByCustomList(platform, availableModels, defaultModelIDsForPlatform(platform), apiKey.Group.ModelsListConfig.Models)
 		writeCustomModelsList(c, platform, availableModels)
 		return
 	}
@@ -1062,9 +1062,12 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 	})
 }
 
-func filterModelsByCustomList(availableModels, fallbackModels, selectedModels []string) []string {
+func filterModelsByCustomList(platform string, availableModels, fallbackModels, selectedModels []string) []string {
 	if len(selectedModels) == 0 {
 		return availableModels
+	}
+	if platform == service.PlatformAnthropic {
+		return normalizedCustomModelsList(selectedModels)
 	}
 	source := availableModels
 	if len(source) == 0 {
@@ -1099,6 +1102,23 @@ func filterModelsByCustomList(availableModels, fallbackModels, selectedModels []
 		filtered = append(filtered, model)
 	}
 	return filtered
+}
+
+func normalizedCustomModelsList(models []string) []string {
+	seen := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		out = append(out, model)
+	}
+	return out
 }
 
 func customModelsListAllowsModel(availablePatterns []string, model string) bool {

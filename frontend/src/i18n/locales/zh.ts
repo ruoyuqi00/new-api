@@ -3118,6 +3118,7 @@ export default {
       kiroImportTitle: '导入 Kiro 凭据',
       kiroImportHint: '将 Kiro 凭据转发到内网 Kiro adapter，公网入口仍然只暴露 Sub2API。',
       kiroImportWarning: '支持 refreshToken 和 Kiro API Key。凭据只会通过管理员接口发送到服务器，不会写入浏览器控制台。',
+      kiroImportGroupHelp: '导入成功后会自动创建或更新 Kiro Gateway 上游账号，并绑定到所选 Anthropic 分组。',
       kiroImportMode: '导入方式',
       kiroImportModeRefreshToken: 'Refresh Token',
       kiroImportModeRefreshTokenDesc: '一行一个 Kiro refreshToken',

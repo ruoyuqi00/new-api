@@ -122,4 +122,38 @@ describe('UseKeyModal', () => {
     expect(codeBlock.text()).toContain('"name": "GPT-5.4 Mini"')
     expect(codeBlock.text()).not.toContain('"name": "GPT-5.4 Nano"')
   })
+
+  it('pins Claude Code model environment variables from group model list', () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-test',
+        baseUrl: 'https://example.com',
+        platform: 'anthropic',
+        modelsListConfig: {
+          enabled: true,
+          models: ['claude-sonnet-4.6', 'claude-opus-4.7']
+        }
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            template: '<div><slot /><slot name="footer" /></div>'
+          },
+          Icon: {
+            template: '<span />'
+          }
+        }
+      }
+    })
+
+    const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    expect(codeBlocks[0]).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4.6"')
+    expect(codeBlocks[0]).toContain('ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4.7"')
+    expect(codeBlocks[0]).toContain('CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY="1"')
+
+    const settingsJson = codeBlocks.find((content) => content.includes('"env"'))
+    expect(settingsJson).toContain('"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4.6"')
+    expect(settingsJson).toContain('"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4.7"')
+  })
 })

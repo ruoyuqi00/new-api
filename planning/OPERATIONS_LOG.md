@@ -1,5 +1,127 @@
 # Operations Log
 
+## 2026-06-01 CPA Codex batch import
+
+- Inspected local CPA export folder
+  `C:\Users\Administrator\Desktop\cpa_7a87050f07484b49` without printing token
+  values.
+- Confirmed all 52 files are Codex session JSON records with:
+  - `type=codex`
+  - `access_token`
+  - `refresh_token`
+- Local JWT metadata check showed all 52 records have refresh tokens, OpenAI
+  Codex auth claims, plan `team`, and unexpired access tokens.
+- Imported all 52 records through
+  `POST /api/v1/admin/accounts/import/codex-session`, binding them to group
+  `GPT5.5` (group id 8).
+- Import result: 52 created, 0 updated, 0 skipped, 0 failed.
+- Post-import live DB summary:
+  - OpenAI OAuth active accounts: 52.
+  - Existing OpenAI OAuth error accounts remain: 100.
+  - `GPT5.5` group now has 52 active accounts from this CPA batch.
+- Public smoke through the `GPT5.5` group:
+  - `/v1/models` returned the GPT model list including `gpt-5.5`.
+  - `/v1/chat/completions` with `gpt-5.5` returned HTTP 200 with `ok`.
+
+## 2026-06-01 Kiro Opus group split and GPT 5.5 verification
+
+- Rechecked live groups after the Windsurf-only correction and confirmed there
+  were no separate Kiro-named user groups online; Kiro accounts were only bound
+  inside `provider-mixed`.
+- Added internal account `kiro-web-internal-anthropic` by reusing the existing
+  Kiro Web adapter credentials with `platform=anthropic`.
+- Added Kiro-specific groups:
+  - `kiro-opus4.6`: `platform=anthropic`, model list `claude-opus-4.6`, bound
+    to `kiro-web-internal-anthropic`.
+  - `kiro-opus4.7`: `platform=anthropic`, model list `claude-opus-4.7`, bound
+    to `kiro-web-internal-anthropic`.
+  - `kiro-gpt5.5`: created as an OpenAI placeholder, then disabled after live
+    smoke showed Kiro upstream returns `Invalid model ID` for `gpt-5.5`.
+- Validation:
+  - Public `/v1/models` for `kiro-opus4.6` returned `claude-opus-4.6`.
+  - Public `/v1/messages` for `kiro-opus4.6` returned HTTP 200 with `ok`.
+  - Public `/v1/models` for `kiro-opus4.7` returned `claude-opus-4.7`.
+  - Public `/v1/messages` for `kiro-opus4.7` returned HTTP 200 with `ok`.
+- Temporary smoke-test API keys were created and soft-deleted after validation.
+- The Kiro Web adapter model list and official Kiro model docs do not expose
+  GPT 5.5 at this time, so do not enable `kiro-gpt5.5` unless upstream support
+  is verified again.
+
+## 2026-06-01 User key Claude/CCS model config deployment
+
+- Fixed user-facing API key group DTOs to include `models_list_config`, allowing
+  the “使用密钥” modal and CC-Switch import link to generate client model
+  mappings from the selected group.
+- Claude Code setup now includes model environment variables for Sonnet, Opus,
+  Haiku, and the small/fast model when the group has custom model-list config.
+- CC-Switch import links for Claude clients now include `sonnetModel`,
+  `opusModel`, and `haikuModel` when resolvable from the group model list.
+- Validation before deploy:
+  - `go test ./...` from `backend`.
+  - `npm run build` from `frontend`.
+  - Targeted Vitest coverage for `ccswitchImport` and `UseKeyModal`.
+- Deployed Sub2API image
+  `sub2api-provider-adapters:ccs-model-config-20260601`.
+- Backed up compose before switching:
+  `/opt/sub2api-backups/docker-compose-20260601-084626-pre-ccs-model-config-20260601.yml`.
+- Post-deploy checks:
+  - Container `sub2api` reported running/healthy on the new image.
+  - Public health through the real server IP returned HTTP 200.
+  - Deployed frontend `KeysView` asset contains the new Claude env/model import
+    fields (`ANTHROPIC_DEFAULT_OPUS_MODEL`, `sonnetModel`, `opusModel`,
+    `haikuModel`, and `models_list_config`).
+- Follow-up validation:
+  - Found live group `provider-mixed` still had empty `models_list_config`, so
+    user-side exports would not pin Claude models for that group.
+  - Updated `provider-mixed` to expose
+    `claude-sonnet-4.6` and `claude-opus-4.7`, then restarted `sub2api` to clear
+    runtime caches.
+  - Server-side smoke through `provider-mixed` returned HTTP 200 with content for
+    both `claude-sonnet-4.6` and `claude-opus-4.7`.
+
+## 2026-06-01 Windsurf custom model-list correction
+
+- Corrected live `models_list_config` entries for Windsurf custom groups from
+  short aliases to the model IDs exposed by the internal Windsurf adapter:
+  - `windsurf-opus4.6`: `claude-opus-4.6`,
+    `claude-opus-4.6-thinking`.
+  - `windsurf-opus4.7`: `claude-opus-4-7-*`.
+  - `windsurf-gpt5.5`: `gpt-5.5*`.
+  - `windsurf-gpt5.4`: `gpt-5.4-*`.
+- Updated Sub2API so Anthropic-compatible groups with explicit
+  `models_list_config` return that configured list from `/v1/models` instead of
+  filtering non-default custom IDs to an empty list.
+- Deployed Sub2API image
+  `sub2api-provider-adapters:custom-models-list-v2-20260601`.
+- Validation:
+  - `go test ./internal/handler -run TestGatewayModels`.
+  - `go test ./...` from `backend`.
+  - `/v1/models` through active keys now returns the corrected model lists for
+    `provider-mixed`, `windsurf-opus4.6`, `windsurf-opus4.7`,
+    `windsurf-gpt5.5`, and `windsurf-gpt5.4`.
+  - `provider-mixed` smoke returned HTTP 200 with content for
+    `claude-sonnet-4.6` and `claude-opus-4.7`.
+  - Dedicated Windsurf groups still returned HTTP 503 through Sub2API because
+    their only bound upstream account, `windsurf-internal-anthropic`, is in
+    `error` state. Direct internal Windsurf adapter checks returned
+    `model_not_entitled` for the corrected Opus/GPT model IDs, so this requires
+    a usable/entitled Windsurf upstream account rather than another export
+    config change.
+
+## 2026-06-01 Kiro import group binding fix deployed
+
+- Added Kiro import support for `group_ids` so the admin import flow can bind
+  the internal Kiro Gateway upstream account to the selected Anthropic groups.
+- The import flow now creates or updates Sub2API account
+  `kiro-gateway-internal-anthropic` as `platform=anthropic,type=apikey`,
+  using the internal Kiro runtime API key from server environment and
+  `base_url=http://kiro-gateway:8000`.
+- Deployed Sub2API image
+  `sub2api-provider-adapters:kiro-import-groups-20260601`.
+- Public health returned `{"status":"ok"}` after deploy.
+- Verified `windsurf-api`, `kiro-rs`, and `kiro-gateway` remain internal-only
+  with no host-published ports.
+
 ## 2026-05-21 KAM/Kiro-Go routing research
 
 - Rechecked `chaogei/Kiro-account-manager`: latest observed HEAD
@@ -1085,3 +1207,55 @@ Also rechecked upstream versions:
   missing official merge.
 
 Details: `planning/WINDSURF_MODEL_GROUPS_AND_RUNTIME_FIX_2026-05-28.md`.
+
+## 2026-06-01 CCS model config and live group verification
+
+Updated the user key frontend config so CC Switch/Codex imports no longer pin
+the old `gpt-5.4` model. OpenAI imports now prefer the key group's model list
+and fall back to `gpt-5.5`, matching the Codex config shown in "Use Key".
+
+Deployment:
+
+- Built and deployed image
+  `sub2api-provider-adapters:ccs-codex-model-20260601`.
+- Updated `/opt/sub2api/docker-compose.yml` after creating an automatic backup.
+- Container health returned OK.
+
+Verification:
+
+- Frontend targeted tests passed:
+  `npm run test:run -- src/utils/__tests__/ccswitchImport.spec.ts`
+  and
+  `npm run test:run -- src/components/keys/__tests__/UseKeyModal.spec.ts`.
+- Frontend production build passed with existing Vite chunk warnings.
+- Public `/v1/models` returned HTTP 200 for `provider-mixed`,
+  `windsurf-opus4.6`, `windsurf-opus4.7`, `windsurf-gpt5.5`,
+  `windsurf-gpt5.4`, `windsurf-grok`, `GPT5.5`, `kiro-opus4.6`, and
+  `kiro-opus4.7`.
+- Public `GPT5.5` smoke with `gpt-5.5` returned HTTP 200 and usable text.
+- Temporary Kiro smoke keys were created for testing and then removed.
+
+Current caveats:
+
+- Kiro Web adapter direct smoke returns usable text for `auto`,
+  `claude-sonnet-4`, `qwen3-coder-next`, `glm-5`, `deepseek-3.2`, and
+  `minimax-m2.1`.
+- The deployed Kiro account is `KIRO FREE`; direct adapter smoke for
+  `claude-sonnet-4.6`, `claude-opus-4.6`, and `claude-opus-4.7` returned
+  upstream text saying `Invalid model ID`, so Kiro Opus/Sonnet 4.6 groups
+  should not be treated as callable until a Kiro account/adapter path with
+  those model entitlements is available.
+- Windsurf family groups still expose their configured model lists, but their
+  bound Windsurf upstream account is currently not schedulable.
+
+Upstream check:
+
+- Fetched official `Wei-Shaw/sub2api` `main`.
+- New upstream head is `aa69e394`.
+- This private branch is behind official upstream by 5 commits focused on the
+  Codex Responses/Chat Completions bridge and Antigravity scheduling/rate-limit
+  fixes.
+- No upstream merge was performed because the diff intersects private
+  Kiro/Windsurf adapter files and should be handled in a separate merge window.
+
+Details: `planning/SUB2API_CCS_GROUP_VERIFICATION_2026-06-01.md`.

@@ -32,10 +32,21 @@ describe('kiroImport', () => {
     })
   })
 
+  it('adds sorted unique group ids when provided', () => {
+    expect(buildKiroImportPayload('refresh-a', 'refresh_token', [3, 1, 3, 0])).toEqual({
+      accounts: [{ refresh_token: 'refresh-a' }],
+      group_ids: [1, 3]
+    })
+  })
+
   it('accepts object and array JSON input', () => {
     expect(buildKiroImportPayload('{"refresh_token":"refresh-a"}', 'json')).toEqual({ refresh_token: 'refresh-a' })
     expect(buildKiroImportPayload('[{"kiroApiKey":"ksk_a"}]', 'json')).toEqual({
       accounts: [{ kiroApiKey: 'ksk_a' }]
+    })
+    expect(buildKiroImportPayload('{"refresh_token":"refresh-a","group_ids":[9]}', 'json', [2])).toEqual({
+      refresh_token: 'refresh-a',
+      group_ids: [2]
     })
   })
 

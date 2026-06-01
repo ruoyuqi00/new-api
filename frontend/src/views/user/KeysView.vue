@@ -927,6 +927,7 @@
       :base-url="publicSettings?.api_base_url || ''"
       :platform="selectedKey?.group?.platform || null"
       :allow-messages-dispatch="selectedKey?.group?.allow_messages_dispatch || false"
+      :models-list-config="selectedKey?.group?.models_list_config || null"
       @close="closeUseKeyModal"
     />
 
@@ -1075,6 +1076,7 @@ import { formatDateTime } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import {
   buildCcSwitchImportDeeplink,
+  resolveClaudeClientModelConfig,
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
 
@@ -1731,7 +1733,9 @@ const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
     clientType,
     providerName,
     apiKey: row.key,
-    usageScript
+    usageScript,
+    modelsListConfig: row.group?.models_list_config,
+    modelConfig: resolveClaudeClientModelConfig(row.group?.models_list_config)
   })
 
   try {

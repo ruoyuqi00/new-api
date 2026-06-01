@@ -16,6 +16,16 @@
         {{ t('admin.accounts.kiroImportWarning') }}
       </div>
 
+      <GroupSelector
+        v-model="selectedGroupIds"
+        :groups="groups"
+        platform="anthropic"
+        searchable="auto"
+      />
+      <div class="text-xs text-gray-500 dark:text-dark-400">
+        {{ t('admin.accounts.kiroImportGroupHelp') }}
+      </div>
+
       <div>
         <label class="input-label">{{ t('admin.accounts.kiroImportMode') }}</label>
         <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
@@ -104,9 +114,10 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import GroupSelector from '@/components/common/GroupSelector.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
-import type { KiroImportResult } from '@/types'
+import type { AdminGroup, KiroImportResult } from '@/types'
 import {
   KiroImportInputError,
   buildKiroImportPayload,
@@ -116,6 +127,7 @@ import {
 
 interface Props {
   show: boolean
+  groups: AdminGroup[]
 }
 
 interface Emits {
@@ -132,6 +144,7 @@ const appStore = useAppStore()
 const importing = ref(false)
 const mode = ref<KiroImportMode>('refresh_token')
 const credentialInput = ref('')
+const selectedGroupIds = ref<number[]>([])
 const result = ref<KiroImportResult | null>(null)
 
 const modeOptions = computed(() => [
@@ -179,6 +192,7 @@ watch(
     if (open) {
       mode.value = 'refresh_token'
       credentialInput.value = ''
+      selectedGroupIds.value = []
       result.value = null
     }
   }
@@ -199,7 +213,7 @@ const inputErrorMessage = (error: KiroImportInputError) => {
 const handleImport = async () => {
   importing.value = true
   try {
-    const payload = buildKiroImportPayload(credentialInput.value, mode.value)
+    const payload = buildKiroImportPayload(credentialInput.value, mode.value, selectedGroupIds.value)
     const res = await adminAPI.accounts.importKiro(payload, {
       idempotencyKey: createKiroImportIdempotencyKey()
     })

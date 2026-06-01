@@ -122,7 +122,7 @@ func TestKiroImportIdempotencyPayloadDoesNotContainRawSecrets(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	payload := buildKiroImportIdempotencyPayload(credentials, duplicateCount)
+	payload := buildKiroImportIdempotencyPayload(credentials, duplicateCount, []int64{12, 10, 12})
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "raw-refresh-token-secret")
@@ -134,6 +134,7 @@ func TestKiroImportIdempotencyPayloadDoesNotContainRawSecrets(t *testing.T) {
 	require.Contains(t, string(raw), hashKiroSecret("raw-kiro-api-key-secret"))
 	require.Contains(t, string(raw), hashKiroSecret("raw-idc-token-secret"))
 	require.Contains(t, string(raw), hashKiroSecret("private@example.com"))
+	require.Contains(t, string(raw), `"group_ids":[12,10,12]`)
 }
 
 func TestImportKiroCredentialsForwardsToAdapterAndRedactsResponse(t *testing.T) {
@@ -234,6 +235,123 @@ func TestImportKiroCredentialsRequiresAdapterConfig(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.NotContains(t, recorder.Body.String(), "refresh-1")
 	require.Contains(t, recorder.Body.String(), "KIRO_ADAPTER_NOT_CONFIGURED")
+}
+
+func TestEnsureKiroRuntimeUpstreamAccountCreatesAndBindsGroups(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = nil
+	handler := &AccountHandler{adminService: adminSvc}
+
+	result, err := handler.ensureKiroRuntimeUpstreamAccount(context.Background(), kiroAdapterConfig{
+		InternalBaseURL: "http://kiro-rs:8990",
+		InternalAPIKey:  "runtime-key",
+	}, []int64{20, 10, 20, 0})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "created", result.Action)
+	require.Equal(t, kiroRuntimeDefaultBaseURL, result.BaseURL)
+	require.Equal(t, []int64{10, 20}, result.GroupIDs)
+
+	require.Len(t, adminSvc.createdAccounts, 1)
+	input := adminSvc.createdAccounts[0]
+	require.Equal(t, kiroRuntimeUpstreamAccountName, input.Name)
+	require.Equal(t, service.PlatformAnthropic, input.Platform)
+	require.Equal(t, service.AccountTypeAPIKey, input.Type)
+	require.Equal(t, []int64{10, 20}, input.GroupIDs)
+	require.True(t, input.SkipMixedChannelCheck)
+	require.Equal(t, "runtime-key", input.Credentials["api_key"])
+	require.Equal(t, kiroRuntimeDefaultBaseURL, input.Credentials["base_url"])
+	mapping, ok := input.Credentials["model_mapping"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "qwen3-coder-next", mapping["qwen3-coder-next"])
+	require.Equal(t, "kiro", input.Extra["provider_adapter"])
+	require.Equal(t, "kiro-gateway", input.Extra["provider_adapter_runtime"])
+}
+
+func TestEnsureKiroRuntimeUpstreamAccountUpdatesExistingWithoutDroppingMapping(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{
+		{
+			ID:       77,
+			Name:     "custom-kiro-account",
+			Platform: service.PlatformAnthropic,
+			Type:     service.AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"api_key":       "old-key",
+				"base_url":      "http://old",
+				"model_mapping": map[string]any{"custom-model": "custom-upstream"},
+			},
+			Extra: map[string]any{"provider_adapter": "kiro", "keep": "yes"},
+		},
+	}
+	handler := &AccountHandler{adminService: adminSvc}
+
+	result, err := handler.ensureKiroRuntimeUpstreamAccount(context.Background(), kiroAdapterConfig{
+		InternalBaseURL: "http://kiro-gateway:8000/",
+		InternalAPIKey:  "new-key",
+	}, []int64{3})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "updated", result.Action)
+	require.Equal(t, int64(77), result.AccountID)
+	require.Equal(t, "http://kiro-gateway:8000", result.BaseURL)
+
+	require.Empty(t, adminSvc.createdAccounts)
+	require.Equal(t, []int64{77}, adminSvc.updatedAccountIDs)
+	require.Len(t, adminSvc.updatedAccounts, 1)
+	input := adminSvc.updatedAccounts[0]
+	require.Equal(t, []int64{3}, *input.GroupIDs)
+	require.True(t, input.SkipMixedChannelCheck)
+	require.Equal(t, "new-key", input.Credentials["api_key"])
+	require.Equal(t, "http://kiro-gateway:8000", input.Credentials["base_url"])
+	mapping, ok := input.Credentials["model_mapping"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "custom-upstream", mapping["custom-model"])
+	require.Equal(t, "deepseek-3.2", mapping["deepseek-3.2"])
+	require.Equal(t, "yes", input.Extra["keep"])
+	require.Equal(t, "kiro-gateway", input.Extra["provider_adapter_runtime"])
+}
+
+func TestKiroImportHandlerEnsuresUpstreamAfterSuccessfulImport(t *testing.T) {
+	old := service.DefaultIdempotencyCoordinator()
+	service.SetDefaultIdempotencyCoordinator(nil)
+	defer service.SetDefaultIdempotencyCoordinator(old)
+
+	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/admin/credentials", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer adapter.Close()
+
+	t.Setenv(envKiroAdapterBaseURL, adapter.URL)
+	t.Setenv(envKiroAdapterRuntimeBaseURL, "http://kiro-gateway:8000")
+	t.Setenv(envKiroAdapterAdminAPIKey, "admin-key")
+	t.Setenv(envKiroAdapterInternalAPIKey, "runtime-key")
+	t.Setenv(envProviderAdaptersKiroBaseURL, "")
+	t.Setenv(envProviderAdaptersKiroRuntimeURL, "")
+	t.Setenv(envProviderAdaptersKiroAPIKey, "")
+
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = nil
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handler := &AccountHandler{adminService: adminSvc}
+	router.POST("/api/v1/admin/accounts/import/kiro", handler.ImportKiroCredentials)
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/import/kiro", strings.NewReader(`{"refresh_token":"refresh-1","group_ids":[8,7,8]}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "runtime-key")
+	require.NotContains(t, recorder.Body.String(), "admin-key")
+	require.NotContains(t, recorder.Body.String(), "refresh-1")
+	require.Contains(t, recorder.Body.String(), `"action":"created"`)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.Equal(t, []int64{7, 8}, adminSvc.createdAccounts[0].GroupIDs)
 }
 
 func TestSanitizeKiroAdapterResponseHandlesNonJSON(t *testing.T) {

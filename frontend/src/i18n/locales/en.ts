@@ -3042,6 +3042,7 @@ export default {
       kiroImportTitle: 'Import Kiro Credentials',
       kiroImportHint: 'Forward Kiro credentials to the internal Kiro adapter while keeping Sub2API as the only public entry.',
       kiroImportWarning: 'Refresh tokens and Kiro API keys are supported. Credentials are sent through the admin API and are not printed to the browser console.',
+      kiroImportGroupHelp: 'After a successful import, the Kiro Gateway upstream account is created or updated and bound to the selected Anthropic groups.',
       kiroImportMode: 'Import mode',
       kiroImportModeRefreshToken: 'Refresh Token',
       kiroImportModeRefreshTokenDesc: 'One Kiro refreshToken per line',

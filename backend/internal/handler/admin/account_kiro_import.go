@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,10 +25,12 @@ const (
 	kiroAdapterResponseMaxBytes = 1 << 20
 
 	envKiroAdapterBaseURL             = "KIRO_ADAPTER_INTERNAL_BASE_URL"
+	envKiroAdapterRuntimeBaseURL      = "KIRO_ADAPTER_RUNTIME_BASE_URL"
 	envKiroAdapterAdminAPIKey         = "KIRO_ADAPTER_ADMIN_API_KEY"
 	envKiroAdapterInternalAPIKey      = "KIRO_ADAPTER_INTERNAL_API_KEY"
 	envKiroAdapterTimeoutSeconds      = "KIRO_ADAPTER_TIMEOUT_SECONDS"
 	envProviderAdaptersKiroBaseURL    = "PROVIDER_ADAPTERS_KIRO_INTERNAL_BASE_URL"
+	envProviderAdaptersKiroRuntimeURL = "PROVIDER_ADAPTERS_KIRO_RUNTIME_BASE_URL"
 	envProviderAdaptersKiroAPIKey     = "PROVIDER_ADAPTERS_KIRO_ADMIN_API_KEY"
 	envProviderAdaptersKiroTimeoutSec = "PROVIDER_ADAPTERS_KIRO_TIMEOUT_SECONDS"
 )
@@ -53,6 +56,7 @@ var kiroSensitiveKeys = []string{
 
 type kiroAdapterConfig struct {
 	InternalBaseURL string
+	RuntimeBaseURL  string
 	AdminAPIKey     string
 	InternalAPIKey  string
 	Timeout         time.Duration
@@ -74,6 +78,7 @@ type KiroImportRequest struct {
 	KiroAPIKeysCamel   []string            `json:"kiroApiKeys"`
 	Raw                string              `json:"raw"`
 	Accounts           []KiroImportAccount `json:"accounts"`
+	GroupIDs           []int64             `json:"group_ids"`
 }
 
 type KiroImportAccount struct {
@@ -164,12 +169,20 @@ func (value kiroFlexibleString) text() string {
 }
 
 type KiroImportResult struct {
-	Total          int              `json:"total"`
-	Forwarded      int              `json:"forwarded"`
-	Succeeded      int              `json:"succeeded"`
-	Failed         int              `json:"failed"`
-	DuplicateCount int              `json:"duplicate_count"`
-	Items          []KiroImportItem `json:"items"`
+	Total          int                              `json:"total"`
+	Forwarded      int                              `json:"forwarded"`
+	Succeeded      int                              `json:"succeeded"`
+	Failed         int                              `json:"failed"`
+	DuplicateCount int                              `json:"duplicate_count"`
+	Items          []KiroImportItem                 `json:"items"`
+	Upstream       *KiroImportUpstreamAccountResult `json:"upstream,omitempty"`
+}
+
+type KiroImportUpstreamAccountResult struct {
+	AccountID int64   `json:"account_id"`
+	Action    string  `json:"action"`
+	GroupIDs  []int64 `json:"group_ids,omitempty"`
+	BaseURL   string  `json:"base_url,omitempty"`
 }
 
 type KiroImportItem struct {
@@ -219,6 +232,7 @@ type kiroImportIdempotencyPayload struct {
 	Provider       string                      `json:"provider"`
 	Credentials    []kiroImportIdempotencyItem `json:"credentials"`
 	DuplicateCount int                         `json:"duplicate_count"`
+	GroupIDs       []int64                     `json:"group_ids,omitempty"`
 }
 
 func (h *AccountHandler) ImportKiroCredentials(c *gin.Context) {
@@ -244,9 +258,19 @@ func (h *AccountHandler) ImportKiroCredentials(c *gin.Context) {
 		return
 	}
 
-	idempotencyPayload := buildKiroImportIdempotencyPayload(credentials, duplicateCount)
+	groupIDs := normalizeKiroGroupIDs(req.GroupIDs)
+	idempotencyPayload := buildKiroImportIdempotencyPayload(credentials, duplicateCount, groupIDs)
 	executeAdminIdempotentJSON(c, "admin.accounts.import_kiro", idempotencyPayload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		return importKiroCredentials(ctx, cfg, credentials, duplicateCount)
+		result, err := importKiroCredentials(ctx, cfg, credentials, duplicateCount)
+		if err != nil {
+			return result, err
+		}
+		upstream, err := h.ensureKiroRuntimeUpstreamAccount(ctx, cfg, groupIDs)
+		if err != nil {
+			return result, err
+		}
+		result.Upstream = upstream
+		return result, nil
 	})
 }
 
@@ -529,7 +553,7 @@ func kiroCredentialKindAndSecret(credential kiroForwardCredential) (string, stri
 	return "refresh_token", credential.RefreshToken
 }
 
-func buildKiroImportIdempotencyPayload(credentials []kiroForwardCredential, duplicateCount int) kiroImportIdempotencyPayload {
+func buildKiroImportIdempotencyPayload(credentials []kiroForwardCredential, duplicateCount int, groupIDs []int64) kiroImportIdempotencyPayload {
 	items := make([]kiroImportIdempotencyItem, 0, len(credentials))
 	for _, credential := range credentials {
 		kind, secret := kiroCredentialKindAndSecret(credential)
@@ -554,12 +578,211 @@ func buildKiroImportIdempotencyPayload(credentials []kiroForwardCredential, dupl
 		Provider:       "kiro",
 		Credentials:    items,
 		DuplicateCount: duplicateCount,
+		GroupIDs:       append([]int64(nil), groupIDs...),
 	}
 }
 
 func hashKiroSecret(secret string) string {
 	sum := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(sum[:])
+}
+
+const (
+	kiroRuntimeUpstreamAccountName = "kiro-gateway-internal-anthropic"
+	kiroRuntimeDefaultBaseURL      = "http://kiro-gateway:8000"
+)
+
+var kiroRuntimeDefaultModelMapping = map[string]any{
+	"deepseek-3.2":     "deepseek-3.2",
+	"glm-5":            "glm-5",
+	"minimax-m2.1":     "minimax-m2.1",
+	"minimax-m2.5":     "minimax-m2.5",
+	"qwen3-coder-next": "qwen3-coder-next",
+}
+
+func (h *AccountHandler) ensureKiroRuntimeUpstreamAccount(ctx context.Context, cfg kiroAdapterConfig, groupIDs []int64) (*KiroImportUpstreamAccountResult, error) {
+	if h == nil || h.adminService == nil {
+		return nil, nil
+	}
+
+	groupIDs = normalizeKiroGroupIDs(groupIDs)
+	runtimeBaseURL := resolveKiroRuntimeBaseURL(cfg)
+	runtimeAPIKey := strings.TrimSpace(cfg.InternalAPIKey)
+	if runtimeBaseURL == "" || runtimeAPIKey == "" {
+		return nil, nil
+	}
+
+	credentials := map[string]any{
+		"api_key":       runtimeAPIKey,
+		"base_url":      runtimeBaseURL,
+		"model_mapping": cloneKiroMap(kiroRuntimeDefaultModelMapping),
+	}
+	extra := map[string]any{
+		"provider_adapter":         "kiro",
+		"provider_adapter_runtime": "kiro-gateway",
+		"anthropic_passthrough":    true,
+	}
+
+	existing, err := h.findKiroRuntimeUpstreamAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		mergedCredentials := mergeKiroRuntimeCredentials(existing.Credentials, credentials)
+		mergedExtra := mergeKiroRuntimeExtra(existing.Extra, extra)
+		updateInput := &service.UpdateAccountInput{
+			Credentials:           mergedCredentials,
+			Extra:                 mergedExtra,
+			SkipMixedChannelCheck: true,
+		}
+		if len(groupIDs) > 0 {
+			updateInput.GroupIDs = &groupIDs
+		}
+		updated, updateErr := h.adminService.UpdateAccount(ctx, existing.ID, updateInput)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		accountID := existing.ID
+		if updated != nil {
+			accountID = updated.ID
+		}
+		return &KiroImportUpstreamAccountResult{
+			AccountID: accountID,
+			Action:    "updated",
+			GroupIDs:  append([]int64(nil), groupIDs...),
+			BaseURL:   runtimeBaseURL,
+		}, nil
+	}
+
+	account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+		Name:                  kiroRuntimeUpstreamAccountName,
+		Platform:              service.PlatformAnthropic,
+		Type:                  service.AccountTypeAPIKey,
+		Credentials:           credentials,
+		Extra:                 extra,
+		Concurrency:           5,
+		Priority:              0,
+		GroupIDs:              groupIDs,
+		SkipDefaultGroupBind:  len(groupIDs) == 0,
+		SkipMixedChannelCheck: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	accountID := int64(0)
+	if account != nil {
+		accountID = account.ID
+	}
+	return &KiroImportUpstreamAccountResult{
+		AccountID: accountID,
+		Action:    "created",
+		GroupIDs:  append([]int64(nil), groupIDs...),
+		BaseURL:   runtimeBaseURL,
+	}, nil
+}
+
+func (h *AccountHandler) findKiroRuntimeUpstreamAccount(ctx context.Context) (*service.Account, error) {
+	accounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, service.PlatformAnthropic, service.AccountTypeAPIKey, "", "", 0, "", "created_at", "desc")
+	if err != nil {
+		return nil, err
+	}
+	for i := range accounts {
+		account := accounts[i]
+		if account.Name == kiroRuntimeUpstreamAccountName || account.GetExtraString("provider_adapter") == "kiro" {
+			return &account, nil
+		}
+	}
+	return nil, nil
+}
+
+func resolveKiroRuntimeBaseURL(cfg kiroAdapterConfig) string {
+	if runtimeBaseURL := strings.TrimSpace(cfg.RuntimeBaseURL); runtimeBaseURL != "" {
+		return strings.TrimRight(runtimeBaseURL, "/")
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.InternalBaseURL), "/")
+	if baseURL == "" {
+		return ""
+	}
+	if strings.Contains(baseURL, "kiro-rs") || strings.HasSuffix(baseURL, ":8990") {
+		return kiroRuntimeDefaultBaseURL
+	}
+	return baseURL
+}
+
+func normalizeKiroGroupIDs(groupIDs []int64) []int64 {
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(groupIDs))
+	result := make([]int64, 0, len(groupIDs))
+	for _, id := range groupIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
+func mergeKiroRuntimeCredentials(existing, incoming map[string]any) map[string]any {
+	out := cloneKiroMap(existing)
+	for key, value := range incoming {
+		if key == "model_mapping" {
+			out[key] = mergeKiroRuntimeModelMapping(out[key], value)
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func mergeKiroRuntimeModelMapping(existing, incoming any) map[string]any {
+	out := map[string]any{}
+	for key, value := range mapFromKiroAny(existing) {
+		out[key] = value
+	}
+	for key, value := range mapFromKiroAny(incoming) {
+		if _, ok := out[key]; !ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func mergeKiroRuntimeExtra(existing, incoming map[string]any) map[string]any {
+	out := cloneKiroMap(existing)
+	for key, value := range incoming {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneKiroMap(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
+func mapFromKiroAny(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	case map[string]string:
+		out := make(map[string]any, len(typed))
+		for key, val := range typed {
+			out[key] = val
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func loadKiroAdapterConfigFromEnv() kiroAdapterConfig {
@@ -571,6 +794,7 @@ func loadKiroAdapterConfigFromEnv() kiroAdapterConfig {
 	}
 	return kiroAdapterConfig{
 		InternalBaseURL: firstEnv(envKiroAdapterBaseURL, envProviderAdaptersKiroBaseURL),
+		RuntimeBaseURL:  firstEnv(envKiroAdapterRuntimeBaseURL, envProviderAdaptersKiroRuntimeURL),
 		AdminAPIKey:     firstEnv(envKiroAdapterAdminAPIKey, envProviderAdaptersKiroAPIKey),
 		InternalAPIKey:  firstEnv(envKiroAdapterInternalAPIKey, envKiroAdapterAdminAPIKey, envProviderAdaptersKiroAPIKey),
 		Timeout:         timeout,

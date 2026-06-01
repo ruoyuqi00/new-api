@@ -378,7 +378,7 @@
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <WindsurfImportModal :show="showWindsurfImport" @close="showWindsurfImport = false" @imported="handleWindsurfImported" />
-    <KiroImportModal :show="showKiroImport" @close="showKiroImport = false" @imported="handleKiroImported" />
+    <KiroImportModal :show="showKiroImport" :groups="groups" @close="showKiroImport = false" @imported="handleKiroImported" />
     <BulkEditAccountModal
       :show="showBulkEdit"
       :account-ids="selIds"

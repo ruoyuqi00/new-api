@@ -71,15 +71,22 @@ const parseJSONImportInput = (input: string): KiroImportRequest => {
 
 export const buildKiroImportPayload = (
   input: string,
-  mode: KiroImportMode
+  mode: KiroImportMode,
+  groupIds: number[] = []
 ): KiroImportRequest => {
   const trimmed = input.trim()
   if (!trimmed) {
     throw new KiroImportInputError('empty')
   }
 
+  const normalizedGroupIds = [...new Set(groupIds.filter(id => Number.isFinite(id) && id > 0))].sort((a, b) => a - b)
+  const withGroups = (payload: KiroImportRequest): KiroImportRequest => {
+    if (!normalizedGroupIds.length) return payload
+    return { ...payload, group_ids: normalizedGroupIds }
+  }
+
   if (mode === 'json') {
-    return parseJSONImportInput(trimmed)
+    return withGroups(parseJSONImportInput(trimmed))
   }
 
   const items = splitCredentialItems(trimmed)
@@ -88,9 +95,9 @@ export const buildKiroImportPayload = (
   }
 
   if (mode === 'api_key') {
-    return { accounts: items.map(item => parseOptionalEmailCredential(item, 'kiro_api_key')) }
+    return withGroups({ accounts: items.map(item => parseOptionalEmailCredential(item, 'kiro_api_key')) })
   }
-  return { accounts: items.map(item => parseOptionalEmailCredential(item, 'refresh_token')) }
+  return withGroups({ accounts: items.map(item => parseOptionalEmailCredential(item, 'refresh_token')) })
 }
 
 export const createKiroImportIdempotencyKey = (): string => {

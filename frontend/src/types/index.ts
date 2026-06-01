@@ -524,6 +524,7 @@ export interface Group {
   allow_messages_dispatch?: boolean
   default_mapped_model?: string
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
+  models_list_config?: ModelsListConfig
   require_oauth_only: boolean
   require_privacy_set: boolean
   created_at: string
@@ -1296,6 +1297,7 @@ export interface KiroImportRequest {
   kiroApiKeys?: string[]
   raw?: string
   accounts?: KiroImportAccount[]
+  group_ids?: number[]
 }
 
 export interface KiroImportItem {
@@ -1314,6 +1316,12 @@ export interface KiroImportResult {
   failed: number
   duplicate_count: number
   items: KiroImportItem[]
+  upstream?: {
+    account_id: number
+    action: string
+    group_ids?: number[]
+    base_url?: string
+  }
 }
 
 export interface ProviderAdapterAdminResponse {

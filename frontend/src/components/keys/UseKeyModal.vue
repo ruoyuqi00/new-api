@@ -139,7 +139,8 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
-import type { GroupPlatform } from '@/types'
+import { resolveClaudeClientModelConfig } from '@/utils/ccswitchImport'
+import type { GroupPlatform, ModelsListConfig } from '@/types'
 
 interface Props {
   show: boolean
@@ -147,6 +148,7 @@ interface Props {
   baseUrl: string
   platform: GroupPlatform | null
   allowMessagesDispatch?: boolean
+  modelsListConfig?: ModelsListConfig | null
 }
 
 interface Emits {
@@ -436,25 +438,37 @@ const currentFiles = computed((): FileConfig[] => {
 function generateAnthropicFiles(baseUrl: string, apiKey: string): FileConfig[] {
   let path: string
   let content: string
+  const modelConfig = resolveClaudeClientModelConfig(props.modelsListConfig)
+  const modelEnvVars = [
+    modelConfig.sonnetModel ? ['ANTHROPIC_DEFAULT_SONNET_MODEL', modelConfig.sonnetModel] : null,
+    modelConfig.opusModel ? ['ANTHROPIC_DEFAULT_OPUS_MODEL', modelConfig.opusModel] : null,
+    modelConfig.haikuModel ? ['ANTHROPIC_DEFAULT_HAIKU_MODEL', modelConfig.haikuModel] : null,
+    modelConfig.haikuModel ? ['ANTHROPIC_SMALL_FAST_MODEL', modelConfig.haikuModel] : null,
+    props.modelsListConfig?.enabled ? ['CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY', '1'] : null
+  ].filter((entry): entry is [string, string] => Boolean(entry))
+  const unixModelEnv = modelEnvVars.map(([key, value]) => `export ${key}="${value}"`).join('\n')
+  const cmdModelEnv = modelEnvVars.map(([key, value]) => `set ${key}=${value}`).join('\n')
+  const powershellModelEnv = modelEnvVars.map(([key, value]) => `$env:${key}="${value}"`).join('\n')
+  const appendModelEnv = (base: string, modelEnv: string) => modelEnv ? `${base}\n${modelEnv}` : base
 
   switch (activeTab.value) {
     case 'unix':
       path = 'Terminal'
-      content = `export ANTHROPIC_BASE_URL="${baseUrl}"
+      content = appendModelEnv(`export ANTHROPIC_BASE_URL="${baseUrl}"
 export ANTHROPIC_AUTH_TOKEN="${apiKey}"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, unixModelEnv)
       break
     case 'cmd':
       path = 'Command Prompt'
-      content = `set ANTHROPIC_BASE_URL=${baseUrl}
+      content = appendModelEnv(`set ANTHROPIC_BASE_URL=${baseUrl}
 set ANTHROPIC_AUTH_TOKEN=${apiKey}
-set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, cmdModelEnv)
       break
     case 'powershell':
       path = 'PowerShell'
-      content = `$env:ANTHROPIC_BASE_URL="${baseUrl}"
+      content = appendModelEnv(`$env:ANTHROPIC_BASE_URL="${baseUrl}"
 $env:ANTHROPIC_AUTH_TOKEN="${apiKey}"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, powershellModelEnv)
       break
     default:
       path = 'Terminal'
@@ -470,7 +484,8 @@ $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
     "ANTHROPIC_BASE_URL": "${baseUrl}",
     "ANTHROPIC_AUTH_TOKEN": "${apiKey}",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"
+    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"${modelEnvVars.length ? ',' : ''}
+${modelEnvVars.map(([key, value], index) => `    "${key}": "${value}"${index === modelEnvVars.length - 1 ? '' : ','}`).join('\n')}
   }
 }`
 
