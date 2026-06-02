@@ -3485,8 +3485,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 }
 
 func shouldFailoverOpenAIPassthroughResponse(statusCode int) bool {
+	if statusCode >= 500 {
+		return true
+	}
 	switch statusCode {
-	case http.StatusTooManyRequests, 529:
+	case http.StatusUnauthorized,
+		http.StatusPaymentRequired,
+		http.StatusForbidden,
+		http.StatusTooManyRequests,
+		529:
 		return true
 	default:
 		return false

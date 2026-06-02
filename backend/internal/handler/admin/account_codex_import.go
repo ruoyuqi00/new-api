@@ -245,7 +245,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 
 		if existing := index.Find(item.IdentityKeys); existing != nil && updateExisting {
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
-			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
+			mergedExtra := applyCodexImportExtraDefaults(mergeCodexImportMap(existing.Extra, extra))
 			updateInput := &service.UpdateAccountInput{
 				Credentials:        mergedCredentials,
 				Extra:              mergedExtra,
@@ -304,7 +304,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			Platform:              service.PlatformOpenAI,
 			Type:                  service.AccountTypeOAuth,
 			Credentials:           credentials,
-			Extra:                 extra,
+			Extra:                 applyCodexImportExtraDefaults(extra),
 			ProxyID:               req.ProxyID,
 			Concurrency:           concurrency,
 			Priority:              priority,
@@ -626,7 +626,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 
 	fingerprint := codexTokenFingerprint(item.AccessToken)
 	item.Extra["access_token_sha256"] = fingerprint
-	item.IdentityKeys = buildCodexIdentityKeys(item.AccountID, item.UserID, item.Email, item.AccessToken)
+	item.IdentityKeys = buildCodexIdentityKeys(item.AccountID, item.UserID, item.Email, item.AccessToken, item.RefreshToken)
 	item.Name = buildCodexImportAccountName(item, entry.Index)
 
 	return item, nil
@@ -845,23 +845,26 @@ func sanitizeCodexImportCredentialExtras(input map[string]any) map[string]any {
 	return out
 }
 
-func buildCodexIdentityKeys(accountID, userID, email, accessToken string) []string {
-	keys := make([]string, 0, 4)
-	if accessToken = strings.TrimSpace(accessToken); accessToken != "" {
-		return []string{"access:" + codexTokenFingerprint(accessToken)}
+func buildCodexIdentityKeys(accountID, userID, email, accessToken, refreshToken string) []string {
+	keys := make([]string, 0, 5)
+	if refreshToken = strings.TrimSpace(refreshToken); refreshToken != "" {
+		keys = append(keys, "refresh:"+codexTokenFingerprint(refreshToken))
 	}
 	accountID = strings.TrimSpace(accountID)
 	userID = strings.TrimSpace(userID)
-	if accountID != "" {
-		keys = append(keys, "account:"+accountID)
-	}
 	if userID != "" {
 		keys = append(keys, "user:"+userID)
 	}
-	if accountID == "" && userID == "" {
+	if userID == "" {
 		if email = strings.ToLower(strings.TrimSpace(email)); email != "" {
 			keys = append(keys, "email:"+email)
 		}
+	}
+	if accessToken = strings.TrimSpace(accessToken); accessToken != "" {
+		keys = append(keys, "access:"+codexTokenFingerprint(accessToken))
+	}
+	if len(keys) == 0 && accountID != "" {
+		keys = append(keys, "account:"+accountID)
 	}
 	return keys
 }
@@ -886,6 +889,7 @@ func (i *codexAccountIndex) Add(account service.Account) {
 		codexCredentialString(account.Credentials, "chatgpt_user_id"),
 		codexCredentialString(account.Credentials, "email"),
 		codexCredentialString(account.Credentials, "access_token"),
+		codexCredentialString(account.Credentials, "refresh_token"),
 	)
 	for _, key := range keys {
 		i.accountsByKey[key] = account
@@ -926,6 +930,14 @@ func mergeCodexImportMap(existing, incoming map[string]any) map[string]any {
 	}
 	for k, v := range incoming {
 		out[k] = v
+	}
+	return out
+}
+
+func applyCodexImportExtraDefaults(extra map[string]any) map[string]any {
+	out := mergeCodexImportMap(extra, nil)
+	if _, ok := out["openai_passthrough"]; !ok {
+		out["openai_passthrough"] = true
 	}
 	return out
 }

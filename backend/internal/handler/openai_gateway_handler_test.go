@@ -24,6 +24,20 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+func TestEffectiveOpenAIMaxAccountSwitches_PassthroughUsesLargePoolFloor(t *testing.T) {
+	require.Equal(t, 10, effectiveOpenAIMaxAccountSwitches(10, &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}))
+	require.Equal(t, openAIPassthroughMinAccountSwitches, effectiveOpenAIMaxAccountSwitches(10, &service.Account{
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Extra:    map[string]any{"openai_passthrough": true},
+	}))
+	require.Equal(t, 80, effectiveOpenAIMaxAccountSwitches(80, &service.Account{
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Extra:    map[string]any{"openai_passthrough": true},
+	}))
+}
+
 func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -336,21 +336,28 @@ func TestResolveCodexImportExpiryForNoRefreshTokenUsesEarlierRequestExpiry(t *te
 	}
 }
 
-func TestCodexIdentityKeysPreferAccessTokenFingerprint(t *testing.T) {
-	keys := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token")
-	want := "access:" + codexTokenFingerprint("token")
-	if len(keys) != 1 || keys[0] != want {
-		t.Fatalf("keys = %v, want [%s]", keys, want)
+func TestCodexIdentityKeysPreferStableCredentials(t *testing.T) {
+	keys := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token", "refresh")
+	wantRefresh := "refresh:" + codexTokenFingerprint("refresh")
+	wantAccess := "access:" + codexTokenFingerprint("token")
+	if !containsCodexIdentityKey(keys, wantRefresh) {
+		t.Fatalf("keys = %v, want refresh fingerprint", keys)
+	}
+	if !containsCodexIdentityKey(keys, "user:user-1") {
+		t.Fatalf("keys = %v, want user identity", keys)
+	}
+	if !containsCodexIdentityKey(keys, wantAccess) {
+		t.Fatalf("keys = %v, want access fallback", keys)
 	}
 
-	keys = buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "")
+	keys = buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "", "")
 	for _, key := range keys {
 		if strings.HasPrefix(key, "email:") {
 			t.Fatalf("strong identity should not include email fallback: %v", keys)
 		}
 	}
 
-	keys = buildCodexIdentityKeys("", "", "same@example.com", "")
+	keys = buildCodexIdentityKeys("", "", "same@example.com", "", "")
 	hasEmail := false
 	for _, key := range keys {
 		if key == "email:same@example.com" {
@@ -362,15 +369,47 @@ func TestCodexIdentityKeysPreferAccessTokenFingerprint(t *testing.T) {
 	}
 }
 
-func TestCodexBatchIdentityAllowsSameAccountWithDifferentTokens(t *testing.T) {
-	first := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token-1")
-	second := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token-2")
+func TestCodexBatchIdentityAllowsSameAccountWithDifferentUsers(t *testing.T) {
+	first := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token-1", "refresh-1")
+	second := buildCodexIdentityKeys("acct-1", "user-2", "other@example.com", "token-2", "refresh-2")
 	seen := map[string]int{}
 
 	markCodexIdentitySeen(seen, first, 1)
 	if duplicateIndex, ok := firstSeenCodexIdentity(seen, second); ok {
-		t.Fatalf("second token was treated as duplicate of entry %d; keys=%v seen=%v", duplicateIndex, second, seen)
+		t.Fatalf("second user was treated as duplicate of entry %d; keys=%v seen=%v", duplicateIndex, second, seen)
 	}
+}
+
+func TestCodexBatchIdentityMatchesRefreshTokenAcrossAccessTokenRotation(t *testing.T) {
+	first := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token-1", "refresh")
+	second := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token-2", "refresh")
+	seen := map[string]int{}
+
+	markCodexIdentitySeen(seen, first, 1)
+	if duplicateIndex, ok := firstSeenCodexIdentity(seen, second); !ok || duplicateIndex != 1 {
+		t.Fatalf("rotated access token was not matched as duplicate; duplicate=%v index=%d keys=%v seen=%v", ok, duplicateIndex, second, seen)
+	}
+}
+
+func TestApplyCodexImportExtraDefaultsEnablesPassthroughUnlessExplicit(t *testing.T) {
+	defaulted := applyCodexImportExtraDefaults(map[string]any{"privacy_mode": true})
+	if defaulted["openai_passthrough"] != true {
+		t.Fatalf("openai_passthrough = %v, want true", defaulted["openai_passthrough"])
+	}
+
+	explicit := applyCodexImportExtraDefaults(map[string]any{"openai_passthrough": false})
+	if explicit["openai_passthrough"] != false {
+		t.Fatalf("openai_passthrough = %v, want explicit false", explicit["openai_passthrough"])
+	}
+}
+
+func containsCodexIdentityKey(keys []string, want string) bool {
+	for _, key := range keys {
+		if key == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildCodexCreateAccountNameUsesItemNameWhenBaseEmpty(t *testing.T) {

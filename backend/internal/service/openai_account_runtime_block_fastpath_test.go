@@ -15,6 +15,7 @@ import (
 func TestOpenAI429FastPath_MarksOAuthAccountCoolingDown(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	passthroughAccount := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_passthrough": true}}
 	apiKeyAccount := &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
 	shouldDisable := svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusTooManyRequests, http.Header{}, nil)
@@ -117,6 +118,7 @@ func TestShouldStopOpenAIOAuth429Failover_OnlyDuringStorm(t *testing.T) {
 	}
 
 	require.True(t, svc.ShouldStopOpenAIOAuth429Failover(account, http.StatusTooManyRequests, 1))
+	require.False(t, svc.ShouldStopOpenAIOAuth429Failover(passthroughAccount, http.StatusTooManyRequests, 1))
 	require.False(t, svc.ShouldStopOpenAIOAuth429Failover(apiKeyAccount, http.StatusTooManyRequests, 1))
 	require.False(t, svc.ShouldStopOpenAIOAuth429Failover(account, http.StatusInternalServerError, 1))
 	require.False(t, svc.ShouldStopOpenAIOAuth429Failover(account, http.StatusTooManyRequests, 0))

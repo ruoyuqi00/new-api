@@ -199,8 +199,11 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 
 type openAIPassthroughFailoverRepo struct {
 	stubOpenAIAccountRepo
-	rateLimitCalls []time.Time
-	overloadCalls  []time.Time
+	rateLimitCalls       []time.Time
+	overloadCalls        []time.Time
+	tempUnschedulable    []time.Time
+	tempUnschedulableMsg []string
+	setErrorMsgs         []string
 }
 
 func (r *openAIPassthroughFailoverRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
@@ -210,6 +213,17 @@ func (r *openAIPassthroughFailoverRepo) SetRateLimited(_ context.Context, _ int6
 
 func (r *openAIPassthroughFailoverRepo) SetOverloaded(_ context.Context, _ int64, until time.Time) error {
 	r.overloadCalls = append(r.overloadCalls, until)
+	return nil
+}
+
+func (r *openAIPassthroughFailoverRepo) SetTempUnschedulable(_ context.Context, _ int64, until time.Time, reason string) error {
+	r.tempUnschedulable = append(r.tempUnschedulable, until)
+	r.tempUnschedulableMsg = append(r.tempUnschedulableMsg, reason)
+	return nil
+}
+
+func (r *openAIPassthroughFailoverRepo) SetError(_ context.Context, _ int64, errorMsg string) error {
+	r.setErrorMsgs = append(r.setErrorMsgs, errorMsg)
 	return nil
 }
 
@@ -797,7 +811,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamErrorIncludesPassthroughF
 	require.Equal(t, "http_error", arr[len(arr)-1].Kind)
 }
 
-func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *testing.T) {
+func TestOpenAIGatewayService_OpenAIPassthrough_AccountPoolErrorsTriggerFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"instructions":"local-test-instructions","input":[{"type":"text","text":"hi"}]}`)
 
@@ -815,7 +829,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 		}
 		switch accountType {
 		case AccountTypeOAuth:
-			account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"}
+			account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc", "refresh_token": "refresh-token"}
 		case AccountTypeAPIKey:
 			account.Credentials = map[string]any{"api_key": "sk-test"}
 		}
@@ -830,6 +844,42 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 		assertRepo  func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time)
 	}{
 		{
+			name:        "oauth_401_set_error",
+			accountType: AccountTypeOAuth,
+			statusCode:  http.StatusUnauthorized,
+			body:        `{"detail":"Unauthorized"}`,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+				require.Empty(t, repo.tempUnschedulable)
+				require.Len(t, repo.setErrorMsgs, 1)
+			},
+		},
+		{
+			name:        "oauth_402_set_error",
+			accountType: AccountTypeOAuth,
+			statusCode:  http.StatusPaymentRequired,
+			body:        `{"detail":{"code":"deactivated_workspace"}}`,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+				require.Empty(t, repo.tempUnschedulable)
+				require.Len(t, repo.setErrorMsgs, 1)
+			},
+		},
+		{
+			name:        "oauth_403_set_error",
+			accountType: AccountTypeOAuth,
+			statusCode:  http.StatusForbidden,
+			body:        `{"error":{"message":"forbidden","type":"access_forbidden"}}`,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+				require.Empty(t, repo.tempUnschedulable)
+				require.Len(t, repo.setErrorMsgs, 1)
+			},
+		},
+		{
 			name:        "oauth_429_rate_limit",
 			accountType: AccountTypeOAuth,
 			statusCode:  http.StatusTooManyRequests,
@@ -840,6 +890,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
 				require.Len(t, repo.rateLimitCalls, 1)
 				require.Empty(t, repo.overloadCalls)
+				require.Empty(t, repo.tempUnschedulable)
+				require.Empty(t, repo.setErrorMsgs)
 				require.True(t, time.Until(repo.rateLimitCalls[0]) > 24*time.Hour)
 			},
 		},
@@ -851,6 +903,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time) {
 				require.Empty(t, repo.rateLimitCalls)
 				require.Len(t, repo.overloadCalls, 1)
+				require.Empty(t, repo.tempUnschedulable)
+				require.Empty(t, repo.setErrorMsgs)
 				require.WithinDuration(t, start.Add(10*time.Minute), repo.overloadCalls[0], 5*time.Second)
 			},
 		},
@@ -865,6 +919,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
 				require.Len(t, repo.rateLimitCalls, 1)
 				require.Empty(t, repo.overloadCalls)
+				require.Empty(t, repo.tempUnschedulable)
+				require.Empty(t, repo.setErrorMsgs)
 				require.True(t, time.Until(repo.rateLimitCalls[0]) > 24*time.Hour)
 			},
 		},
@@ -876,7 +932,21 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time) {
 				require.Empty(t, repo.rateLimitCalls)
 				require.Len(t, repo.overloadCalls, 1)
+				require.Empty(t, repo.tempUnschedulable)
+				require.Empty(t, repo.setErrorMsgs)
 				require.WithinDuration(t, start.Add(10*time.Minute), repo.overloadCalls[0], 5*time.Second)
+			},
+		},
+		{
+			name:        "apikey_500_upstream_error",
+			accountType: AccountTypeAPIKey,
+			statusCode:  http.StatusInternalServerError,
+			body:        `{"error":{"message":"temporary upstream failure","type":"server_error"}}`,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+				require.Empty(t, repo.tempUnschedulable)
+				require.Empty(t, repo.setErrorMsgs)
 			},
 		},
 	}

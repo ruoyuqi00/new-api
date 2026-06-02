@@ -168,5 +168,8 @@ func (s *OpenAIGatewayService) ShouldStopOpenAIOAuth429Failover(account *Account
 	if !isOpenAIOAuthAccount(account) {
 		return false
 	}
+	if account.IsOpenAIPassthroughEnabled() {
+		return false
+	}
 	return s.isOpenAIOAuth429Storm()
 }

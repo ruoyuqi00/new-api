@@ -1,5 +1,43 @@
 # Operations Log
 
+## 2026-06-02 CPA Codex passthrough failover fix
+
+- Investigated why CPA/Codex accounts imported through Sub2API looked broadly
+  rate-limited while native NewAPI-style CPA routing worked better.
+- Root cause found:
+  - Codex/CPA accounts must use the OpenAI Responses/Codex passthrough path.
+  - Sub2API passthrough previously only failed over on `429` and `529`, so
+    bad CPA tokens returning `401` could leak directly to the client.
+  - The OpenAI passthrough handler also stopped after the configured 10 account
+    switches, which is too small for a 200-account CPA pool containing a mix of
+    revoked and upstream-limited accounts.
+- Code changes:
+  - CPA Codex imports now default `extra.openai_passthrough=true`.
+  - CPA import identity matching now prefers refresh token/user identity over
+    shared `chatgpt_account_id`, avoiding accidental duplicate merges.
+  - OpenAI passthrough failover now covers `401`, `402`, `403`, `429`, `529`,
+    and `5xx`, while preserving direct passthrough for client-side `400`.
+  - OpenAI passthrough accounts get a 50-switch minimum failover budget, and are
+    not prematurely stopped by the OpenAI OAuth 429 storm shortcut.
+- Local verification:
+  - `go test ./internal/handler/admin ./internal/handler ./internal/service`
+    passed.
+- Server deployment:
+  - Deployed image `sub2api-provider-adapters:cpa-import-20260602c`.
+  - Public health: `https://api.vyywcw.cn/health` returned `{"status":"ok"}`.
+- Live GPT5.5 group smoke:
+  - `/v1/messages` with `claude-opus-4-8` returned HTTP 200 and routed upstream
+    to `/v1/responses` with `gpt-5.5`.
+  - `/v1/responses` with `gpt-5.5` returned HTTP 200 after skipping revoked and
+    upstream-limited CPA accounts; logs showed `max_switches=50`.
+  - Successful accounts were from import batch `cpa_c9fc1ffeabda4f2b`.
+- Post-smoke live DB summary for group `GPT5.5`:
+  - OpenAI active accounts: 230.
+  - OpenAI schedulable accounts: 230.
+  - New CPA batch `cpa_c9fc1ffeabda4f2b`: 179 active/schedulable, 21 error.
+  - The errors observed during smoke were upstream token revocations, not leaked
+    Sub2API client responses.
+
 ## 2026-06-02 CPA Codex batch import
 
 - Inspected local CPA export folder

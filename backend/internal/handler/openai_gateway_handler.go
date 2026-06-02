@@ -40,6 +40,18 @@ type OpenAIGatewayHandler struct {
 	cfg                      *config.Config
 }
 
+const openAIPassthroughMinAccountSwitches = 50
+
+func effectiveOpenAIMaxAccountSwitches(base int, account *service.Account) int {
+	if base <= 0 {
+		base = 3
+	}
+	if account != nil && account.IsOpenAIPassthroughEnabled() && base < openAIPassthroughMinAccountSwitches {
+		return openAIPassthroughMinAccountSwitches
+	}
+	return base
+}
+
 func resolveOpenAIMessagesDispatchMappedModel(apiKey *service.APIKey, requestedModel string) string {
 	if apiKey == nil || apiKey.Group == nil {
 		return ""
@@ -415,7 +427,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
-					if switchCount >= maxAccountSwitches {
+					effectiveMaxAccountSwitches := effectiveOpenAIMaxAccountSwitches(maxAccountSwitches, account)
+					if switchCount >= effectiveMaxAccountSwitches {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -428,7 +441,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("upstream_status", failoverErr.StatusCode),
 						zap.Int("switch_count", switchCount),
-						zap.Int("max_switches", maxAccountSwitches),
+						zap.Int("max_switches", effectiveMaxAccountSwitches),
 					)
 					continue
 				}
@@ -810,7 +823,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
-					if switchCount >= maxAccountSwitches {
+					effectiveMaxAccountSwitches := effectiveOpenAIMaxAccountSwitches(maxAccountSwitches, account)
+					if switchCount >= effectiveMaxAccountSwitches {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -823,7 +837,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("upstream_status", failoverErr.StatusCode),
 						zap.Int("switch_count", switchCount),
-						zap.Int("max_switches", maxAccountSwitches),
+						zap.Int("max_switches", effectiveMaxAccountSwitches),
 					)
 					continue
 				}
