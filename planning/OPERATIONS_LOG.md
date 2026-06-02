@@ -1,5 +1,29 @@
 # Operations Log
 
+## 2026-06-02 CPA Codex batch import
+
+- Inspected local CPA export folder
+  `C:\Users\Administrator\Desktop\cpa_c9fc1ffeabda4f2b` without printing token
+  values.
+- Confirmed all 200 files are Codex session JSON records with:
+  - `type=codex`
+  - `access_token`
+  - `refresh_token`
+- Local JWT metadata check showed all 200 records have refresh tokens, OpenAI
+  Codex auth claims, no duplicate refresh tokens within this batch, and
+  unexpired access tokens.
+- Imported all 200 records through
+  `POST /api/v1/admin/accounts/import/codex-session`, binding them to group
+  `GPT5.5` (group id 8), with `skip_default_group_bind=true`.
+- Post-import live DB summary:
+  - `GPT5.5` bound accounts: 270.
+  - `GPT5.5` active accounts: 253.
+  - `GPT5.5` currently schedulable accounts: 240.
+  - This CPA batch contributes 200 active accounts.
+- Public smoke through the `GPT5.5` group:
+  - `/v1/models` returned HTTP 200.
+  - `/v1/chat/completions` with `gpt-5.5` returned HTTP 200 with `ok`.
+
 ## 2026-06-01 CPA Codex batch import
 
 - Inspected local CPA export folder
