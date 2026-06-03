@@ -1366,6 +1366,8 @@ Known limitation:
   which means those refresh tokens have already been consumed/rotated elsewhere
   or the CPA import source contains stale refresh tokens. Re-importing current
   CPA credentials or disabling the stale accounts is required before those
-  accounts can become callable.
+  accounts can become callable. After smoke/background refresh, the GPT5.5
+  OpenAI OAuth pool was down to 48 active accounts, 203 error accounts, and 41
+  DB-schedulable accounts.
 
 Details: `planning/SUB2API_UPSTREAM_MERGE_DEPLOY_2026-06-03.md`.

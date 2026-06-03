@@ -118,12 +118,21 @@ GPT5.5 group are not currently callable.
 
 ## CPA account finding
 
-GPT5.5 group state after deployment and cache cleanup:
+GPT5.5 group state after deployment and cache cleanup, before the final smoke:
 
 - OpenAI OAuth accounts: 251 total
 - Active OpenAI OAuth accounts: 136
 - Error OpenAI OAuth accounts: 115
 - DB-schedulable OpenAI OAuth accounts: 129
+
+After the final smoke and background refresh pass:
+
+- OpenAI OAuth accounts: 251 total
+- Active OpenAI OAuth accounts: 48
+- Error OpenAI OAuth accounts: 203
+- DB-schedulable OpenAI OAuth accounts: 41
+- Recent logs showed 201 `refresh_token_reused` refresh failures in the last
+  10 minutes.
 
 Refresh logs show the failing CPA accounts return OpenAI
 `refresh_token_reused`:
