@@ -1321,3 +1321,51 @@ Upstream check:
   Kiro/Windsurf adapter files and should be handled in a separate merge window.
 
 Details: `planning/SUB2API_CCS_GROUP_VERIFICATION_2026-06-01.md`.
+
+## 2026-06-03 upstream protocol merge and OpenAI OAuth recovery guard
+
+Merged official `Wei-Shaw/sub2api` `upstream/main` at `aa69e394` into the
+private branch. The upstream delta includes the Responses/Chat Completions
+bridge redesign, Anthropic Messages API compatibility work, Antigravity fixes,
+WS Codex image bridge updates, and apicompat streaming tests.
+
+Deployment:
+
+- Built and deployed
+  `sub2api-provider-adapters:upstream-merge-20260603b`.
+- Server compose now runs that image for `sub2api`.
+- Local and public health checks returned `{"status":"ok"}`.
+- Cleared GPT5.5 group OpenAI OAuth Redis token cache entries and scheduler
+  cache entries after deployment, then restarted `sub2api`.
+
+Local fixes added after the upstream merge:
+
+- OpenAI OAuth `401` with a non-empty `refresh_token` no longer permanently
+  marks the account as `error` for `token_invalidated`, `token_revoked`, or
+  `{"detail":"Unauthorized"}`.
+- The handler now invalidates the token cache, marks only token-related
+  credential fields as needing refresh, and temporarily removes the account
+  from scheduling.
+- Added a repository partial JSONB credential update helper so this path does
+  not overwrite the whole credentials document.
+
+Verification:
+
+- `go test ./internal/service -run TestOpenAIGatewayService_OpenAIPassthrough_AccountPoolErrorsTriggerFailover`
+- `go test ./internal/repository ./internal/pkg/apicompat`
+- `go test ./internal/service`
+- `go test ./internal/handler/admin ./internal/handler`
+
+Known limitation:
+
+- `go test -tags unit ./internal/service -run TestRateLimitService_HandleUpstreamError_OpenAITokenInvalidatedWithRefreshTokenRecovers`
+  is blocked by an existing unrelated compile issue in
+  `openai_account_runtime_block_fastpath_test.go`.
+- Live GPT5.5 smoke still returns upstream auth failure. Logs show many imported
+  CPA OpenAI OAuth accounts fail refresh with OpenAI `refresh_token_reused`,
+  which means those refresh tokens have already been consumed/rotated elsewhere
+  or the CPA import source contains stale refresh tokens. Re-importing current
+  CPA credentials or disabling the stale accounts is required before those
+  accounts can become callable.
+
+Details: `planning/SUB2API_UPSTREAM_MERGE_DEPLOY_2026-06-03.md`.

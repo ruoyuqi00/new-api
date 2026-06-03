@@ -844,15 +844,29 @@ func TestOpenAIGatewayService_OpenAIPassthrough_AccountPoolErrorsTriggerFailover
 		assertRepo  func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time)
 	}{
 		{
-			name:        "oauth_401_set_error",
+			name:        "oauth_401_temp_unschedulable",
 			accountType: AccountTypeOAuth,
 			statusCode:  http.StatusUnauthorized,
 			body:        `{"detail":"Unauthorized"}`,
-			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time) {
 				require.Empty(t, repo.rateLimitCalls)
 				require.Empty(t, repo.overloadCalls)
-				require.Empty(t, repo.tempUnschedulable)
-				require.Len(t, repo.setErrorMsgs, 1)
+				require.Len(t, repo.tempUnschedulable, 1)
+				require.Empty(t, repo.setErrorMsgs)
+				require.WithinDuration(t, start.Add(10*time.Minute), repo.tempUnschedulable[0], 5*time.Second)
+			},
+		},
+		{
+			name:        "oauth_401_token_invalidated_temp_unschedulable",
+			accountType: AccountTypeOAuth,
+			statusCode:  http.StatusUnauthorized,
+			body:        `{"error":{"code":"token_invalidated","message":"Your authentication token has been invalidated. Please try signing in again."}}`,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+				require.Len(t, repo.tempUnschedulable, 1)
+				require.Empty(t, repo.setErrorMsgs)
+				require.WithinDuration(t, start.Add(10*time.Minute), repo.tempUnschedulable[0], 5*time.Second)
 			},
 		},
 		{

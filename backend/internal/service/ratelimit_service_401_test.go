@@ -15,12 +15,14 @@ import (
 
 type rateLimitAccountRepoStub struct {
 	mockAccountRepoForGemini
-	setErrorCalls          int
-	tempCalls              int
-	updateCredentialsCalls int
-	lastCredentials        map[string]any
-	lastErrorMsg           string
-	lastTempReason         string
+	setErrorCalls               int
+	tempCalls                   int
+	updateCredentialsCalls      int
+	updateCredentialFieldsCalls int
+	lastCredentials             map[string]any
+	lastCredentialFields        map[string]any
+	lastErrorMsg                string
+	lastTempReason              string
 }
 
 func (r *rateLimitAccountRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
@@ -38,6 +40,12 @@ func (r *rateLimitAccountRepoStub) SetTempUnschedulable(ctx context.Context, id 
 func (r *rateLimitAccountRepoStub) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
 	r.updateCredentialsCalls++
 	r.lastCredentials = cloneCredentials(credentials)
+	return nil
+}
+
+func (r *rateLimitAccountRepoStub) UpdateCredentialFields(ctx context.Context, id int64, updates map[string]any) error {
+	r.updateCredentialFieldsCalls++
+	r.lastCredentialFields = cloneCredentials(updates)
 	return nil
 }
 
@@ -153,6 +161,35 @@ func TestRateLimitService_HandleUpstreamError_OAuth401InvalidatorError(t *testin
 	require.Equal(t, 0, repo.setErrorCalls)
 	require.Equal(t, 1, repo.tempCalls)
 	require.Equal(t, 0, repo.updateCredentialsCalls)
+	require.Len(t, invalidator.accounts, 1)
+}
+
+func TestRateLimitService_HandleUpstreamError_OpenAITokenInvalidatedWithRefreshTokenRecovers(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	invalidator := &tokenCacheInvalidatorRecorder{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	service.SetTokenCacheInvalidator(invalidator)
+	account := &Account{
+		ID:       104,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":  "invalidated-at",
+			"refresh_token": "rt-104",
+			"expires_at":    time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+	}
+	body := []byte(`{"error":{"code":"token_invalidated","message":"Your authentication token has been invalidated. Please try signing in again."}}`)
+
+	shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, body)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls, "refreshable OpenAI OAuth 401 should not permanently disable the account")
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, 0, repo.updateCredentialsCalls, "401 handler must not rewrite the full credentials document")
+	require.Equal(t, 1, repo.updateCredentialFieldsCalls)
+	require.Contains(t, repo.lastCredentialFields, "expires_at")
+	require.Contains(t, repo.lastCredentialFields, "_token_version")
 	require.Len(t, invalidator.accounts, 1)
 }
 

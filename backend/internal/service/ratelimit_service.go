@@ -38,6 +38,10 @@ type AccountRuntimeBlocker interface {
 	ClearAccountSchedulingBlock(accountID int64)
 }
 
+type accountCredentialFieldsUpdater interface {
+	UpdateCredentialFields(ctx context.Context, id int64, updates map[string]any) error
+}
+
 // SuccessfulTestRecoveryResult 表示测试成功后恢复了哪些运行时状态。
 type SuccessfulTestRecoveryResult struct {
 	ClearedError     bool
@@ -120,6 +124,37 @@ func (s *RateLimitService) notifyAccountSchedulingBlockCleared(accountID int64) 
 		return
 	}
 	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
+}
+
+func isRecoverableOpenAIOAuth401(account *Account) bool {
+	return account != nil &&
+		account.Platform == PlatformOpenAI &&
+		account.Type == AccountTypeOAuth &&
+		strings.TrimSpace(account.GetCredential("refresh_token")) != ""
+}
+
+func (s *RateLimitService) markOAuthCredentialsNeedRefresh(ctx context.Context, account *Account) {
+	if s == nil || account == nil || !isRecoverableOpenAIOAuth401(account) {
+		return
+	}
+	expiresAt := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	updates := map[string]any{
+		"expires_at":     expiresAt,
+		"_token_version": time.Now().UnixMilli(),
+	}
+	if account.Credentials == nil {
+		account.Credentials = map[string]any{}
+	}
+	account.Credentials["expires_at"] = expiresAt
+	account.Credentials["_token_version"] = updates["_token_version"]
+
+	updater, ok := s.accountRepo.(accountCredentialFieldsUpdater)
+	if !ok {
+		return
+	}
+	if err := updater.UpdateCredentialFields(ctx, account.ID, updates); err != nil {
+		slog.Warn("oauth_401_mark_refresh_required_failed", "account_id", account.ID, "error", err)
+	}
 }
 
 // ErrorPolicyResult 表示错误策略检查的结果
@@ -210,23 +245,27 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		// OpenAI: token_invalidated / token_revoked 表示 token 被永久作废（非过期），直接标记 error
 		openai401Code := extractUpstreamErrorCode(responseBody)
 		if account.Platform == PlatformOpenAI && (openai401Code == "token_invalidated" || openai401Code == "token_revoked") {
-			msg := "Token revoked (401): account authentication permanently revoked"
-			if upstreamMsg != "" {
-				msg = "Token revoked (401): " + upstreamMsg
+			if !isRecoverableOpenAIOAuth401(account) {
+				msg := "Token revoked (401): account authentication permanently revoked"
+				if upstreamMsg != "" {
+					msg = "Token revoked (401): " + upstreamMsg
+				}
+				s.handleAuthError(ctx, account, msg)
+				shouldDisable = true
+				break
 			}
-			s.handleAuthError(ctx, account, msg)
-			shouldDisable = true
-			break
 		}
 		// OpenAI: {"detail":"Unauthorized"} 表示 token 完全无效（非标准 OpenAI 错误格式），直接标记 error
 		if account.Platform == PlatformOpenAI && gjson.GetBytes(responseBody, "detail").String() == "Unauthorized" {
-			msg := "Unauthorized (401): account authentication failed permanently"
-			if upstreamMsg != "" {
-				msg = "Unauthorized (401): " + upstreamMsg
+			if !isRecoverableOpenAIOAuth401(account) {
+				msg := "Unauthorized (401): account authentication failed permanently"
+				if upstreamMsg != "" {
+					msg = "Unauthorized (401): " + upstreamMsg
+				}
+				s.handleAuthError(ctx, account, msg)
+				shouldDisable = true
+				break
 			}
-			s.handleAuthError(ctx, account, msg)
-			shouldDisable = true
-			break
 		}
 		// OAuth 账号在 401 错误时临时不可调度（给 token 刷新窗口）；非 OAuth 账号保持原有 SetError 行为。
 		// Antigravity 除外：其 401 由 applyErrorPolicy 的 temp_unschedulable_rules 自行控制。
@@ -257,6 +296,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			// tryRecoverFromRefreshRace 重读 DB 发现 currentRT == usedRT 也救不回来，账号被错误 disable。
 			// 这里仅依赖 InvalidateToken + SetTempUnschedulable 让账号在冷却期内不被调度，
 			// 冷却结束后由 token_provider 的 NeedsRefresh / token_refresh_service 走带分布式锁的正路刷新。
+			s.markOAuthCredentialsNeedRefresh(ctx, account)
 			msg := "Authentication failed (401): invalid or expired credentials"
 			if upstreamMsg != "" {
 				msg = "OAuth 401: " + upstreamMsg
