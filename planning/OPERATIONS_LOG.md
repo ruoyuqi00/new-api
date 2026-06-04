@@ -1371,3 +1371,46 @@ Known limitation:
   DB-schedulable accounts.
 
 Details: `planning/SUB2API_UPSTREAM_MERGE_DEPLOY_2026-06-03.md`.
+
+## 2026-06-04 NewAPI sidecar deployment
+
+Deployed an independent NewAPI instance on the same server as Sub2API.
+
+Runtime layout:
+
+- NewAPI path: `/opt/newapi`
+- Public URL: `https://newapi.vyywcw.cn/`
+- Image: `calciumion/new-api:latest`
+- Running version from logs: `New API v1.0.0-rc.10`
+- Local host port: `127.0.0.1:3001 -> newapi:3000`
+- Data is isolated from Sub2API:
+  - `newapi-mysql` with `/opt/newapi/mysql_data`
+  - `newapi-redis` with `/opt/newapi/redis_data`
+  - app data under `/opt/newapi/data`
+
+Caddy now serves `api.vyywcw.cn`, `www.vyywcw.cn`, and
+`newapi.vyywcw.cn` from one site block. A `@newapi` host matcher routes
+`newapi.vyywcw.cn` to `newapi:3000`; existing Sub2API routing remains the
+fallback for `api.vyywcw.cn`.
+
+Verification:
+
+- `newapi`, `newapi-mysql`, and `newapi-redis` containers are healthy.
+- `http://127.0.0.1:3001/` returned HTTP 200.
+- Caddy HTTPS routing for `newapi.vyywcw.cn` returned HTTP 200.
+- `https://newapi.vyywcw.cn/` returned HTTP 200 from the local machine.
+- `https://api.vyywcw.cn/health` still returned `{"status":"ok"}`.
+
+Operational notes:
+
+- NewAPI is intentionally uninitialized; create the root admin user through
+  the web UI so the admin password is not handled by automation.
+- Do not import the same CPA/OpenAI OAuth accounts into both NewAPI and Sub2API
+  with auto-refresh enabled. Refresh tokens rotate, and whichever system uses a
+  refresh token first owns the next token; the other system will hit
+  `refresh_token_reused`.
+- Recommended split: use NewAPI for CPA/OpenAI OAuth pools and standard
+  OpenAI-compatible aggregation; keep Sub2API for private Kiro/Windsurf and
+  custom protocol adapter work.
+
+Details: `planning/NEWAPI_SIDECAR_DEPLOY_2026-06-04.md`.
