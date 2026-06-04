@@ -1416,3 +1416,34 @@ Operational notes:
   custom protocol adapter work.
 
 Details: `planning/NEWAPI_SIDECAR_DEPLOY_2026-06-04.md`.
+
+## 2026-06-04 NewAPI CPA Codex channel imports
+
+Imported CPA/Codex OAuth credentials into the NewAPI sidecar. Secrets were used
+only during import and were not written to Git.
+
+Imported channel tags:
+
+- `cpa-codex-20260604`: 6 channels imported from manually supplied refresh
+  tokens.
+- `cpa-codex-c72b8eef485f4865`: 10 channels imported from
+  `C:\Users\Administrator\Downloads\cpa_c72b8eef485f4865`.
+
+Verification:
+
+- Both tags are fully enabled and refreshed in NewAPI:
+  - `cpa-codex-20260604`: 6 total, 6 enabled, 6 refreshed.
+  - `cpa-codex-c72b8eef485f4865`: 10 total, 10 enabled, 10 refreshed.
+- Enabled NewAPI self-use mode (`SelfUseModeEnabled=true`) so self-hosted
+  channel testing and calls are not blocked by missing model pricing.
+- `/v1/chat/completions` is not supported by the Codex channel path.
+- `/v1/responses` with `stream=true` and list-form `input` returned HTTP 200
+  SSE responses for sampled channels from both tags using `gpt-5.4`.
+
+Operational notes:
+
+- Codex/ChatGPT accounts rejected `gpt-5` and `gpt-5-codex` during channel
+  tests, while `gpt-5.4` reached the upstream successfully when using the
+  Responses API format.
+- NewAPI requires `input` to be a list for this Codex Responses path, for
+  example a user message with `input_text` content.
