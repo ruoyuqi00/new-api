@@ -1447,3 +1447,32 @@ Operational notes:
   Responses API format.
 - NewAPI requires `input` to be a list for this Codex Responses path, for
   example a user message with `input_text` content.
+
+## 2026-06-04 NewAPI GPT-5.5 CPA group split
+
+Configured two dedicated NewAPI token/channel groups for the imported
+CPA/Codex pools:
+
+- `cpa-gpt55-a`: channels tagged `cpa-codex-20260604` (6 channels).
+- `cpa-gpt55-b`: channels tagged `cpa-codex-c72b8eef485f4865` (10 channels).
+
+Changes:
+
+- Added both groups to NewAPI group ratio and user usable group settings.
+- Created one NewAPI API token per group with unlimited quota, model limit
+  `gpt-5.5`, and cross-group retry disabled.
+- Appended `gpt-5.5` to all 16 CPA/Codex channel model lists so the dispatcher
+  can route the model inside the split groups.
+
+Verification:
+
+- NewAPI enabled model list includes `gpt-5.5`.
+- `https://newapi.vyywcw.cn/v1/responses` returned HTTP 200 SSE
+  `response.created` for both `cpa-gpt55-a` and `cpa-gpt55-b` keys using
+  `model: gpt-5.5`.
+
+Usage note:
+
+- Use the Responses API shape with `stream=true` and list-form `input`.
+- The usable model name is `gpt-5.5`; `gpt-5.5-codex` is rejected upstream for
+  these ChatGPT/Codex accounts.

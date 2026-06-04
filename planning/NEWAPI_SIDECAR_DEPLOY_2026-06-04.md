@@ -145,3 +145,45 @@ Recommended split:
 - If a shared public entrypoint is needed later, add a lightweight gateway that
   routes by model family or key group rather than duplicating OAuth accounts in
   both systems.
+
+## GPT-5.5 CPA groups
+
+Two NewAPI groups were configured for the imported CPA/Codex account pools:
+
+- `cpa-gpt55-a`: 6 channels from tag `cpa-codex-20260604`.
+- `cpa-gpt55-b`: 10 channels from tag `cpa-codex-c72b8eef485f4865`.
+
+Each group has its own API token, limited to `gpt-5.5`, with cross-group retry
+disabled. Full token values are intentionally not stored in Git.
+
+The channel model lists were updated to include `gpt-5.5`; NewAPI's enabled
+model list confirms the model is routable. Both group tokens were smoke-tested
+against:
+
+```text
+POST https://newapi.vyywcw.cn/v1/responses
+```
+
+Required request shape:
+
+```json
+{
+  "model": "gpt-5.5",
+  "stream": true,
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Reply OK only."
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 8
+}
+```
+
+Do not use `gpt-5.5-codex` for these ChatGPT/Codex accounts; upstream rejects
+that model name.
