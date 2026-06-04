@@ -28,6 +28,27 @@
   - `python -m py_compile adapters\kiro-web\kiro_web_adapter.py` passed.
   - `go test ./internal/handler/admin -run Kiro` passed.
   - `npm run build` from `frontend` passed.
+- Follow-up fix:
+  - Kiro runtime admin fetches now treat `/api/admin/*` like `/v1/*` and use
+    the internal adapter key first. This matches `kiro-web-adapter`, whose
+    redacted management endpoints share the same internal key as model calls.
+- Server deployment:
+  - Deployed Sub2API image
+    `sub2api-provider-adapters:kiro-admin-20260604b`.
+  - Deployed Kiro web adapter image
+    `sub2api-kiro-web-adapter:admin-20260604`.
+  - Backed up compose before image and key-alignment changes.
+  - Aligned the live Sub2API Kiro internal-key environment with the
+    `kiro-web-adapter` key file without printing the secret.
+- Post-deploy verification:
+  - `https://api.vyywcw.cn/health` returned `{"status":"ok"}`.
+  - `docker compose ps` showed `sub2api` and `sub2api-kiro-web-adapter`
+    running on the new images.
+  - From inside the Sub2API container, the redacted Kiro management endpoint
+    `http://kiro-web-adapter:8991/api/admin/credentials` returned account
+    metadata through `x-api-key`.
+  - The returned account payload did not include raw access-token or
+    refresh-token fields in the sampled admin response.
 
 ## 2026-06-02 CPA Codex passthrough failover fix
 
