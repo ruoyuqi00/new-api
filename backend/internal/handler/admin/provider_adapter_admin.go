@@ -334,7 +334,7 @@ func fetchKiroAdapterAdminWithConfig(ctx context.Context, cfg kiroAdapterConfig,
 }
 
 func isKiroRuntimeAPIPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/")
+	return strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/api/admin/")
 }
 
 func adapterProbeFromResponse(result ProviderAdapterAdminResponse) *adapterProbeState {
