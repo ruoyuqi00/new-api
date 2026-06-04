@@ -1123,8 +1123,6 @@ Impact:
   Portal `CreateSpace` / `StreamSendMessage` path.
 - Keep the deployed Kiro Web adapter as the Claude/Opus source of truth.
 
-Details: `planning/PROVIDER_REFERENCE_PROTOCOL_SCAN_2026-05-21.md`.
-
 ## 2026-05-21 Sub2API upstream scan
 
 Fetched official `Wei-Shaw/sub2api` without merging.
@@ -1166,8 +1164,6 @@ Potential merge touch points with private adapter work:
   Resolved during merge by renaming the private migration to
   `142_windsurf_opus47_aliases.sql`.
 
-Details: `planning/SUB2API_UPSTREAM_SCAN_2026-05-21.md`.
-
 ## 2026-05-27 Windsurf cache and Sub2API route update
 
 Updated the live internal Windsurf adapter from `dwgx/WindsurfAPI v2.0.96`
@@ -1198,8 +1194,6 @@ Verification:
   `cache_read_input_tokens=1935`, and Windsurf health showed
   `conversationPool.hits=1`.
 - Public Sub2API `/v1/messages` with `ws-claude-opus-4.6` returned HTTP 200.
-
-Details: `planning/WINDSURF_CACHE_AND_SUB2API_CALLING_2026-05-27.md`.
 
 ## 2026-05-28 Sub2API mail relay activated with Resend
 
@@ -1268,8 +1262,6 @@ Also rechecked upstream versions:
   UI is probably an online-update/image-label detection issue rather than a
   missing official merge.
 
-Details: `planning/WINDSURF_MODEL_GROUPS_AND_RUNTIME_FIX_2026-05-28.md`.
-
 ## 2026-06-01 CCS model config and live group verification
 
 Updated the user key frontend config so CC Switch/Codex imports no longer pin
@@ -1320,8 +1312,6 @@ Upstream check:
 - No upstream merge was performed because the diff intersects private
   Kiro/Windsurf adapter files and should be handled in a separate merge window.
 
-Details: `planning/SUB2API_CCS_GROUP_VERIFICATION_2026-06-01.md`.
-
 ## 2026-06-03 upstream protocol merge and OpenAI OAuth recovery guard
 
 Merged official `Wei-Shaw/sub2api` `upstream/main` at `aa69e394` into the
@@ -1370,8 +1360,6 @@ Known limitation:
   OpenAI OAuth pool was down to 48 active accounts, 203 error accounts, and 41
   DB-schedulable accounts.
 
-Details: `planning/SUB2API_UPSTREAM_MERGE_DEPLOY_2026-06-03.md`.
-
 ## 2026-06-04 NewAPI sidecar deployment
 
 Deployed an independent NewAPI instance on the same server as Sub2API.
@@ -1414,8 +1402,6 @@ Operational notes:
 - Recommended split: use NewAPI for CPA/OpenAI OAuth pools and standard
   OpenAI-compatible aggregation; keep Sub2API for private Kiro/Windsurf and
   custom protocol adapter work.
-
-Details: `planning/NEWAPI_SIDECAR_DEPLOY_2026-06-04.md`.
 
 ## 2026-06-04 NewAPI CPA Codex channel imports
 
