@@ -5,12 +5,35 @@
 Run NewAPI and Sub2API on the same server without sharing account state,
 database state, or Redis token cache state.
 
+This is a sidecar deployment, not a Sub2API replacement. Sub2API remains the
+primary private fork in this repository and continues to own the custom
+Kiro/Windsurf/provider-adapter work.
+
 This gives the deployment two separate roles:
 
 - NewAPI: CPA/OpenAI OAuth account pools and standard OpenAI-compatible model
   aggregation.
 - Sub2API: private Kiro/Windsurf adapters, Anthropic compatibility work, CCS
   import behavior, and other custom protocol routing.
+
+## Repository policy
+
+NewAPI deployment notes are committed to this same private repository on
+`main` because they are part of the same production server's operating model.
+They are not placed on a separate branch because a branch would look like an
+alternate product direction or a migration away from Sub2API.
+
+For future changes:
+
+- Keep Sub2API source, patches, and upstream merges on `main`.
+- Keep NewAPI server operation notes in `planning/` unless a reusable,
+  sanitized deployment template is intentionally added later.
+- Do not add `/opt/newapi/.env`, generated passwords, API keys, CPA tokens, or
+  live `docker-compose.yml` files containing secrets to Git.
+- If a reusable NewAPI compose template is added later, place it under a clearly
+  named path such as `deploy/newapi-sidecar/` and keep it secret-free.
+- Always describe NewAPI as a sidecar/complement for CPA/OpenAI OAuth pools, not
+  as evidence that Sub2API is abandoned.
 
 ## Server layout
 

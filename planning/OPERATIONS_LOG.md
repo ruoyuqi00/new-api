@@ -1405,6 +1405,8 @@ Operational notes:
 
 - NewAPI is intentionally uninitialized; create the root admin user through
   the web UI so the admin password is not handled by automation.
+- NewAPI is documented in this same repository on `main` as a sidecar
+  deployment record, not as a branch replacing Sub2API.
 - Do not import the same CPA/OpenAI OAuth accounts into both NewAPI and Sub2API
   with auto-refresh enabled. Refresh tokens rotate, and whichever system uses a
   refresh token first owns the next token; the other system will hit

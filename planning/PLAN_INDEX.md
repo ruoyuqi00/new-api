@@ -39,6 +39,10 @@
 - `SECRETS_LOCATION_AND_ROTATION_GUIDE.md`
   - Safe secret location, inspection, and rotation guide. Tracks where secrets
     live without committing plaintext passwords or API keys to Git.
+- `NEWAPI_SIDECAR_DEPLOY_2026-06-04.md`
+  - Documents the NewAPI sidecar deployment on the same production server.
+    NewAPI is a complement for CPA/OpenAI OAuth pools, while Sub2API remains
+    the private fork and custom Kiro/Windsurf/provider-adapter system.
 
 ## 2026-05-19 Kiro Gateway Runtime Docs
 
