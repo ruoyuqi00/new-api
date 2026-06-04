@@ -95,29 +95,44 @@
               <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-900 dark:text-dark-400">
                 <tr>
                   <th class="px-3 py-2 text-left font-medium">Account</th>
-                  <th class="px-3 py-2 text-left font-medium">Plan</th>
+                  <th class="px-3 py-2 text-left font-medium">Auth</th>
+                  <th class="px-3 py-2 text-left font-medium">Profile</th>
                   <th class="px-3 py-2 text-left font-medium">Runtime</th>
                   <th class="px-3 py-2 text-left font-medium">Token</th>
-                  <th class="px-3 py-2 text-left font-medium">Usage</th>
+                  <th class="px-3 py-2 text-left font-medium">Models</th>
+                  <th class="px-3 py-2 text-left font-medium">Usage / Errors</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
                 <tr v-if="kiroRuntimeAccounts.length === 0">
-                  <td class="px-3 py-4 text-center text-gray-500 dark:text-dark-400" colspan="5">
+                  <td class="px-3 py-4 text-center text-gray-500 dark:text-dark-400" colspan="7">
                     {{ t('admin.accounts.providerAdaptersEmpty') }}
                   </td>
                 </tr>
                 <tr v-for="account in kiroRuntimeAccounts" :key="account.id">
                   <td class="px-3 py-2">
                     <div class="font-medium text-gray-900 dark:text-white">{{ account.label }}</div>
+                    <div class="text-xs text-gray-500 dark:text-dark-400">{{ account.email || account.id }}</div>
+                  </td>
+                  <td class="px-3 py-2 text-gray-600 dark:text-dark-300">
+                    <div>{{ account.auth_method || account.provider || '-' }}</div>
                     <div class="text-xs text-gray-500 dark:text-dark-400">{{ account.region || account.engine }}</div>
                   </td>
-                  <td class="px-3 py-2 text-gray-600 dark:text-dark-300">{{ account.plan_name || account.plan_tier || '-' }}</td>
+                  <td class="px-3 py-2 text-gray-600 dark:text-dark-300">{{ account.profile_arn_present ? 'yes' : 'no' }}</td>
                   <td class="px-3 py-2">
                     <span :class="runtimeStatusClass(account.runtime_status)">{{ account.runtime_status || '-' }}</span>
+                    <div v-if="account.disabled_reason" class="mt-1 max-w-[12rem] truncate text-xs text-red-500" :title="account.disabled_reason">
+                      {{ account.disabled_reason }}
+                    </div>
                   </td>
                   <td class="px-3 py-2 text-gray-600 dark:text-dark-300">{{ account.token_status || '-' }}</td>
-                  <td class="px-3 py-2 text-gray-600 dark:text-dark-300">{{ formatUsage(account.usage_current, account.usage_limit) }}</td>
+                  <td class="px-3 py-2 text-gray-600 dark:text-dark-300">{{ account.supported_model_count || '-' }}</td>
+                  <td class="px-3 py-2 text-gray-600 dark:text-dark-300">
+                    <div>{{ formatUsage(account.usage_current, account.usage_limit) }}</div>
+                    <div class="text-xs text-gray-500 dark:text-dark-400">
+                      err {{ account.error_count ?? 0 }}<span v-if="account.cooldown_until"> / cooldown {{ formatUnixTime(account.cooldown_until) }}</span>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -341,8 +356,8 @@ const activeFetchedAt = computed(() => {
 const activeRaw = computed(() => {
   const endpoint = activeEndpoint.value
   if (!endpoint) return t('admin.accounts.providerAdaptersEmpty')
-  if (endpoint.loading) return t('admin.accounts.providerAdaptersLoading')
-  if (endpoint.error) return endpoint.error
+  if (endpoint.loading && !endpoint.result) return t('admin.accounts.providerAdaptersLoading')
+  if (endpoint.error && !endpoint.result) return endpoint.error
   if (!endpoint.result) return t('admin.accounts.providerAdaptersEmpty')
   const payload = isProviderAdapterAdminResponse(endpoint.result)
     ? endpoint.result.data ?? endpoint.result
@@ -439,8 +454,8 @@ const runtimeStatusClass = (status?: string) => {
 }
 
 const endpointSummary = (endpoint: EndpointState) => {
-  if (endpoint.loading) return t('admin.accounts.providerAdaptersLoading')
-  if (endpoint.error) return endpoint.error
+  if (endpoint.loading && !endpoint.result) return t('admin.accounts.providerAdaptersLoading')
+  if (endpoint.error && !endpoint.result) return endpoint.error
   if (!endpoint.result) return t('admin.accounts.providerAdaptersEmpty')
 
   if (endpoint.key === 'kiroRuntimeStatus') {
@@ -498,13 +513,18 @@ const formatUsage = (current?: number, limit?: number) => {
   return `${current ?? 0} / ${limit}`
 }
 
+const formatUnixTime = (value?: number) => {
+  if (!value) return '-'
+  const millis = value > 10_000_000_000 ? value : value * 1000
+  return new Date(millis).toLocaleString()
+}
+
 const loadEndpoint = async (endpoint: EndpointState) => {
   endpoint.loading = true
   endpoint.error = ''
   try {
     endpoint.result = await endpoint.load()
   } catch (error: any) {
-    endpoint.result = null
     endpoint.error = error?.message || t('admin.accounts.providerAdaptersLoadFailed')
   } finally {
     endpoint.loading = false

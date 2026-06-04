@@ -28,6 +28,9 @@ The Kiro Web Portal route is different:
 - `POST /v1/messages`
 - `POST /v1/chat/completions`
 - `GET /admin/usage`
+- `GET /api/admin/credentials`
+- `GET /api/admin/accounts`
+- `GET /api/admin/status`
 
 Authentication uses the same internal key style as the existing Kiro adapter:
 
@@ -35,6 +38,11 @@ Authentication uses the same internal key style as the existing Kiro adapter:
 - or `x-api-key: <key>`
 
 By default the key is read from `/config/generated-kiro-api-key.txt`.
+
+The `/api/admin/*` endpoints are internal, redacted management endpoints for
+Sub2API's Adapter Admin page. They expose account counts, disabled/runtime
+status, token expiry status, Profile ARN presence, model metadata, and routing
+defaults, but never return raw access tokens or refresh tokens.
 
 ## Environment
 
@@ -184,3 +192,13 @@ reference projects:
 - force-refresh once when the portal session cannot authenticate;
 - optionally trim very large prompts against a conservative model context
   budget before calling `StreamSendMessage`.
+
+The 2026-06-04 admin-console update kept this adapter as the Kiro runtime used
+by Sub2API and learned only UI/protocol shape from Kiro-Go-style local gateway
+projects:
+
+- expose `/api/admin/credentials` so Sub2API's Kiro Runtime panel can populate
+  accounts instead of showing sparse/offline data;
+- include sanitized fields for auth method, region, Profile ARN presence,
+  token status, runtime status, disabled reason, and supported model count;
+- keep the public model/runtime endpoints unchanged.

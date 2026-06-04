@@ -153,6 +153,69 @@ def parse_expiry(value: Any) -> dt.datetime | None:
     return None
 
 
+def expiry_timestamp(value: Any) -> int | None:
+    parsed = parse_expiry(value)
+    if not parsed:
+        return None
+    return int(parsed.timestamp())
+
+
+def credential_token_status(cred: dict[str, Any]) -> str:
+    expires_at = parse_expiry(pick(cred, "expiresAt", "expires_at"))
+    if not expires_at:
+        return "unknown"
+    now = now_utc()
+    if expires_at <= now:
+        return "expired"
+    if expires_at <= now + dt.timedelta(minutes=5):
+        return "expiring"
+    return "valid"
+
+
+def credential_id(cred: dict[str, Any], index: int) -> str:
+    for key in ("id", "account_id", "accountId", "user_id", "userId"):
+        value = cred.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    fingerprint = pick(cred, "email", "login_hint", "loginHint", "refreshToken", "refresh_token", "accessToken", "access_token")
+    if isinstance(fingerprint, str) and fingerprint.strip():
+        return f"kiro_{sha256_hex(fingerprint.strip())[:12]}"
+    return f"kiro_account_{index + 1}"
+
+
+def sanitize_credential_for_admin(cred: dict[str, Any], index: int) -> dict[str, Any]:
+    disabled = bool(cred.get("disabled"))
+    profile_arn = pick(cred, "profileArn", "profile_arn")
+    email = pick(cred, "email", "login_hint", "loginHint")
+    expires_at = pick(cred, "expiresAt", "expires_at")
+    models = cred.get("availableModels") or cred.get("available_models") or cred.get("models") or DEFAULT_MODELS
+    if not isinstance(models, list):
+        models = DEFAULT_MODELS
+    return {
+        "id": credential_id(cred, index),
+        "label": email or credential_id(cred, index),
+        "email": email,
+        "auth_method": pick(cred, "authMethod", "auth_method") or ("social" if pick(cred, "refreshToken", "refresh_token") else "access_token"),
+        "provider": pick(cred, "idp", "provider", "authProvider", "auth_provider"),
+        "engine": "kiro-web",
+        "region": pick(cred, "authRegion", "auth_region", "region") or "us-east-1",
+        "priority": cred.get("priority"),
+        "disabled": disabled,
+        "disabled_reason": cred.get("disabled_reason"),
+        "disabled_at": cred.get("disabled_at"),
+        "has_access_token": bool(pick(cred, "accessToken", "access_token")),
+        "has_refresh_token": bool(pick(cred, "refreshToken", "refresh_token")),
+        "has_profile_arn": bool(profile_arn),
+        "profile_arn_present": bool(profile_arn),
+        "expires_at": expiry_timestamp(expires_at),
+        "expiresAt": expiry_timestamp(expires_at),
+        "token_status": "disabled" if disabled else credential_token_status(cred),
+        "runtime_status": "disabled" if disabled else "available",
+        "availableModels": [str(model) for model in models if isinstance(model, str) and model.strip()],
+        "supported_model_count": len([model for model in models if isinstance(model, str) and model.strip()]),
+    }
+
+
 def auth_failure_from_response(status: int, message: str) -> bool:
     lower = message.lower()
     if status in (401, 403):
@@ -690,6 +753,74 @@ class KiroWebClient:
         usable.sort(key=lambda pair: int(pair[0].get("priority") or 0))
         return usable, loaded
 
+    def admin_credentials(self) -> dict[str, Any]:
+        try:
+            loaded = json.loads(self.creds_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {
+                "provider": "kiro-web",
+                "engine": "kiro-web",
+                "credentials": [],
+                "accounts": [],
+                "total": 0,
+                "available": 0,
+                "disabled": 0,
+                "with_profile_arn": 0,
+                "models": [
+                    {
+                        "id": model,
+                        "source": "adapter_default",
+                        "supported_account_count": 0,
+                        "last_smoke_status": "not_run",
+                        "public_enabled": True,
+                    }
+                    for model in DEFAULT_MODELS
+                ],
+                "error": "credentials file not found",
+            }
+        candidates = loaded if isinstance(loaded, list) else [loaded]
+        if not isinstance(candidates, list):
+            candidates = []
+        credentials = [
+            sanitize_credential_for_admin(item, idx)
+            for idx, item in enumerate(candidates)
+            if isinstance(item, dict)
+        ]
+        available = [item for item in credentials if item.get("runtime_status") == "available"]
+        model_counts: dict[str, int] = {}
+        for item in available:
+            for model in item.get("availableModels") or DEFAULT_MODELS:
+                model_counts[str(model)] = model_counts.get(str(model), 0) + 1
+        models = [
+            {
+                "id": model,
+                "source": "adapter_default",
+                "supported_account_count": model_counts.get(model, len(available)),
+                "last_smoke_status": "not_run",
+                "public_enabled": True,
+            }
+            for model in DEFAULT_MODELS
+        ]
+        return {
+            "provider": "kiro-web",
+            "engine": "kiro-web",
+            "credentials": credentials,
+            "accounts": credentials,
+            "total": len(credentials),
+            "available": len(available),
+            "disabled": len(credentials) - len(available),
+            "with_profile_arn": sum(1 for item in credentials if item.get("profile_arn_present")),
+            "models": models,
+            "model_count": len(models),
+            "routing": {
+                "default_strategy": "priority-first",
+                "session_sticky": False,
+                "model_aware_routing": True,
+                "auto_switch_on_quota": True,
+                "allow_overage": False,
+            },
+        }
+
     def load_credential(self) -> tuple[dict[str, Any], int | None, Any]:
         usable, loaded = self.load_credentials()
         cred, idx = usable[0]
@@ -1122,6 +1253,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 usage = self.server.kiro.usage()
                 self.write_json(200, {"provider": "kiro-web", "usage": usage})
+                return
+            if path in ("/api/admin/credentials", "/api/admin/accounts", "/api/admin/status"):
+                if not self.require_auth():
+                    return
+                self.write_json(200, self.server.kiro.admin_credentials())
                 return
             self.write_error_json(404, "not found", "not_found")
         except Exception as exc:

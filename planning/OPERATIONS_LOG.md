@@ -1,5 +1,34 @@
 # Operations Log
 
+## 2026-06-04 Kiro adapter admin visibility
+
+- Reviewed the existing Sub2API Kiro/Windsurf adapter admin area without
+  inspecting `D:\wflogin\注册机相关项目`.
+- Found the main Kiro display gap:
+  - Sub2API already probes Kiro runtime account data at
+    `/api/admin/credentials`.
+  - The deployed `kiro-web` adapter only exposed runtime/model endpoints and
+    `/admin/usage`, so the Kiro Runtime panel could show sparse or empty
+    account data even when the adapter itself could serve model requests.
+- Compared against the newer Kiro-Go local gateway pattern and kept only the
+  useful management-surface ideas: account pool summary, sanitized account
+  fields, model counts, runtime status, and stable refresh behavior.
+- Code changes:
+  - Added redacted `kiro-web` management endpoints:
+    `/api/admin/credentials`, `/api/admin/accounts`, and `/api/admin/status`.
+  - The admin response now includes account id/label/email where available,
+    auth method, provider, region, disabled state/reason, token status, Profile
+    ARN presence, supported model count, and default model metadata, without
+    returning raw access or refresh tokens.
+  - Improved the Sub2API Adapter Admin Kiro account table to show auth,
+    Profile ARN, model count, disabled reason, and error/cooldown fields.
+  - Refresh now keeps the previous response visible if a later refresh fails,
+    reducing the blank/abnormal component state reported in the admin UI.
+- Local verification:
+  - `python -m py_compile adapters\kiro-web\kiro_web_adapter.py` passed.
+  - `go test ./internal/handler/admin -run Kiro` passed.
+  - `npm run build` from `frontend` passed.
+
 ## 2026-06-02 CPA Codex passthrough failover fix
 
 - Investigated why CPA/Codex accounts imported through Sub2API looked broadly

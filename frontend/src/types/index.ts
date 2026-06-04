@@ -1380,8 +1380,11 @@ export interface KiroRuntimeAccount {
   label: string
   email?: string
   auth_method?: string
+  provider?: string
   engine: string
   region?: string
+  disabled?: boolean
+  disabled_reason?: string
   plan_name?: string
   plan_tier?: string
   profile_arn_present: boolean
