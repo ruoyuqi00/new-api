@@ -1,5 +1,30 @@
 # Operations Log
 
+## 2026-06-05 NewAPI CPA GPT group import
+
+- Imported CPA/Codex OAuth credentials into the NewAPI sidecar from
+  `C:\Users\Administrator\Downloads\cpa_18129d47107c4f90` without printing
+  access tokens or refresh tokens.
+- Local precheck:
+  - 20 JSON files found.
+  - 20 unique refresh tokens.
+  - Access-token JWTs were not expired at import time.
+- NewAPI changes:
+  - Added 20 enabled channels with tag `cpa-codex-18129d47107c4f90`.
+  - Set all imported channels to group `gpt`.
+  - Added `gpt` to `GroupRatio` and `UserUsableGroups`.
+  - Created a NewAPI token named `gpt`, limited to `gpt-5.5`, with
+    cross-group retry disabled. The token value is intentionally not stored in
+    Git.
+- Server safety:
+  - Created a pre-import NewAPI MySQL backup under `/opt/newapi/backups/`.
+  - Temporary SQL/import files were removed after execution.
+- Verification:
+  - NewAPI channel summary for the new tag: 20 total, 20 enabled.
+  - Public smoke against `https://newapi.vyywcw.cn/v1/responses` with the
+    `gpt` token, `stream=true`, and `model: gpt-5.5` returned HTTP 200 and
+    SSE `response.created`.
+
 ## 2026-06-04 Kiro adapter admin visibility
 
 - Reviewed the existing Sub2API Kiro/Windsurf adapter admin area without
