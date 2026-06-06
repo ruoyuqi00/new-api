@@ -1,5 +1,25 @@
 # Operations Log
 
+## 2026-06-06 NewAPI manual Codex account import
+
+- Imported one manually supplied CPA/Codex OAuth account into the NewAPI
+  sidecar without printing token values.
+- NewAPI channel:
+  - channel id `37`
+  - tag `cpa-codex-manual-20260606`
+  - group `gpt`
+  - model list includes `gpt-5.5`
+- Verification:
+  - Isolated channel smoke through a temporary test group returned HTTP 200
+    from `https://newapi.vyywcw.cn/v1/responses`.
+  - Final `gpt` group smoke with model `gpt-5.5` returned HTTP 200 and SSE
+    `response.created`.
+- Cleanup:
+  - The older `cpa-codex-18129d47107c4f90` batch repeatedly returned upstream
+    `token_invalidated` errors during `gpt` group smoke.
+  - Per operator preference, unusable channels were deleted instead of left
+    disabled. The old bad batch now has 0 channels left in group `gpt`.
+
 ## 2026-06-05 NewAPI CPA GPT group import
 
 - Imported CPA/Codex OAuth credentials into the NewAPI sidecar from
