@@ -1,5 +1,30 @@
 # Operations Log
 
+## 2026-06-07 Upstream merge upgrade and redeploy
+
+- Merged `upstream/main` into the private `main` branch.
+- Upstream changes included:
+  - server version sync to `0.1.134`;
+  - OpenAI Responses sticky-account handling;
+  - OpenAI-compatible stream field validation;
+  - scheduler snapshot sync;
+  - usage cache token split;
+  - user-visible error views and ops error log improvements;
+  - `skills/sub2api-admin` helper scripts/docs.
+- Preserved private provider adapter work:
+  - Kiro import endpoint and frontend modal;
+  - Windsurf import endpoint and frontend modal;
+  - Provider Adapters admin page and routes;
+  - `kiro-web-adapter` files and deployment wiring.
+- Local verification:
+  - `go test ./internal/handler/admin -run 'Kiro|Windsurf|Codex'` passed.
+  - `go test ./internal/pkg/apicompat ./internal/service -run 'Responses|Anthropic|OpenAI|Codex|Scheduler|RateLimit|Account'`
+    passed.
+  - `npm run test:run -- src/components/admin/account/__tests__/kiroImport.spec.ts src/components/admin/account/__tests__/windsurfImport.spec.ts`
+    passed.
+  - `npm run build` passed and produced updated embedded frontend assets.
+- Deployment verification is recorded below after the server image switch.
+
 ## 2026-06-07 Sub2API upstream/provider adapter recheck
 
 - Checked upstream `upstream/main`; upstream is ahead of the private branch.
