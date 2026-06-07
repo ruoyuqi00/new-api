@@ -1,5 +1,29 @@
 # Operations Log
 
+## 2026-06-07 NewAPI CPA GPT batch import
+
+- Imported CPA/Codex OAuth credentials into the NewAPI sidecar from
+  `C:\Users\Administrator\Downloads\cpa_649f355d0aa5402a` without printing
+  access tokens or refresh tokens.
+- Local precheck:
+  - 10 JSON files found.
+  - 10 unique refresh tokens.
+  - Access-token JWTs were not expired at import time.
+- NewAPI changes:
+  - Added channels with tag `cpa-codex-649f355d0aa5402a`.
+  - Imported channels were assigned to group `gpt` and model list including
+    `gpt-5.5`.
+  - Created temporary per-channel smoke groups/tokens for verification, then
+    removed the temporary tokens.
+- Verification and cleanup:
+  - Per-channel smoke against `https://newapi.vyywcw.cn/v1/responses` found
+    9 usable channels and 1 upstream `token_invalidated` channel.
+  - Per operator preference, the unusable channel was deleted rather than left
+    disabled.
+  - Final NewAPI state for `cpa-codex-649f355d0aa5402a`: 9 total, 9 enabled.
+  - Final `gpt` group smoke with model `gpt-5.5` returned HTTP 200 and SSE
+    `response.created`.
+
 ## 2026-06-06 NewAPI manual Codex account import
 
 - Imported one manually supplied CPA/Codex OAuth account into the NewAPI
