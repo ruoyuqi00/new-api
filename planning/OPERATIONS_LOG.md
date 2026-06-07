@@ -1,5 +1,37 @@
 # Operations Log
 
+## 2026-06-07 NewAPI HH CPA/Codex reimport final verification
+
+- Rechecked the four manually supplied HH CPA/Codex accounts after the NewAPI
+  Codex `account_id` metadata repair.
+- Final NewAPI channels:
+  - tag: `cpa-codex-manual-hh-reimport-20260607`
+  - channel IDs: `54`, `55`, `56`, `57`
+  - group: `gpt`
+  - channel type: Codex (`57`)
+  - enabled status: all 4 enabled
+  - model list includes `gpt-5.5`
+- Metadata verification:
+  - all 4 channels store `type: codex`;
+  - all 4 channels store a real ChatGPT account id, not `pending-*`;
+  - all 4 channels have access and refresh tokens present.
+- Smoke verification:
+  - created a temporary NewAPI token scoped to group `gpt` and model
+    `gpt-5.5`;
+  - called each channel through
+    `POST https://newapi.vyywcw.cn/v1/responses`;
+  - request used `stream: true` and list-form `input`;
+  - channels `54`, `55`, `56`, and `57` all reached
+    `response.completed`.
+- Cleanup:
+  - temporary smoke-test tokens were deleted after testing;
+  - no `codex-hh-smoke-20260607` or `codex-hh-token-debug-20260607`
+    tokens remained.
+- Note: earlier `Invalid token` smoke output was caused by the local SSH/script
+  invocation breaking curl headers before the request reached NewAPI. After
+  switching to base64-transferred remote scripts, token creation and
+  channel-specific calls verified correctly.
+
 ## 2026-06-07 NewAPI Codex account_id metadata repair
 
 - Investigated why the same CPA/Codex OAuth accounts were usable when imported

@@ -198,3 +198,32 @@ Required request shape:
 
 Do not use `gpt-5.5-codex` for these ChatGPT/Codex accounts; upstream rejects
 that model name.
+
+## Manual HH CPA/Codex reimport
+
+On 2026-06-07, four manually supplied HH CPA/Codex accounts were rechecked and
+kept in NewAPI after the Codex `account_id` metadata repair.
+
+Final channel placement:
+
+- tag: `cpa-codex-manual-hh-reimport-20260607`
+- group: `gpt`
+- channel IDs: `54`, `55`, `56`, `57`
+- model used for smoke: `gpt-5.5`
+
+Verification:
+
+- all four channels are enabled;
+- all four channel keys include `type: codex`, a real ChatGPT `account_id`,
+  and present access/refresh token fields;
+- a temporary `gpt` group token was created only for smoke testing and deleted
+  afterward;
+- each channel completed a channel-specific call to
+  `POST https://newapi.vyywcw.cn/v1/responses` with `stream: true`.
+
+Operational note:
+
+- When testing channel-specific keys through SSH automation, transfer the remote
+  script as base64 and run it with `bash`. Passing multiline shell directly
+  through Windows PowerShell can split curl headers and produce misleading
+  NewAPI-layer `Invalid token` errors before the request reaches the channel.
