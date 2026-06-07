@@ -1,5 +1,54 @@
 # Operations Log
 
+## 2026-06-07 Sub2API upstream/provider adapter recheck
+
+- Checked upstream `upstream/main`; upstream is ahead of the private branch.
+  Notable upstream changes include:
+  - OpenAI Responses sticky account handling.
+  - Stream field validation for OpenAI-compatible gateways.
+  - Chat Completions/Responses bridge tests.
+  - Scheduler snapshot sync.
+  - Usage cache token split.
+  - A new `skills/sub2api-admin` helper.
+- Did not merge upstream in this pass because upstream does not include the
+  private Kiro/Windsurf adapter files and a direct merge would require a
+  private-patch preservation pass.
+- Rechecked local import parser tests:
+  - `go test ./internal/handler/admin -run 'Kiro|Windsurf'` passed.
+- Server validation:
+  - `https://api.vyywcw.cn/health` returned OK.
+  - `windsurf-api` internal health returned OK, version `2.0.97`, with 11
+    active accounts and 0 error accounts.
+  - Found Kiro adapter wiring drift: Sub2API was still defaulting Kiro internal
+    admin calls to `http://kiro-rs:8990`, while `/api/admin/credentials` is
+    implemented by `kiro-web-adapter`.
+  - Updated `/opt/sub2api/docker-compose.yml` and `.env` so Kiro admin/import
+    calls use `http://kiro-web-adapter:8991` and the same adapter admin key as
+    `kiro-web-adapter`'s key file.
+  - Recreated `sub2api`; the container returned healthy.
+  - Verified from inside the Sub2API container that
+    `http://kiro-web-adapter:8991/api/admin/credentials` returns Kiro web
+    account/model status. The response showed the `kiro-web` engine, runtime
+    availability, and model coverage including Claude Opus/Sonnet 4.x lines.
+- Updated deployment templates:
+  - `deploy/docker-compose.yml` now documents Provider Adapter env wiring and
+    defaults Kiro internal admin URL to `http://kiro-web-adapter:8991`.
+  - `deploy/.env.example` now documents `WINDSURF_API_KEY`,
+    `KIRO_ADMIN_API_KEY`, and adapter base URL settings.
+- Protocol/import status:
+  - Public Kiro changelog recheck showed recent CLI/Web/model updates,
+    including CLI 2.6.0, Kiro Web session improvements, and Opus/Sonnet 4.x
+    model availability/context updates. No public note found that changes the
+    refresh-token or Kiro web adapter import shape used by this deployment.
+  - Kiro-Go reference remains on `a2e3971` after fetch. Its current useful
+    differences are still multi-account/model refresh/SSO-local-token import
+    UX and structured tool handling, not a new mandatory token format for our
+    deployed web adapter path.
+  - Public Windsurf API docs describe the Enterprise service-key API for usage
+    and configuration management. That is separate from the deployed internal
+    WindsurfAPI adapter path, which remains healthy on version `2.0.97`; no
+    live import break was found in this check.
+
 ## 2026-06-07 NewAPI CPA GPT batch import
 
 - Imported CPA/Codex OAuth credentials into the NewAPI sidecar from
