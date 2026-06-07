@@ -1,5 +1,26 @@
 # Operations Log
 
+## 2026-06-07 NewAPI manual HH account import attempt
+
+- Attempted to import two manually supplied CPA/Codex OAuth accounts into the
+  NewAPI sidecar with tag `cpa-codex-manual-hh-20260607`.
+- Import target:
+  - group `gpt`
+  - models include `gpt-5.5`
+  - NewAPI channel type `57`
+- Created a pre-import MySQL backup under `/opt/newapi/backups/`.
+- Per-channel isolated smoke used temporary groups/tokens and restarted NewAPI
+  to refresh DB-backed token/group caches.
+- Both accounts reached upstream but returned HTTP 401:
+  - `Could not parse your authentication token`
+  - upstream code `unauthorized_unknown`
+- Per operator preference, both unusable channels were deleted rather than
+  left disabled.
+- Final state:
+  - `cpa-codex-manual-hh-20260607`: 0 remaining channels.
+  - Temporary `tmp-hh-smoke-*` tokens: 0 remaining.
+  - NewAPI app, MySQL, and Redis containers were healthy after cleanup.
+
 ## 2026-06-07 Upstream merge upgrade and redeploy
 
 - Merged `upstream/main` into the private `main` branch.
