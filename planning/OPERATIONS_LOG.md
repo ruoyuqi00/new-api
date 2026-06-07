@@ -1,5 +1,41 @@
 # Operations Log
 
+## 2026-06-07 NewAPI Codex account_id metadata repair
+
+- Investigated why the same CPA/Codex OAuth accounts were usable when imported
+  by local cockpit-tools but failed in NewAPI manual DB smoke tests.
+- Root cause: the manual NewAPI path had stored placeholder
+  `account_id` values such as `pending-*`. NewAPI's Codex adapter sends this
+  value as the `chatgpt-account-id` header, while cockpit-tools and Sub2API
+  both extract the real `chatgpt_account_id` from OAuth JWTs before use.
+- Additional note: Codex refresh tokens are rotating credentials. If
+  cockpit-tools refreshes an imported account first, the old pasted
+  `refresh_token` may no longer be reusable on the server; use the latest
+  exported credential chain when re-importing.
+- Created a MySQL backup before repair:
+  `/opt/newapi/backups/channels-before-accountid-fix-20260607182523.sql`.
+- Repaired all existing NewAPI Codex channels by decoding the current
+  `access_token` JWT and updating only key metadata:
+  - channels scanned: 26
+  - channels updated: 26
+  - channels skipped: 0
+  - fields repaired: `account_id`, `email`, and missing `type`
+- Verification:
+  - all NewAPI Codex channels now have non-placeholder `account_id` metadata
+    and email metadata;
+  - a temporary NewAPI token in group `gpt` was created and deleted during
+    smoke testing;
+  - `https://newapi.vyywcw.cn/v1/responses` with `model: gpt-5.5`,
+    list-form `input`, and `stream: true` returned HTTP 200 SSE
+    `response.created`;
+  - the same call with `stream: false` returned `Stream must be set to true`,
+    so clients should use streaming for these Codex/ChatGPT accounts;
+  - `gpt-5-codex` is still rejected upstream for these ChatGPT accounts.
+- Import rule going forward: never use a synthetic `pending-*` account id for
+  NewAPI Codex channels. Extract `chatgpt_account_id` from the access token or
+  import through a flow that refreshes/normalizes credentials like
+  cockpit-tools.
+
 ## 2026-06-07 NewAPI manual HH account import attempt
 
 - Attempted to import two manually supplied CPA/Codex OAuth accounts into the

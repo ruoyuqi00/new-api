@@ -146,6 +146,17 @@ Recommended split:
   routes by model family or key group rather than duplicating OAuth accounts in
   both systems.
 
+Codex import rule:
+
+- NewAPI Codex channels must store the real ChatGPT `account_id`.
+- Do not use synthetic placeholders such as `pending-*`; NewAPI sends this
+  field as the `chatgpt-account-id` request header.
+- When importing CPA/Codex JSON manually, extract `chatgpt_account_id` from the
+  `access_token` JWT or use an import path that refreshes and normalizes the
+  credential chain like cockpit-tools.
+- If cockpit-tools already refreshed a pasted credential, export/use the latest
+  credential chain; the old `refresh_token` may have been rotated away.
+
 ## GPT-5.5 CPA groups
 
 Two NewAPI groups were configured for the imported CPA/Codex account pools:
