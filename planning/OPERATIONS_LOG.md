@@ -24,6 +24,22 @@
     passed.
   - `npm run build` passed and produced updated embedded frontend assets.
 - Deployment verification is recorded below after the server image switch.
+- Server deployment:
+  - Built image `sub2api-provider-adapters:upstream-merge-20260607-c75c6b1a`
+    from commit `c75c6b1a`.
+  - The first two server builds failed because `/var/lib/docker` ran out of
+    space during Go compilation/linking. Cleaned Docker build cache, temporary
+    build artifacts, and old `sub2api-provider-adapters:*` image tags while
+    retaining current/recent rollback images.
+  - Updated `/opt/sub2api/docker-compose.yml` to use the new image and
+    recreated `sub2api`.
+  - `docker compose ps` showed `sub2api` healthy on the new image.
+  - `https://api.vyywcw.cn/health` returned HTTP 200.
+  - `/app/sub2api --version` reported `Sub2API 0.1.134`, commit `c75c6b1a`.
+  - Windsurf internal health remained OK: version `2.0.97`, 11 active
+    accounts, 0 error accounts.
+  - Kiro internal admin probe through `kiro-web-adapter:8991` returned
+    `kiro-web` account/model status with runtime availability.
 
 ## 2026-06-07 Sub2API upstream/provider adapter recheck
 
