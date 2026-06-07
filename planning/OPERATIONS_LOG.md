@@ -21,6 +21,28 @@
   - Temporary `tmp-hh-smoke-*` tokens: 0 remaining.
   - NewAPI app, MySQL, and Redis containers were healthy after cleanup.
 
+## 2026-06-07 NewAPI manual HH retry import attempt
+
+- Retried with two newly supplied CPA/Codex OAuth accounts using tag
+  `cpa-codex-manual-hh-retry-20260607`.
+- Import target:
+  - group `gpt`
+  - models include `gpt-5.5`
+  - NewAPI channel type `57`
+- Created a pre-import MySQL backup under `/opt/newapi/backups/`.
+- The accounts were inserted as temporary channels `52` and `53` for isolated
+  smoke testing.
+- Per-channel smoke restarted NewAPI to refresh token/group caches before
+  calling `https://newapi.vyywcw.cn/v1/responses` with `gpt-5.5`.
+- Both channels returned HTTP 401 `Invalid token`.
+- Per operator preference, both unusable channels were deleted rather than
+  left disabled.
+- Final state:
+  - `cpa-codex-manual-hh-retry-20260607`: 0 remaining channels.
+  - Temporary `tmp-hh-retry-smoke-*` tokens: 0 remaining.
+  - `gpt` group remained at 10 enabled channels.
+  - NewAPI app, MySQL, and Redis containers were healthy after cleanup.
+
 ## 2026-06-07 Upstream merge upgrade and redeploy
 
 - Merged `upstream/main` into the private `main` branch.
