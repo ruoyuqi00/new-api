@@ -135,6 +135,8 @@ docs/*
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
 !docs/KIRO_UPSTREAM_AUDIT_2026-05-23.md
 !docs/UPSTREAM_PROTOCOL_AUDIT_2026-05-25.md
+!docs/legal/
+!docs/legal/*.md
 .serena/
 .codex/
 frontend/coverage/
