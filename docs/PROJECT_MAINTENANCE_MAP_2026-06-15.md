@@ -45,11 +45,50 @@ The current docs that matter most for maintenance are:
 At `D:\wflogin`, these directories are present but are not all part of the main deployed stack:
 
 - `sub2api-private/` is the current maintenance repo.
-- `sub2api/` and `sub2api-fork/` are older checkout variants.
 - `new-api/` is the sidecar/newapi reference project.
-- `Kiro-Go/`, `kiro.rs-master/`, and `windsurf-relay-sanitized/` are reference implementations or extracted notes.
 - `unified-ai-gateway/` is a separate sidecar/reference workspace.
-- `*_src.tar`, `*.tar.gz`, `*.zip`, and `.tmp-*` files are build or investigation artifacts.
+- `openclaw/` and `tools/` are currently kept because Windows service `OpenClaw` is running through `D:\wflogin\tools\nssm\nssm-2.24\win64\nssm.exe`.
+- `_archive_old_unused_20260615/` contains old checkouts, build artifacts, temp files, and notes moved out of the root workspace.
+- `D:\wflogin\<registration-project>` is intentionally independent and was not inspected or moved. This refers to the Chinese-named folder requested by the user.
+
+Older checkout variants and reference implementations such as `sub2api/`, `sub2api-fork/`, `Kiro-Go/`, `kiro.rs-master/`, and `windsurf-relay-sanitized/` were moved into the archive folder during the cleanup pass.
+
+## Workspace cleanup performed
+
+Cleanup date: 2026-06-15.
+
+Archive root:
+
+```text
+D:\wflogin\_archive_old_unused_20260615
+```
+
+Nothing was deleted. Old or unused material was moved into subfolders:
+
+- `artifacts/` - old tar, tar.gz, zip, and image bundles.
+- `legacy-checkouts/` - older repository checkouts and reference workspaces.
+- `uploads/` - old upload chunk directories.
+- `temp/` - temporary response/debug folders.
+- `sensitive/` - temporary files that may contain keys or local SQL snippets.
+- `hidden-configs/` - old root-level `.claude` and `.cursor` folders.
+- `runtime-scripts/` - old root-level `.runtime` scripts.
+- `caches/`, `media/`, and `notes/` - cache, screenshot, and loose note files.
+
+After cleanup, the root `D:\wflogin` intentionally contains only:
+
+- `sub2api-private/`
+- `new-api/`
+- `unified-ai-gateway/`
+- `openclaw/`
+- `tools/`
+- `_archive_old_unused_20260615/`
+- `D:\wflogin\<registration-project>`
+
+Skipped / retained:
+
+- `openclaw/` was not moved because it appeared in use.
+- `tools/` was not moved because `OpenClaw` service depends on `tools\nssm\nssm-2.24\win64\nssm.exe`.
+- `D:\wflogin\<registration-project>` was not inspected and remains independent.
 
 ## Cleanup policy
 
