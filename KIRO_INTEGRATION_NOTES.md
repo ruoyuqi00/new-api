@@ -13,6 +13,12 @@ Current upstream account model in Sub2API:
 - Anthropic API key accounts already support custom `credentials.base_url`.
 - Anthropic API key accounts also support an `extra.anthropic_passthrough` mode for forwarding requests with authentication replacement.
 
+Latest production note:
+
+- 2026-06-16: Kiro group was aligned to Anthropic routing for Claude Code usage.
+- Production image `sub2api-provider-adapters:kiro-counttokens-20260616b` adds a Kiro-specific `/v1/messages/count_tokens` fallback that returns local `input_tokens` estimates when the Kiro Web adapter returns generic 404.
+- Detailed record: `docs/KIRO_CLAUDE_CODE_2026-06-16.md`.
+
 Kiro credential model observed from `kiro.rs`:
 
 - OAuth-like credentials:

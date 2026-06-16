@@ -9537,11 +9537,20 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 
 	// 处理错误响应
 	if resp.StatusCode >= 400 {
+		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if isKiroCountTokensUnsupported404(resp.StatusCode, respBody, account) {
+			estimated := estimateAnthropicCountTokens(body)
+			logger.LegacyPrintf("service.gateway",
+				"[count_tokens] Kiro adapter does not expose count_tokens (404), returning local estimate: account=%d name=%s input_tokens=%d msg=%s",
+				account.ID, account.Name, estimated, truncateString(upstreamMsg, 512))
+			c.JSON(http.StatusOK, gin.H{"input_tokens": estimated})
+			return nil
+		}
+
 		// 标记账号状态（429/529等）
 		s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 
-		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		upstreamDetail := ""
 		if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 			maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -9636,10 +9645,6 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 	}
 
 	if resp.StatusCode >= 400 {
-		if s.rateLimitService != nil {
-			s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
-		}
-
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
@@ -9652,6 +9657,18 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 				account.ID, account.Name, truncateString(upstreamMsg, 512))
 			s.countTokensError(c, http.StatusNotFound, "not_found_error", "count_tokens endpoint is not supported by upstream")
 			return nil
+		}
+		if isKiroCountTokensUnsupported404(resp.StatusCode, respBody, account) {
+			estimated := estimateAnthropicCountTokens(body)
+			logger.LegacyPrintf("service.gateway",
+				"[count_tokens] Kiro adapter does not expose count_tokens (404), returning local estimate: account=%d name=%s input_tokens=%d msg=%s",
+				account.ID, account.Name, estimated, truncateString(upstreamMsg, 512))
+			c.JSON(http.StatusOK, gin.H{"input_tokens": estimated})
+			return nil
+		}
+
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		}
 
 		upstreamDetail := ""
@@ -9920,6 +9937,107 @@ func sanitizeCountTokensRequestBody(body []byte) []byte {
 		}
 	}
 	return out
+}
+
+func isKiroCountTokensUnsupported404(statusCode int, body []byte, account *Account) bool {
+	if statusCode != http.StatusNotFound || account == nil || !isKiroAdapterAccount(account) {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	return msg == "not found" || msg == "not_found" || strings.Contains(msg, "not found")
+}
+
+func isKiroAdapterAccount(account *Account) bool {
+	if account == nil {
+		return false
+	}
+	values := []string{
+		account.Name,
+		account.GetCredential("base_url"),
+		account.GetExtraString("provider_adapter"),
+		account.GetExtraString("provider_adapter_runtime"),
+		account.GetExtraString("engine"),
+	}
+	for _, value := range values {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(value)), "kiro") {
+			return true
+		}
+	}
+	return false
+}
+
+func estimateAnthropicCountTokens(reqBody []byte) int {
+	total := 0
+	addText := func(text string) {
+		text = strings.TrimSpace(text)
+		if text != "" {
+			total += estimateTokensForText(text)
+		}
+	}
+
+	system := gjson.GetBytes(reqBody, "system")
+	if system.IsArray() {
+		total += estimateAnthropicContentTokens(system)
+	} else {
+		addText(system.String())
+	}
+
+	gjson.GetBytes(reqBody, "messages").ForEach(func(_, msg gjson.Result) bool {
+		total += estimateAnthropicContentTokens(msg.Get("content"))
+		return true
+	})
+
+	gjson.GetBytes(reqBody, "tools").ForEach(func(_, tool gjson.Result) bool {
+		addText(tool.Get("name").String())
+		addText(tool.Get("description").String())
+		if schema := strings.TrimSpace(tool.Get("input_schema").Raw); schema != "" {
+			total += estimateTokensForText(schema)
+		}
+		return true
+	})
+
+	if total <= 0 {
+		return 1
+	}
+	return total
+}
+
+func estimateAnthropicContentTokens(content gjson.Result) int {
+	if !content.Exists() {
+		return 0
+	}
+	if content.IsArray() {
+		total := 0
+		content.ForEach(func(_, block gjson.Result) bool {
+			total += estimateAnthropicBlockTokens(block)
+			return true
+		})
+		return total
+	}
+	if content.Type == gjson.String {
+		return estimateTokensForText(content.String())
+	}
+	return estimateAnthropicBlockTokens(content)
+}
+
+func estimateAnthropicBlockTokens(block gjson.Result) int {
+	total := 0
+	addText := func(text string) {
+		text = strings.TrimSpace(text)
+		if text != "" {
+			total += estimateTokensForText(text)
+		}
+	}
+
+	addText(block.Get("text").String())
+	addText(block.Get("name").String())
+	if nested := block.Get("content"); nested.Exists() {
+		total += estimateAnthropicContentTokens(nested)
+	}
+	if input := strings.TrimSpace(block.Get("input").Raw); input != "" {
+		total += estimateTokensForText(input)
+	}
+	return total
 }
 
 // countTokensError 返回 count_tokens 错误响应

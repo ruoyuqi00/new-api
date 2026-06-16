@@ -689,6 +689,103 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_CountTokens404PassthroughNotE
 	}
 }
 
+func TestGatewayService_AnthropicAPIKeyPassthrough_CountTokensKiroGeneric404FallsBackToEstimate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+
+	body := []byte(`{"model":"claude-sonnet-4.6","messages":[{"role":"user","content":"hello from kiro"}],"tools":[{"name":"echo","description":"Echo text","input_schema":{"type":"object","properties":{"text":{"type":"string"}}}}]}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4.6"}
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"not_found","message":"not found"}}`)),
+		},
+	}
+
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:          210,
+		Name:        "kiro-web-internal-anthropic",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "internal-kiro-key",
+			"base_url": "https://kiro-web-adapter.example",
+		},
+		Extra: map[string]any{
+			"anthropic_passthrough":    true,
+			"provider_adapter":         "kiro",
+			"provider_adapter_runtime": "kiro-web",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	err := svc.ForwardCountTokens(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Greater(t, gjson.GetBytes(rec.Body.Bytes(), "input_tokens").Int(), int64(0))
+}
+
+func TestGatewayService_CountTokensKiroGeneric404FallsBackToEstimate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+
+	body := []byte(`{"model":"claude-sonnet-4.6","messages":[{"role":"user","content":"hello from standard kiro path"}]}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4.6"}
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"not_found","message":"not found"}}`)),
+		},
+	}
+
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:          210,
+		Name:        "kiro-web-internal-anthropic",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "internal-kiro-key",
+			"base_url": "https://kiro-web-adapter.example",
+		},
+		Extra: map[string]any{
+			"provider_adapter":         "kiro",
+			"provider_adapter_runtime": "kiro-web",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	err := svc.ForwardCountTokens(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Greater(t, gjson.GetBytes(rec.Body.Bytes(), "input_tokens").Int(), int64(0))
+}
+
 func TestGatewayService_AnthropicAPIKeyPassthrough_BuildRequestRejectsInvalidBaseURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
