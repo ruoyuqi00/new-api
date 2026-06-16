@@ -53,12 +53,38 @@ defaults, but never return raw access tokens or refresh tokens.
 | `KIRO_ADAPTER_API_KEY` | unset | Overrides key file |
 | `KIRO_ADAPTER_HOST` | `0.0.0.0` | Bind host |
 | `KIRO_ADAPTER_PORT` | `8991` | Bind port |
+| `KIRO_RUNTIME_STATE_FILE` | `/config/kiro-runtime-state.json` | Non-secret account routing state file |
+| `KIRO_ACCOUNT_SELECTION_STRATEGY` | `round-robin` | `round-robin`, `sticky`, or legacy `priority-first` |
+| `KIRO_SESSION_AFFINITY_ENABLED` | `true` | Keep the same conversation/session hint on the same account |
+| `KIRO_SESSION_AFFINITY_TTL_SECONDS` | `3600` | TTL for session-to-account affinity state |
 | `KIRO_ENABLE_TOKEN_BUFFER_RESERVE` | unset | Set to `1` to enable conservative prompt trimming |
 | `KIRO_TOKEN_BUFFER_RESERVE` | `20000` | Prompt trimming reserve below model context window when trimming is enabled |
 | `KIRO_MODEL_CAPABILITIES_JSON` | unset | Optional JSON object to override per-model `context_window` and `max_output_tokens` |
 
+## Account Routing And Cache State
+
+The adapter stores account routing state in `KIRO_RUNTIME_STATE_FILE`. This
+sidecar JSON file contains only rotation cursors, hashed session affinity keys,
+and sanitized credential IDs. It does not contain access tokens, refresh tokens,
+raw session IDs, or API keys.
+
+Default routing is true round-robin across enabled credentials that support the
+requested model. When a request includes a stable session hint, such as
+`conversation_id`, `thread_id`, `session_id`, `prompt_cache_key`, `user`,
+`metadata.user_id`, `X-Claude-Code-Session-Id`, `x-opencode-session`, or
+`x-session-affinity`, the adapter keeps that hint on the same Kiro account for
+the configured TTL. This preserves Kiro/Claude prompt-cache locality without
+pinning unrelated new requests to one account.
+
+Quota or overage-style upstream text is not treated as a dead account signal.
+Only hard authentication failures during token refresh, such as invalid or
+revoked tokens, disable a stored credential.
+
 Context handling is model-aware but conservative:
 
+- `claude-opus-4.8` is advertised and mapped as the newest Opus family alias
+  learned from the current Kiro references. Live availability still depends on
+  the Kiro account and Web Portal model rollout.
 - `claude-opus-4.6` follows the current upstream model metadata with a
   `1,000,000` token context window and `128,000` max output tokens.
 - Other advertised Kiro models have explicit context/output metadata instead
@@ -92,6 +118,9 @@ kiro-web-adapter:
   environment:
     - KIRO_CREDENTIALS_FILE=/config/credentials.json
     - KIRO_ADAPTER_API_KEY_FILE=/config/generated-kiro-api-key.txt
+    - KIRO_RUNTIME_STATE_FILE=/config/kiro-runtime-state.json
+    - KIRO_ACCOUNT_SELECTION_STRATEGY=round-robin
+    - KIRO_SESSION_AFFINITY_ENABLED=true
     - KIRO_ADAPTER_HOST=0.0.0.0
     - KIRO_ADAPTER_PORT=8991
     - TZ=${TZ:-Asia/Shanghai}
@@ -178,6 +207,8 @@ Validated through the public Sub2API domain on 2026-05-23:
 - Tool calls, image input, and full Anthropic feature parity are not yet
   implemented.
 - Each request creates a fresh Kiro Web space/session.
+- Auth/session material is cached in memory briefly, while account routing and
+  conversation affinity are persisted in the runtime state sidecar.
 - Model traffic errors from Kiro are currently passed through as text.
 - This service is intentionally internal-only; Sub2API remains the public
   gateway for keys, groups, routing, and quotas.

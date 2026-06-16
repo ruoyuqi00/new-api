@@ -34,12 +34,14 @@ from typing import Any, Iterable, Iterator
 PORTAL_BASE = "https://app.kiro.dev/service/KiroWebPortalService/operation"
 DEFAULT_CREDS = "/config/credentials.json"
 DEFAULT_API_KEY_FILE = "/config/generated-kiro-api-key.txt"
+DEFAULT_RUNTIME_STATE_FILE = "/config/kiro-runtime-state.json"
 DEFAULT_MODEL_CONTEXT_TOKENS = 200000
 DEFAULT_MAX_OUTPUT_TOKENS = 64000
 DEFAULT_TOKEN_BUFFER_RESERVE = 20000
 
 DEFAULT_MODELS = [
     "auto",
+    "claude-opus-4.8",
     "claude-opus-4.7",
     "claude-opus-4.6",
     "claude-sonnet-4.6",
@@ -94,6 +96,7 @@ TOKEN_BUFFER_RESERVE = env_int(
 
 MODEL_CAPABILITIES = {
     "auto": {"context_window": DEFAULT_MODEL_CONTEXT_TOKENS, "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS},
+    "claude-opus-4.8": {"context_window": 1000000, "max_output_tokens": 128000},
     "claude-opus-4.7": {"context_window": DEFAULT_MODEL_CONTEXT_TOKENS, "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS},
     "claude-opus-4.6": {"context_window": 1000000, "max_output_tokens": 128000},
     "claude-sonnet-4.6": {"context_window": 200000, "max_output_tokens": 64000},
@@ -214,6 +217,74 @@ def sanitize_credential_for_admin(cred: dict[str, Any], index: int) -> dict[str,
         "availableModels": [str(model) for model in models if isinstance(model, str) and model.strip()],
         "supported_model_count": len([model for model in models if isinstance(model, str) and model.strip()]),
     }
+
+
+def normalize_selection_strategy(raw: str | None) -> str:
+    value = (raw or "round-robin").strip().lower().replace("_", "-")
+    if value in {"priority", "priority-first", "first"}:
+        return "priority-first"
+    if value in {"sticky", "session-sticky", "affinity"}:
+        return "sticky"
+    return "round-robin"
+
+
+def credential_model_ids(cred: dict[str, Any]) -> set[str]:
+    raw_models = cred.get("availableModels") or cred.get("available_models") or cred.get("models")
+    if not isinstance(raw_models, list) or not raw_models:
+        return set()
+    result: set[str] = set()
+    for item in raw_models:
+        if isinstance(item, str) and item.strip():
+            result.add(map_model(item))
+            result.add(item.strip())
+    return result
+
+
+def credential_supports_model(cred: dict[str, Any], model: str | None) -> bool:
+    allowed = credential_model_ids(cred)
+    if not allowed or not model:
+        return True
+    canonical = map_model(model)
+    return canonical in allowed or model in allowed or "auto" in allowed
+
+
+def request_affinity_key(headers: Any, payload: dict[str, Any], namespace: str) -> str | None:
+    header_candidates = (
+        "x-session-affinity",
+        "x-claude-code-session-id",
+        "x-opencode-session",
+        "x-conversation-id",
+        "x-thread-id",
+    )
+    for key in header_candidates:
+        value = headers.get(key) if headers else None
+        if isinstance(value, str) and value.strip():
+            return f"{namespace}:header:{key}:{value.strip()[:256]}"
+
+    body_candidates = (
+        "conversation_id",
+        "conversationId",
+        "thread_id",
+        "threadId",
+        "session_id",
+        "sessionId",
+        "prompt_cache_key",
+        "promptCacheKey",
+        "user",
+    )
+    for key in body_candidates:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return f"{namespace}:body:{key}:{value.strip()[:256]}"
+
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        for key in body_candidates + ("user_id", "userId"):
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return f"{namespace}:metadata:{key}:{value.strip()[:256]}"
+
+    return None
 
 
 def auth_failure_from_response(status: int, message: str) -> bool:
@@ -644,6 +715,8 @@ def map_model(model: str | None) -> str:
 
     direct = {
         "auto": "auto",
+        "claude-opus-4.8": "claude-opus-4.8",
+        "claude-opus-4-8": "claude-opus-4.8",
         "claude-opus-4.7": "claude-opus-4.7",
         "claude-opus-4-7": "claude-opus-4.7",
         "claude-opus-4.6": "claude-opus-4.6",
@@ -660,6 +733,8 @@ def map_model(model: str | None) -> str:
     }
     if normalized in direct:
         return direct[normalized]
+    if "opus" in normalized and "4-8" in normalized:
+        return "claude-opus-4.8"
     if "opus" in normalized and "4-7" in normalized:
         return "claude-opus-4.7"
     if "opus" in normalized and "4-6" in normalized:
@@ -735,10 +810,20 @@ class PortalSession:
 class KiroWebClient:
     def __init__(self, creds_path: str) -> None:
         self.creds_path = Path(creds_path)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        self.state_lock = threading.Lock()
         self.session_cache: dict[str, PortalSession] = {}
+        self.runtime_state_path = Path(os.environ.get("KIRO_RUNTIME_STATE_FILE") or DEFAULT_RUNTIME_STATE_FILE)
+        self.selection_strategy = normalize_selection_strategy(os.environ.get("KIRO_ACCOUNT_SELECTION_STRATEGY"))
+        self.session_affinity_enabled = env_bool("KIRO_SESSION_AFFINITY_ENABLED", True)
+        self.session_affinity_ttl_seconds = env_int(
+            "KIRO_SESSION_AFFINITY_TTL_SECONDS",
+            3600,
+            60,
+            86400,
+        )
 
-    def load_credentials(self) -> tuple[list[tuple[dict[str, Any], int | None]], Any]:
+    def load_credentials(self, model: str | None = None) -> tuple[list[tuple[dict[str, Any], int | None]], Any]:
         loaded = json.loads(self.creds_path.read_text(encoding="utf-8"))
         candidates = loaded if isinstance(loaded, list) else [loaded]
         if not isinstance(candidates, list):
@@ -746,11 +831,15 @@ class KiroWebClient:
         usable: list[tuple[dict[str, Any], int | None]] = []
         for idx, item in enumerate(candidates):
             if isinstance(item, dict) and not item.get("disabled"):
-                if pick(item, "refreshToken", "refresh_token", "accessToken", "access_token"):
+                if (
+                    pick(item, "refreshToken", "refresh_token", "accessToken", "access_token")
+                    and credential_supports_model(item, model)
+                ):
                     usable.append((dict(item), idx if isinstance(loaded, list) else None))
         if not usable:
-            raise RuntimeError("no enabled Kiro credential with token material")
-        usable.sort(key=lambda pair: int(pair[0].get("priority") or 0))
+            suffix = f" for model {map_model(model)}" if model else ""
+            raise RuntimeError(f"no enabled Kiro credential with token material{suffix}")
+        usable.sort(key=lambda pair: (int(pair[0].get("priority") or 0), self.credential_runtime_id(pair[0], pair[1])))
         return usable, loaded
 
     def admin_credentials(self) -> dict[str, Any]:
@@ -813,18 +902,158 @@ class KiroWebClient:
             "models": models,
             "model_count": len(models),
             "routing": {
-                "default_strategy": "priority-first",
-                "session_sticky": False,
+                "default_strategy": self.selection_strategy,
+                "session_sticky": self.session_affinity_enabled,
+                "session_affinity_ttl_seconds": self.session_affinity_ttl_seconds,
+                "runtime_state_file": str(self.runtime_state_path),
                 "model_aware_routing": True,
-                "auto_switch_on_quota": True,
-                "allow_overage": False,
+                "auto_switch_on_quota": False,
+                "allow_overage": True,
             },
         }
 
     def load_credential(self) -> tuple[dict[str, Any], int | None, Any]:
         usable, loaded = self.load_credentials()
-        cred, idx = usable[0]
+        preferred_ids = self.select_credential_ids(None, None)
+        ordered = self.order_usable_credentials(usable, preferred_ids)
+        cred, idx = ordered[0]
         return dict(cred), idx, loaded
+
+    def credential_runtime_id(self, cred: dict[str, Any], index: int | None) -> str:
+        return credential_id(cred, index if isinstance(index, int) else 0)
+
+    def read_runtime_state(self) -> dict[str, Any]:
+        try:
+            parsed = json.loads(self.runtime_state_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return {"version": 1}
+        return parsed if isinstance(parsed, dict) else {"version": 1}
+
+    def write_runtime_state(self, state: dict[str, Any]) -> None:
+        try:
+            self.runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.runtime_state_path.with_suffix(self.runtime_state_path.suffix + ".tmp")
+            tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(self.runtime_state_path)
+        except OSError:
+            # State persistence is an optimization. Requests should keep working
+            # even if the mounted config directory is temporarily read-only.
+            pass
+
+    def prune_runtime_state(self, state: dict[str, Any], valid_ids: set[str]) -> None:
+        now = int(time.time())
+        affinity = state.get("affinity")
+        if isinstance(affinity, dict):
+            for key in list(affinity.keys()):
+                item = affinity.get(key)
+                if not isinstance(item, dict):
+                    affinity.pop(key, None)
+                    continue
+                credential_id_value = item.get("credential_id")
+                expires_at = int(item.get("expires_at") or 0)
+                if credential_id_value not in valid_ids or expires_at <= now:
+                    affinity.pop(key, None)
+            if len(affinity) > 5000:
+                sorted_items = sorted(
+                    affinity.items(),
+                    key=lambda pair: int(pair[1].get("expires_at") or 0) if isinstance(pair[1], dict) else 0,
+                )
+                for key, _ in sorted_items[: len(affinity) - 5000]:
+                    affinity.pop(key, None)
+
+    def order_usable_credentials(
+        self,
+        usable: list[tuple[dict[str, Any], int | None]],
+        preferred_ids: list[str] | None,
+    ) -> list[tuple[dict[str, Any], int | None]]:
+        if not preferred_ids:
+            return usable
+        preferred = {value: idx for idx, value in enumerate(preferred_ids)}
+        return sorted(
+            usable,
+            key=lambda pair: preferred.get(self.credential_runtime_id(pair[0], pair[1]), len(preferred)),
+        )
+
+    def select_credential_ids(self, model: str | None, affinity_key: str | None) -> list[str]:
+        usable, _ = self.load_credentials(model)
+        candidate_ids = [self.credential_runtime_id(cred, idx) for cred, idx in usable]
+        if len(candidate_ids) <= 1:
+            return candidate_ids
+
+        route_key = map_model(model) if model else "global"
+        selected_id: str | None = None
+        affinity_hash = sha256_hex(affinity_key) if affinity_key and self.session_affinity_enabled else None
+
+        with self.state_lock:
+            state = self.read_runtime_state()
+            state["version"] = 1
+            state.setdefault("cursor", {})
+            state.setdefault("affinity", {})
+            state.setdefault("last_selected", {})
+            self.prune_runtime_state(state, set(candidate_ids))
+
+            affinity = state.get("affinity") if isinstance(state.get("affinity"), dict) else {}
+            if affinity_hash:
+                entry = affinity.get(affinity_hash)
+                if isinstance(entry, dict):
+                    candidate = entry.get("credential_id")
+                    expires_at = int(entry.get("expires_at") or 0)
+                    if candidate in candidate_ids and expires_at > int(time.time()):
+                        selected_id = str(candidate)
+
+            if selected_id is None and self.selection_strategy == "sticky":
+                last_selected = state.get("last_selected") if isinstance(state.get("last_selected"), dict) else {}
+                candidate = last_selected.get(route_key)
+                if candidate in candidate_ids:
+                    selected_id = str(candidate)
+
+            if selected_id is None:
+                if self.selection_strategy == "priority-first":
+                    selected_id = candidate_ids[0]
+                else:
+                    cursor = state.get("cursor") if isinstance(state.get("cursor"), dict) else {}
+                    raw_cursor = int(cursor.get(route_key) or 0)
+                    selected_id = candidate_ids[raw_cursor % len(candidate_ids)]
+                    cursor[route_key] = raw_cursor + 1
+                    state["cursor"] = cursor
+
+            if affinity_hash and selected_id:
+                affinity[affinity_hash] = {
+                    "credential_id": selected_id,
+                    "expires_at": int(time.time()) + self.session_affinity_ttl_seconds,
+                }
+                state["affinity"] = affinity
+
+            if selected_id:
+                last_selected = state.get("last_selected") if isinstance(state.get("last_selected"), dict) else {}
+                last_selected[route_key] = selected_id
+                state["last_selected"] = last_selected
+            state["updated_at"] = now_utc().isoformat()
+            self.write_runtime_state(state)
+
+        if selected_id in candidate_ids:
+            start = candidate_ids.index(selected_id)
+            return candidate_ids[start:] + candidate_ids[:start]
+        return candidate_ids
+
+    def remember_selected_credential(self, credential_id_value: str, model: str | None, affinity_key: str | None) -> None:
+        route_key = map_model(model) if model else "global"
+        affinity_hash = sha256_hex(affinity_key) if affinity_key and self.session_affinity_enabled else None
+        with self.state_lock:
+            state = self.read_runtime_state()
+            state["version"] = 1
+            last_selected = state.get("last_selected") if isinstance(state.get("last_selected"), dict) else {}
+            last_selected[route_key] = credential_id_value
+            state["last_selected"] = last_selected
+            if affinity_hash:
+                affinity = state.get("affinity") if isinstance(state.get("affinity"), dict) else {}
+                affinity[affinity_hash] = {
+                    "credential_id": credential_id_value,
+                    "expires_at": int(time.time()) + self.session_affinity_ttl_seconds,
+                }
+                state["affinity"] = affinity
+            state["updated_at"] = now_utc().isoformat()
+            self.write_runtime_state(state)
 
     def persist_credential(self, updated: dict[str, Any], index: int | None, loaded: Any) -> None:
         if index is None:
@@ -843,11 +1072,21 @@ class KiroWebClient:
         updated["disabled_at"] = now_utc().isoformat()
         self.persist_credential(updated, index, loaded)
 
-    def ensure_access_token(self, force_refresh: bool = False) -> dict[str, Any]:
+    def ensure_access_token(
+        self,
+        force_refresh: bool = False,
+        model: str | None = None,
+        preferred_ids: list[str] | None = None,
+        skip_ids: set[str] | None = None,
+    ) -> tuple[dict[str, Any], str]:
         with self.lock:
-            usable, loaded = self.load_credentials()
+            usable, loaded = self.load_credentials(model)
+            usable = self.order_usable_credentials(usable, preferred_ids)
             last_error: Exception | None = None
             for cred, idx in usable:
+                runtime_id = self.credential_runtime_id(cred, idx)
+                if skip_ids and runtime_id in skip_ids:
+                    continue
                 access_token = pick(cred, "accessToken", "access_token")
                 expires_at = parse_expiry(pick(cred, "expiresAt", "expires_at"))
                 if (
@@ -856,11 +1095,11 @@ class KiroWebClient:
                     and expires_at
                     and expires_at > now_utc() + dt.timedelta(minutes=5)
                 ):
-                    return cred
+                    return cred, runtime_id
                 refresh_token = pick(cred, "refreshToken", "refresh_token")
                 if not refresh_token:
                     if access_token and not force_refresh:
-                        return cred
+                        return cred, runtime_id
                     last_error = RuntimeError("credential has no refresh token")
                     continue
                 try:
@@ -875,7 +1114,7 @@ class KiroWebClient:
                     continue
                 self.persist_credential(refreshed, idx, loaded)
                 self.session_cache.clear()
-                return refreshed
+                return refreshed, runtime_id
             if last_error:
                 raise RuntimeError(f"no Kiro credential could be refreshed: {last_error}") from last_error
             raise RuntimeError("no enabled Kiro credential with token material")
@@ -1023,64 +1262,88 @@ class KiroWebClient:
             "idp": html_meta(body, "idp") or idp,
         }
 
-    def prepare_session(self) -> PortalSession:
+    def prepare_session(self, model: str | None = None, affinity_key: str | None = None) -> PortalSession:
+        preferred_ids = self.select_credential_ids(model, affinity_key)
         last_error: Exception | None = None
         for force_refresh in (False, True):
-            cred = self.ensure_access_token(force_refresh=force_refresh)
-            access_token = pick(cred, "accessToken", "access_token")
-            if not access_token:
-                last_error = RuntimeError("credential has no access token")
-                continue
-            cache_key = sha256_hex(access_token)[:24]
-            cached = self.session_cache.get(cache_key)
-            if not force_refresh and cached and cached.expires_at > time.time() + 120:
-                return cached
-
-            visitor_id = str(pick(cred, "visitorId", "visitor_id") or uuid.uuid4())
-            profile_arn = pick(cred, "profileArn", "profile_arn")
-            provider = pick(cred, "idp", "provider", "authProvider", "auth_provider")
-            idps = [str(provider)] if provider else []
-            for candidate in ("Google", "Github", "BuilderId"):
-                if candidate not in idps:
-                    idps.append(candidate)
-
-            working_idp: str | None = None
-            for idp in idps:
-                tmp = PortalSession(
-                    access_token=access_token,
-                    idp=idp,
-                    csrf_token=None,
-                    cookie_header=None,
-                    user_id=None,
-                    visitor_id=visitor_id,
-                    profile_arn=profile_arn,
-                    expires_at=time.time() + 600,
-                )
+            skipped: set[str] = set()
+            while True:
                 try:
-                    self.portal_call(tmp, "GetUserInfo", {"origin": "KIRO_IDE"}, timeout=30)
-                    working_idp = idp
-                    break
+                    cred, runtime_id = self.ensure_access_token(
+                        force_refresh=force_refresh,
+                        model=model,
+                        preferred_ids=preferred_ids,
+                        skip_ids=skipped,
+                    )
                 except Exception as exc:
                     last_error = exc
-                    continue
-            if not working_idp:
-                self.session_cache.pop(cache_key, None)
-                continue
+                    break
 
-            meta = self.fetch_index_meta(access_token, working_idp, visitor_id)
-            session = PortalSession(
-                access_token=access_token,
-                idp=working_idp,
-                csrf_token=meta.get("csrf_token"),
-                cookie_header=meta.get("cookie_header"),
-                user_id=meta.get("user_id"),
-                visitor_id=visitor_id,
-                profile_arn=profile_arn,
-                expires_at=time.time() + 900,
-            )
-            self.warm_portal_session(session)
-            self.session_cache[cache_key] = session
-            return session
+                access_token = pick(cred, "accessToken", "access_token")
+                if not access_token:
+                    last_error = RuntimeError("credential has no access token")
+                    skipped.add(runtime_id)
+                    continue
+                cache_key = sha256_hex(access_token)[:24]
+                cached = self.session_cache.get(cache_key)
+                if not force_refresh and cached and cached.expires_at > time.time() + 120:
+                    self.remember_selected_credential(runtime_id, model, affinity_key)
+                    return cached
+
+                visitor_id = str(pick(cred, "visitorId", "visitor_id") or uuid.uuid4())
+                profile_arn = pick(cred, "profileArn", "profile_arn")
+                provider = pick(cred, "idp", "provider", "authProvider", "auth_provider")
+                idps = [str(provider)] if provider else []
+                for candidate in ("Google", "Github", "BuilderId"):
+                    if candidate not in idps:
+                        idps.append(candidate)
+
+                working_idp: str | None = None
+                for idp in idps:
+                    tmp = PortalSession(
+                        access_token=access_token,
+                        idp=idp,
+                        csrf_token=None,
+                        cookie_header=None,
+                        user_id=None,
+                        visitor_id=visitor_id,
+                        profile_arn=profile_arn,
+                        expires_at=time.time() + 600,
+                    )
+                    try:
+                        self.portal_call(tmp, "GetUserInfo", {"origin": "KIRO_IDE"}, timeout=30)
+                        working_idp = idp
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        continue
+                if not working_idp:
+                    self.session_cache.pop(cache_key, None)
+                    skipped.add(runtime_id)
+                    continue
+
+                try:
+                    meta = self.fetch_index_meta(access_token, working_idp, visitor_id)
+                    session = PortalSession(
+                        access_token=access_token,
+                        idp=working_idp,
+                        csrf_token=meta.get("csrf_token"),
+                        cookie_header=meta.get("cookie_header"),
+                        user_id=meta.get("user_id"),
+                        visitor_id=visitor_id,
+                        profile_arn=profile_arn,
+                        expires_at=time.time() + 900,
+                    )
+                    self.warm_portal_session(session)
+                except Exception as exc:
+                    last_error = exc
+                    self.session_cache.pop(cache_key, None)
+                    skipped.add(runtime_id)
+                    continue
+
+                self.session_cache[cache_key] = session
+                self.remember_selected_credential(runtime_id, model, affinity_key)
+                return session
         if last_error:
             raise RuntimeError(f"Kiro portal authentication failed: {last_error}") from last_error
         raise RuntimeError("Kiro portal authentication failed")
@@ -1112,8 +1375,8 @@ class KiroWebClient:
             raise RuntimeError("Kiro CreateSpace response did not include spaceId")
         return decoded["spaceId"]
 
-    def send_message_events(self, prompt: str, model: str) -> Iterator[dict[str, Any]]:
-        session = self.prepare_session()
+    def send_message_events(self, prompt: str, model: str, affinity_key: str | None = None) -> Iterator[dict[str, Any]]:
+        session = self.prepare_session(model=model, affinity_key=affinity_key)
         space_id = self.create_space(session)
         prompt = trim_prompt_for_model(prompt, model)
         body = {
@@ -1134,10 +1397,15 @@ class KiroWebClient:
             for event in iter_eventstream(response):
                 yield event
 
-    def collect_text(self, prompt: str, model: str) -> tuple[str, dict[str, Any] | None]:
+    def collect_text(
+        self,
+        prompt: str,
+        model: str,
+        affinity_key: str | None = None,
+    ) -> tuple[str, dict[str, Any] | None]:
         chunks: list[str] = []
         completion: dict[str, Any] | None = None
-        for event in self.send_message_events(prompt, model):
+        for event in self.send_message_events(prompt, model, affinity_key=affinity_key):
             text, _ = event_text(event)
             if text:
                 chunks.append(text)
@@ -1147,7 +1415,7 @@ class KiroWebClient:
         return "".join(chunks), completion
 
     def usage(self) -> dict[str, Any]:
-        session = self.prepare_session()
+        session = self.prepare_session(model="auto", affinity_key="admin:usage")
         decoded = self.portal_call(
             session,
             "GetUserUsageAndLimits",
@@ -1300,10 +1568,11 @@ class Handler(BaseHTTPRequestHandler):
     def handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
         model = str(payload.get("model") or "claude-sonnet-4.6")
         prompt = anthropic_prompt(payload)
+        affinity_key = request_affinity_key(self.headers, payload, "anthropic")
         if payload.get("stream"):
-            self.stream_anthropic(prompt, model)
+            self.stream_anthropic(prompt, model, affinity_key)
             return
-        text, _ = self.server.kiro.collect_text(prompt, model)
+        text, _ = self.server.kiro.collect_text(prompt, model, affinity_key=affinity_key)
         self.write_json(
             200,
             {
@@ -1318,7 +1587,7 @@ class Handler(BaseHTTPRequestHandler):
             },
         )
 
-    def stream_anthropic(self, prompt: str, model: str) -> None:
+    def stream_anthropic(self, prompt: str, model: str, affinity_key: str | None = None) -> None:
         message_id = f"msg_{secrets.token_hex(12)}"
         self.sse_start()
         self.sse_event(
@@ -1341,7 +1610,7 @@ class Handler(BaseHTTPRequestHandler):
             "content_block_start",
             {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
         )
-        for event in self.server.kiro.send_message_events(prompt, model):
+        for event in self.server.kiro.send_message_events(prompt, model, affinity_key=affinity_key):
             text, _ = event_text(event)
             if text:
                 self.sse_event(
@@ -1362,10 +1631,11 @@ class Handler(BaseHTTPRequestHandler):
     def handle_openai_chat(self, payload: dict[str, Any]) -> None:
         model = str(payload.get("model") or "claude-sonnet-4.6")
         prompt = openai_prompt(payload)
+        affinity_key = request_affinity_key(self.headers, payload, "openai")
         if payload.get("stream"):
-            self.stream_openai(prompt, model)
+            self.stream_openai(prompt, model, affinity_key)
             return
-        text, _ = self.server.kiro.collect_text(prompt, model)
+        text, _ = self.server.kiro.collect_text(prompt, model, affinity_key=affinity_key)
         created = int(time.time())
         self.write_json(
             200,
@@ -1385,7 +1655,7 @@ class Handler(BaseHTTPRequestHandler):
             },
         )
 
-    def stream_openai(self, prompt: str, model: str) -> None:
+    def stream_openai(self, prompt: str, model: str, affinity_key: str | None = None) -> None:
         completion_id = f"chatcmpl-{secrets.token_hex(12)}"
         created = int(time.time())
         self.sse_start()
@@ -1397,7 +1667,7 @@ class Handler(BaseHTTPRequestHandler):
             "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
         }
         self.sse_event(None, first)
-        for event in self.server.kiro.send_message_events(prompt, model):
+        for event in self.server.kiro.send_message_events(prompt, model, affinity_key=affinity_key):
             text, _ = event_text(event)
             if text:
                 self.sse_event(
