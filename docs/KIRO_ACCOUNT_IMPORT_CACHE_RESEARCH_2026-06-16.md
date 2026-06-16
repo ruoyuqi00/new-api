@@ -68,6 +68,16 @@ Observed checks:
 
 That last point should not be treated as proof that the account is dead or permanently unusable. Some Kiro accounts can continue in an overage mode, so quota-looking text must be handled as a soft runtime signal only.
 
+Follow-up after user clarification:
+
+- A single-account probe found credential index 1 returned the quota-style text.
+- Credential index 2 returned a normal `OK` response for `deepseek-3.2`.
+- No account was disabled or deleted.
+- The live credentials file was backed up, then only priorities were adjusted so the tested-good credential is selected first by `kiro-web-adapter`.
+- Backup before this priority-only change:
+  `/opt/sub2api-backups/kiro-rs-credentials-before-priority-usable-20260616-*.json`
+- Default `kiro-web-adapter /v1/messages` smoke after the priority change returned HTTP 200 with text `OK`.
+
 ## Existing Cache In Code
 
 `adapters/kiro-web/kiro_web_adapter.py` already has an in-memory `session_cache`:
