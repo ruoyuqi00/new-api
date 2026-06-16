@@ -127,3 +127,41 @@ claude-opus-4.8 Anthropic-compatible direct adapter call -> HTTP 200, "adapter-o
 The "Too many requests" response is not treated as dead account evidence. It is
 an upstream runtime/rate-limit message returned through a live authenticated
 account.
+
+## Sub2API bridge follow-up
+
+On the same day, the Kiro adapter was checked from the Sub2API side.
+
+Findings:
+
+- Sub2API can reach `http://kiro-web-adapter:8991/health` on the shared Docker
+  network.
+- Kiro upstream accounts existed in Sub2API, but they were attached to the
+  mixed `GPT5.5` group together with many normal OpenAI/CPA accounts.
+- A direct `GPT5.5` group request for `claude-opus-4.8` initially failed with
+  HTTP 502 because Sub2API selected ordinary OpenAI accounts first and those
+  accounts returned upstream auth failures for the Claude model.
+
+Operational correction:
+
+- Added `claude-opus-4.8` and `claude-opus-4-8` to the Kiro Web account model
+  mappings for account IDs `3` and `210`.
+- Enabled a `claude-*` model routing rule on `GPT5.5` as a compatibility guard.
+- Created a dedicated Sub2API group named `kiro`.
+- Attached only account ID `3` (`kiro-web-internal-openai`) to that group.
+- Created a dedicated Sub2API API key named `kiro-dedicated-20260616`.
+
+Validation:
+
+```text
+Sub2API /v1/chat/completions
+model: claude-opus-4.8
+group/key: kiro-dedicated-20260616
+result: HTTP 200, assistant text "sub2api-ok"
+```
+
+Recommendation:
+
+- Use the dedicated `kiro` Sub2API key/group for Kiro Claude models.
+- Do not rely on the mixed `GPT5.5` key for Claude/Kiro calls unless the group
+  routing behavior has been revalidated after a Sub2API restart/cache refresh.
