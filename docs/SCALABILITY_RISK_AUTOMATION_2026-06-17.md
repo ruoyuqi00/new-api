@@ -13,7 +13,7 @@ This document records what is already true, what is still incomplete, and how th
 - Active maintenance repo: `D:\wflogin\sub2api-private`
 - Private GitHub remote: `https://github.com/ruoyuqi00/sub2api-provider-adapters.git`
 - Production stack path: `/opt/sub2api`
-- Current deployed Sub2API image: `sub2api-provider-adapters:risk-log-key-filter-20260617`
+- Current deployed Sub2API image: `sub2api-provider-adapters:route-preview-20260617-ae80f49c`
 - Current risk-control commit: `6a4b1591 Add risk log API key filter`
 - NewAPI was not restarted during this deployment.
 - The independent Chinese-named registration project under `D:\wflogin` must stay isolated and must not be inspected unless the user explicitly changes that constraint.
@@ -42,6 +42,10 @@ This document records what is already true, what is still incomplete, and how th
   - `sub2api-provider-adapters:risk-log-key-filter-20260617` was deployed with `docker compose up -d --no-deps sub2api`;
   - public `/health` returned HTTP 200;
   - Sub2API container was healthy on the new image.
+- Route preview deployment on 2026-06-17:
+  - `sub2api-provider-adapters:route-preview-20260617-ae80f49c` was loaded and deployed with `docker compose up -d --no-deps sub2api`;
+  - public `/health` returned HTTP 200;
+  - `GET /api/v1/admin/channels/route-preview` is now available in the running stack and remains admin-authenticated.
 - Kiro hard-dead credential handling was live-checked on 2026-06-17 after the adapter update:
   - `sub2api-kiro-web-adapter` was running on the server;
   - `/opt/sub2api/kiro-rs/config/credentials.json` had shrunk from 28 credentials to 27;
