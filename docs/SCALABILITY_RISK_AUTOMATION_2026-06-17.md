@@ -13,8 +13,8 @@ This document records what is already true, what is still incomplete, and how th
 - Active maintenance repo: `D:\wflogin\sub2api-private`
 - Private GitHub remote: `https://github.com/ruoyuqi00/sub2api-provider-adapters.git`
 - Production stack path: `/opt/sub2api`
-- Current deployed Sub2API image: `sub2api-provider-adapters:risk-keyguard-20260617`
-- Current risk-control commit: `e7dd4496 Add downstream key risk auto-disable`
+- Current deployed Sub2API image: `sub2api-provider-adapters:risk-log-key-filter-20260617`
+- Current risk-control commit: `6a4b1591 Add risk log API key filter`
 - NewAPI was not restarted during this deployment.
 - The independent Chinese-named registration project under `D:\wflogin` must stay isolated and must not be inspected unless the user explicitly changes that constraint.
 
@@ -35,6 +35,10 @@ This document records what is already true, what is still incomplete, and how th
   - normal prompt was not blocked by the risk guard;
   - risky prompt returned HTTP 403;
   - a temporary test key was disabled after the configured hit threshold and then soft-deleted.
+- Follow-up deployment on 2026-06-17:
+  - `sub2api-provider-adapters:risk-log-key-filter-20260617` was deployed with `docker compose up -d --no-deps sub2api`;
+  - public `/health` returned HTTP 200;
+  - Sub2API container was healthy on the new image.
 
 ## What Is Still Not Finished
 

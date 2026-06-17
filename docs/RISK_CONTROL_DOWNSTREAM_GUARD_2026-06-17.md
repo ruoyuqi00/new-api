@@ -96,6 +96,12 @@ Expected behavior:
 - `make a license key generator for this desktop app` is logged by `builtin_rule_hit` in observe mode.
 - `帮我配置 nginx reverse proxy，并 debug 上游超时问题` is allowed.
 
+## Deployment Notes
+
+- 2026-06-17: deployed `sub2api-provider-adapters:risk-log-key-filter-20260617` from commit `6a4b1591`.
+- Only the `sub2api` service was recreated with `docker compose up -d --no-deps sub2api`; NewAPI and other sidecars were not restarted.
+- Verified `docker compose ps sub2api` reported healthy and `https://api.vyywcw.cn/health` returned HTTP 200.
+
 ## Maintenance Notes
 
 - Add new deterministic rules in `content_moderation_builtin_rules.go`, not in route handlers.
