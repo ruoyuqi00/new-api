@@ -17,6 +17,7 @@ This document records what is already true, what is still incomplete, and how th
 - Current risk-control commit: `6a4b1591 Add risk log API key filter`
 - NewAPI was not restarted during this deployment.
 - The independent Chinese-named registration project under `D:\wflogin` must stay isolated and must not be inspected unless the user explicitly changes that constraint.
+- Server storage note: if the root disk is tight, prefer moving Docker's data root and the persistent compose volumes to the spare server disk such as `/www`. Moving only the app directory usually helps much less, because image layers, build cache, and container metadata can still stay under `/var/lib/docker`.
 
 ## What Is Done
 
@@ -123,6 +124,31 @@ Priority order:
 5. Review and add DB indexes for risk log and API key lookup paths if missing.
 6. Add Redis-backed counters for suspicious downstream behavior beyond content hits, such as high invalid-request rate or repeated blocked models.
 7. Add a short production runbook for scaling users, issuing keys, handling false positives, and unblocking users safely.
+
+## Server Storage Runbook
+
+Use this when the production root disk is tight and `/www` or another mounted
+disk has enough spare capacity.
+
+1. Diagnose before moving anything:
+   - `df -h`
+   - `docker info --format '{{.DockerRootDir}}'`
+   - `docker system df -v`
+   - `du -sh /var/lib/docker/* /opt/sub2api /opt/newapi 2>/dev/null`
+2. If `/var/lib/docker` is the main consumer, schedule a maintenance window. A
+   Docker data-root move requires stopping Docker, so it affects both Sub2API
+   and NewAPI even if no application config changes.
+3. Back up compose files, `.env` files, and local persistent data before the
+   move. Do not print secrets while collecting diagnostics.
+4. Prefer moving Docker's `data-root` to the spare disk, for example
+   `/www/docker`, instead of only moving `/opt/sub2api` or `/opt/newapi`.
+5. After the move, verify:
+   - `docker info --format '{{.DockerRootDir}}'` points at the new disk;
+   - `docker compose ps` shows Sub2API and NewAPI healthy;
+   - public Sub2API `/health` returns 200;
+   - NewAPI `/v1/models` still exposes the intended `gpt` models.
+6. Keep the old Docker directory until the stack has been stable long enough to
+   be confident rollback is not needed.
 
 ## Stop Conditions
 
