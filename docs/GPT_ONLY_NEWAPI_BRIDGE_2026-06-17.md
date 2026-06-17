@@ -199,3 +199,45 @@ Operational verification:
 - A tiny `gpt-5.4-mini` chat smoke no longer fails on NewAPI disk pressure after Docker build cache cleanup.
 - The current chat smoke reached the bridge but returned `Upstream authentication failed, please contact administrator`, so the remaining failure is upstream GPT supply/account health, not NewAPI model visibility.
 - Root filesystem was at 97% and NewAPI returned `system_disk_overloaded`; `docker builder prune -f` safely reclaimed build cache and lowered `/` usage to 89%.
+
+## External GPT Upstream Added
+
+Applied on 2026-06-17 after the user provided an OpenAI-compatible upstream API endpoint for the first external GPT supply channel.
+
+Important: the upstream API key is intentionally not recorded in this repository. Do not add it to docs, commits, issue comments, screenshots, or shell transcripts.
+
+NewAPI production channel:
+
+- Channel id: `2292`.
+- Channel name: `external-gpt-upstream-s2cf`.
+- Channel type: OpenAI-compatible.
+- Base URL root: `https://s2cf.c5mc.cn`.
+- NewAPI group: `gpt`.
+- Tag: `external-gpt-s2cf`.
+- Priority: `120`.
+- Weight: `80`.
+- Auto-ban: disabled for this channel so an upstream-side incident does not silently remove the external fallback without operator review.
+- NewAPI was not restarted.
+
+Enabled models on this external GPT channel:
+
+- `gpt-5.5`
+- `gpt-5.4`
+- `gpt-5.4-mini`
+- `gpt-5.3-codex`
+- `codex-auto-review`
+
+Verification performed from the production server:
+
+- Direct upstream `/v1/models` returned HTTP 200 from the server, while the local Windows machine was blocked by upstream Cloudflare policy.
+- Direct upstream `gpt-5.4-mini` chat smoke returned HTTP 200 with `OK`.
+- NewAPI `channel/fix` returned HTTP 200 with `success: 3`, `fails: 0`, refreshing channel abilities/cache without restarting NewAPI.
+- Forced NewAPI request through channel `2292` with `gpt-5.4-mini` returned HTTP 200 with `OK`.
+- Normal NewAPI `gpt` group request with `gpt-5.5` returned HTTP 200 with `OK`.
+
+Operational interpretation:
+
+- The user-facing product group remains only `gpt`; this external upstream is an admin-only supply channel behind that group.
+- NewAPI can now route the `gpt` group through both the Sub2API bridge channel and the external OpenAI-compatible channel.
+- Do not create a separate user-visible group for this upstream unless it becomes a distinct product/package later.
+- When another upstream is added, use the same pattern: a dedicated NewAPI channel, a clear tag, only the intended user-visible group, and at least one successful smoke test for every exposed model before making it available to users.
