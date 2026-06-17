@@ -36,6 +36,8 @@ const (
 	ContentModerationActionBlock        = "block"
 	ContentModerationActionHashBlock    = "hash_block"
 	ContentModerationActionKeywordBlock = "keyword_block"
+	ContentModerationActionBuiltinHit   = "builtin_rule_hit"
+	ContentModerationActionBuiltinBlock = "builtin_rule_block"
 	ContentModerationActionError        = "error"
 
 	contentModerationKeywordCategory = "keyword"
@@ -867,6 +869,51 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		"text_runes", len([]rune(content.Text)),
 		"image_count", len(content.Images))
 	hashText := content.Hash()
+	if hit, ok := matchBuiltInRiskRule(content.Text); ok {
+		scores := map[string]float64{hit.Category: hit.Score}
+		blocked := cfg.Mode == ContentModerationModePreBlock
+		action := ContentModerationActionBuiltinHit
+		if blocked {
+			action = ContentModerationActionBuiltinBlock
+			s.recordPreBlockSyncMetric(0, action)
+		}
+		slog.Info("content_moderation.builtin_rule_hit",
+			"user_id", input.UserID,
+			"api_key_id", input.APIKeyID,
+			"group_id", contentModerationLogGroupID(input.GroupID),
+			"endpoint", input.Endpoint,
+			"protocol", input.Protocol,
+			"mode", cfg.Mode,
+			"blocked", blocked,
+			"rule_id", hit.RuleID,
+			"category", hit.Category,
+			"keyword", hit.Keyword)
+		log := s.buildLog(input, cfg, action, true, hit.Category, hit.Score, scores, content.ExcerptText(), nil, nil, "")
+		s.enqueueRecord(input, cfg, log, hashText, true, true)
+		if blocked {
+			return &ContentModerationDecision{
+				Allowed:         false,
+				Blocked:         true,
+				Flagged:         true,
+				Message:         cfg.BlockMessage,
+				StatusCode:      cfg.BlockStatus,
+				InputHash:       hashText,
+				HighestCategory: hit.Category,
+				HighestScore:    hit.Score,
+				CategoryScores:  scores,
+				Action:          action,
+			}, nil
+		}
+		return &ContentModerationDecision{
+			Allowed:         true,
+			Flagged:         true,
+			InputHash:       hashText,
+			HighestCategory: hit.Category,
+			HighestScore:    hit.Score,
+			CategoryScores:  scores,
+			Action:          action,
+		}, nil
+	}
 	if cfg.Mode == ContentModerationModePreBlock {
 		if cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
 			if keyword, hit := matchBlockedKeyword(content.Text, cfg.BlockedKeywords); hit {
@@ -1083,7 +1130,7 @@ func (s *ContentModerationService) recordPreBlockSyncMetric(latencyMS int, actio
 	}
 	s.preBlockLatencyTotalMS.Add(int64(latencyMS))
 	switch action {
-	case ContentModerationActionBlock, ContentModerationActionHashBlock, ContentModerationActionKeywordBlock:
+	case ContentModerationActionBlock, ContentModerationActionHashBlock, ContentModerationActionKeywordBlock, ContentModerationActionBuiltinBlock:
 		s.preBlockBlocked.Add(1)
 	case ContentModerationActionError:
 		s.preBlockErrors.Add(1)

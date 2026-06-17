@@ -2772,6 +2772,8 @@ export default {
       action: {
         block: 'Blocked',
         keywordBlock: 'Keyword Blocked',
+        builtinRuleBlock: 'Built-in Rule Blocked',
+        builtinRuleHit: 'Built-in Rule Hit',
         error: 'Error',
       },
     },

@@ -2849,6 +2849,8 @@ export default {
       action: {
         block: '拦截',
         keywordBlock: '关键词拦截',
+        builtinRuleBlock: '内置规则拦截',
+        builtinRuleHit: '内置规则命中',
         error: '异常',
       },
     },
