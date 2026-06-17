@@ -27,6 +27,7 @@ This document records what is already true, what is still incomplete, and how th
 - Repeated risk hits can disable the specific downstream API key.
 - User-level auto-ban remains as a broader fallback.
 - Admin Risk Control UI exposes key-level auto-disable settings.
+- The service test suite now includes a cross-protocol built-in block matrix for Anthropic, OpenAI Chat, OpenAI Responses, Gemini, and OpenAI Images.
 - Production verification on 2026-06-17:
   - public `/health` returned HTTP 200;
   - Sub2API container was healthy on `risk-keyguard-20260617`;
@@ -127,4 +128,3 @@ Automation should stop and ask the user before:
 - rotating production secrets;
 - inspecting the isolated registration-project folder;
 - making broad UI redesigns unrelated to risk control or operations.
-
