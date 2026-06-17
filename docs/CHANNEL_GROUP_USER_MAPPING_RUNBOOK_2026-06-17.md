@@ -194,3 +194,15 @@ output: channel_id, mapped model, billing model, restrict decision, candidate ac
 ```
 
 That would make future upstream onboarding safer because operators could confirm the exact routing path before giving a key to a user.
+
+## Capacity Notes
+
+For the current GPT-first rollout, keep these practical rules:
+
+- keep the public user-facing group as `gpt`;
+- keep the Sub2API bridge key internal only;
+- do not reuse a bridge key across unrelated families;
+- keep account growth separated from user-key growth so scheduler pressure stays visible;
+- use group-level RPM / concurrency controls before expanding the pool size;
+- treat rate-limit text as a cooldown signal, not a dead-account signal;
+- treat terminal lock/suspension/verification text as a dead-account signal.
