@@ -106,6 +106,24 @@ type channelResponse struct {
 	UpdatedAt                  string                            `json:"updated_at"`
 }
 
+type channelRoutePreviewResponse struct {
+	GroupID                              int64                        `json:"group_id"`
+	RequestedPlatform                    string                       `json:"requested_platform"`
+	GroupPlatform                        string                       `json:"group_platform"`
+	RequestedModel                       string                       `json:"requested_model"`
+	MappedModel                          string                       `json:"mapped_model"`
+	Mapped                               bool                         `json:"mapped"`
+	ChannelID                            int64                        `json:"channel_id"`
+	ChannelName                          string                       `json:"channel_name"`
+	ChannelStatus                        string                       `json:"channel_status"`
+	BillingModelSource                   string                       `json:"billing_model_source"`
+	RestrictionModel                     string                       `json:"restriction_model"`
+	Restricted                           bool                         `json:"restricted"`
+	RequiresAccountLevelRestrictionCheck bool                         `json:"requires_account_level_restriction_check"`
+	Pricing                              *channelModelPricingResponse `json:"pricing,omitempty"`
+	Warnings                             []string                     `json:"warnings"`
+}
+
 type channelModelPricingResponse struct {
 	ID               int64                     `json:"id"`
 	Platform         string                    `json:"platform"`
@@ -288,6 +306,36 @@ func accountStatsPricingRuleRequestToService(r accountStatsPricingRuleRequest) s
 		AccountIDs: r.AccountIDs,
 		Pricing:    pricingRequestToService(r.Pricing),
 	}
+}
+
+func channelRoutePreviewToResponse(preview *service.ChannelRoutePreview) *channelRoutePreviewResponse {
+	if preview == nil {
+		return nil
+	}
+	resp := &channelRoutePreviewResponse{
+		GroupID:                              preview.GroupID,
+		RequestedPlatform:                    preview.RequestedPlatform,
+		GroupPlatform:                        preview.GroupPlatform,
+		RequestedModel:                       preview.RequestedModel,
+		MappedModel:                          preview.MappedModel,
+		Mapped:                               preview.Mapped,
+		ChannelID:                            preview.ChannelID,
+		ChannelName:                          preview.ChannelName,
+		ChannelStatus:                        preview.ChannelStatus,
+		BillingModelSource:                   preview.BillingModelSource,
+		RestrictionModel:                     preview.RestrictionModel,
+		Restricted:                           preview.Restricted,
+		RequiresAccountLevelRestrictionCheck: preview.RequiresAccountLevelRestrictionCheck,
+		Warnings:                             preview.Warnings,
+	}
+	if preview.Pricing != nil {
+		pricing := pricingToResponse(preview.Pricing)
+		resp.Pricing = &pricing
+	}
+	if resp.Warnings == nil {
+		resp.Warnings = []string{}
+	}
+	return resp
 }
 
 // --- Handlers ---
@@ -531,4 +579,37 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 
 	models := h.pricingService.ListModelNamesByProvider(provider)
 	response.Success(c, gin.H{"models": models})
+}
+
+// PreviewRoute 预览分组+模型在渠道缓存中的路由结果。
+// GET /api/v1/admin/channels/route-preview?group_id=8&platform=openai&model=gpt-5.5
+func (h *ChannelHandler) PreviewRoute(c *gin.Context) {
+	groupIDRaw := strings.TrimSpace(c.Query("group_id"))
+	if groupIDRaw == "" {
+		response.ErrorFrom(c, infraerrors.BadRequest("MISSING_PARAMETER", "group_id parameter is required").
+			WithMetadata(map[string]string{"param": "group_id"}))
+		return
+	}
+	groupID, err := strconv.ParseInt(groupIDRaw, 10, 64)
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_GROUP_ID", "Invalid group ID"))
+		return
+	}
+
+	model := strings.TrimSpace(c.Query("model"))
+	if model == "" {
+		response.ErrorFrom(c, infraerrors.BadRequest("MISSING_PARAMETER", "model parameter is required").
+			WithMetadata(map[string]string{"param": "model"}))
+		return
+	}
+
+	platform := strings.TrimSpace(c.Query("platform"))
+
+	preview, err := h.channelService.PreviewRoute(c.Request.Context(), groupID, platform, model)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, channelRoutePreviewToResponse(preview))
 }

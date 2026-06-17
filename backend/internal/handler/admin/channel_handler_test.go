@@ -3,12 +3,14 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -474,4 +476,117 @@ func TestSyncPricingModels_ValidPlatform_EmptyService(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		require.NotNil(t, body.Data.Models, "models must not be null for platform=%s", platform)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// 4. PreviewRoute handler
+// ---------------------------------------------------------------------------
+
+type channelPreviewRepo struct {
+	channel       service.Channel
+	groupPlatform map[int64]string
+}
+
+func (r *channelPreviewRepo) Create(context.Context, *service.Channel) error { return nil }
+func (r *channelPreviewRepo) GetByID(context.Context, int64) (*service.Channel, error) {
+	return &r.channel, nil
+}
+func (r *channelPreviewRepo) Update(context.Context, *service.Channel) error { return nil }
+func (r *channelPreviewRepo) Delete(context.Context, int64) error            { return nil }
+func (r *channelPreviewRepo) List(context.Context, pagination.PaginationParams, string, string) ([]service.Channel, *pagination.PaginationResult, error) {
+	return nil, nil, nil
+}
+func (r *channelPreviewRepo) ListAll(context.Context) ([]service.Channel, error) {
+	if r.channel.ID == 0 {
+		return nil, nil
+	}
+	return []service.Channel{r.channel}, nil
+}
+func (r *channelPreviewRepo) ExistsByName(context.Context, string) (bool, error) {
+	return false, nil
+}
+func (r *channelPreviewRepo) ExistsByNameExcluding(context.Context, string, int64) (bool, error) {
+	return false, nil
+}
+func (r *channelPreviewRepo) GetGroupIDs(context.Context, int64) ([]int64, error) {
+	return r.channel.GroupIDs, nil
+}
+func (r *channelPreviewRepo) SetGroupIDs(context.Context, int64, []int64) error { return nil }
+func (r *channelPreviewRepo) GetChannelIDByGroupID(context.Context, int64) (int64, error) {
+	return r.channel.ID, nil
+}
+func (r *channelPreviewRepo) GetGroupsInOtherChannels(context.Context, int64, []int64) ([]int64, error) {
+	return nil, nil
+}
+func (r *channelPreviewRepo) GetGroupPlatforms(context.Context, []int64) (map[int64]string, error) {
+	return r.groupPlatform, nil
+}
+func (r *channelPreviewRepo) ListModelPricing(context.Context, int64) ([]service.ChannelModelPricing, error) {
+	return nil, nil
+}
+func (r *channelPreviewRepo) CreateModelPricing(context.Context, *service.ChannelModelPricing) error {
+	return nil
+}
+func (r *channelPreviewRepo) UpdateModelPricing(context.Context, *service.ChannelModelPricing) error {
+	return nil
+}
+func (r *channelPreviewRepo) DeleteModelPricing(context.Context, int64) error { return nil }
+func (r *channelPreviewRepo) ReplaceModelPricing(context.Context, int64, []service.ChannelModelPricing) error {
+	return nil
+}
+
+func setupPreviewRouteRouter(repo *channelPreviewRepo) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	svc := service.NewChannelService(repo, nil, nil, nil)
+	h := NewChannelHandler(svc, nil, nil)
+	router.GET("/channels/route-preview", h.PreviewRoute)
+	return router
+}
+
+func TestPreviewRoute_MissingParams(t *testing.T) {
+	router := setupPreviewRouteRouter(&channelPreviewRepo{})
+
+	req := httptest.NewRequest(http.MethodGet, "/channels/route-preview?platform=openai", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPreviewRoute_Success(t *testing.T) {
+	router := setupPreviewRouteRouter(&channelPreviewRepo{
+		channel: service.Channel{
+			ID:                 12,
+			Name:               "gpt-bridge",
+			Status:             service.StatusActive,
+			GroupIDs:           []int64{8},
+			BillingModelSource: service.BillingModelSourceChannelMapped,
+			RestrictModels:     true,
+			ModelPricing: []service.ChannelModelPricing{
+				{Platform: "openai", Models: []string{"gpt-5.5-mini"}},
+			},
+			ModelMapping: map[string]map[string]string{
+				"openai": {"gpt-5.5": "gpt-5.5-mini"},
+			},
+		},
+		groupPlatform: map[int64]string{8: "openai"},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/channels/route-preview?group_id=8&platform=openai&model=gpt-5.5", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Data channelRoutePreviewResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, int64(8), body.Data.GroupID)
+	require.Equal(t, "gpt-5.5-mini", body.Data.MappedModel)
+	require.True(t, body.Data.Mapped)
+	require.False(t, body.Data.Restricted)
+	require.Empty(t, body.Data.Warnings)
+	require.NotNil(t, body.Data.Pricing)
+	require.Equal(t, "openai", body.Data.Pricing.Platform)
 }

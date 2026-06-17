@@ -70,6 +70,9 @@ Operational control points:
 - Docker data root has already been moved off the tight root disk.
 - GPT-only bridge wiring has already been documented and applied.
 - An external GPT-compatible upstream fallback channel also exists for admin-only supply.
+- Sub2API now has a read-only admin route preview endpoint for checking
+  `group_id + platform + model` before exposing a model through NewAPI or
+  adding a new upstream fallback.
 
 ## 5. What Still Needs Load-Scale Hardening
 
@@ -94,3 +97,30 @@ NewAPI user group
 
 That keeps GPT, Opus, Grok, Kiro, Gemini, and image traffic separable instead of turning into one mixed pool.
 
+## 7. Admin Route Preview
+
+Use the Sub2API admin route preview before changing the user-visible NewAPI
+model list, creating a new bridge key, or attaching a new upstream fallback.
+
+```text
+GET /api/v1/admin/channels/route-preview?group_id=<id>&platform=<platform>&model=<model>
+```
+
+The endpoint is read-only and does not call any upstream provider. It reports:
+
+- the group platform loaded from the channel cache;
+- the active channel attached to the group;
+- channel-level model mapping;
+- the model used for channel restriction/pricing checks;
+- whether the channel would directly restrict the request;
+- the matching channel pricing entry, if any;
+- warnings such as:
+  - `no_active_channel_for_group`;
+  - `requested_platform_differs_from_group_platform`;
+  - `no_channel_pricing_for_restriction_model`;
+  - `model_restricted_by_channel`;
+  - `requires_account_level_restriction_check`.
+
+For `billing_model_source=upstream`, the preview intentionally marks
+`requires_account_level_restriction_check`, because the final restriction model
+depends on the account-level upstream mapping selected by the scheduler.

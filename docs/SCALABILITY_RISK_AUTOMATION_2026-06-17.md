@@ -46,6 +46,10 @@ This document records what is already true, what is still incomplete, and how th
   - `sub2api-kiro-web-adapter` was running on the server;
   - `/opt/sub2api/kiro-rs/config/credentials.json` had shrunk from 28 credentials to 27;
   - the server-side adapter file at `/opt/sub2api/kiro-web-adapter/kiro_web_adapter.py` contained the hard-dead delete path.
+- Sub2API admin channel route preview was added on 2026-06-17:
+  - `GET /api/v1/admin/channels/route-preview?group_id=<id>&platform=<platform>&model=<model>`;
+  - read-only cache-backed check for group platform, active channel, model mapping, restriction model, matching channel pricing, and warnings;
+  - useful before exposing NewAPI models, creating bridge keys, or attaching upstream fallback channels.
 
 ## What Is Still Not Finished
 
@@ -93,6 +97,8 @@ Needed next:
 - Make transient failures, 401/403 auth failures, 429 rate limits, and stream timeouts produce different cooldown behavior.
 - Keep sticky-session behavior fast but bounded, with clear TTLs and cleanup.
 - Expand tests around model routing, fallback groups, and account capability filtering.
+- Extend the route preview with candidate account counts and account-capability
+  filtering once the first read-only preview has proven useful in production.
 
 ### 5. Protocol Drift Tracking
 

@@ -100,6 +100,26 @@ type ChannelMappingResult struct {
 	BillingModelSource string // 计费模型来源（"requested" / "upstream" / "channel_mapped"）
 }
 
+// ChannelRoutePreview describes how a group/model request will be evaluated by
+// the channel cache before an admin exposes it through a bridge.
+type ChannelRoutePreview struct {
+	GroupID                              int64
+	RequestedPlatform                    string
+	GroupPlatform                        string
+	RequestedModel                       string
+	MappedModel                          string
+	Mapped                               bool
+	ChannelID                            int64
+	ChannelName                          string
+	ChannelStatus                        string
+	BillingModelSource                   string
+	RestrictionModel                     string
+	Restricted                           bool
+	RequiresAccountLevelRestrictionCheck bool
+	Pricing                              *ChannelModelPricing
+	Warnings                             []string
+}
+
 // BuildModelMappingChain 根据映射结果和上游实际模型构建映射链描述。
 // reqModel: 客户端请求的原始模型名。
 // upstreamModel: 上游实际使用的模型名（ForwardResult.UpstreamModel）。
@@ -480,6 +500,75 @@ func (s *ChannelService) GetChannelModelPricing(ctx context.Context, groupID int
 
 	cp := pricing.Clone()
 	return &cp
+}
+
+// PreviewRoute returns the channel/mapping/restriction view that would be used
+// for a group/model request. It is read-only and does not call any upstream.
+func (s *ChannelService) PreviewRoute(ctx context.Context, groupID int64, requestedPlatform, model string) (*ChannelRoutePreview, error) {
+	requestedPlatform = strings.ToLower(strings.TrimSpace(requestedPlatform))
+	model = strings.TrimSpace(model)
+	preview := &ChannelRoutePreview{
+		GroupID:           groupID,
+		RequestedPlatform: requestedPlatform,
+		RequestedModel:    model,
+		MappedModel:       model,
+		Warnings:          []string{},
+	}
+
+	cache, err := s.loadCache(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	groupPlatform := cache.groupPlatform[groupID]
+	preview.GroupPlatform = groupPlatform
+	if requestedPlatform != "" && groupPlatform != "" && requestedPlatform != groupPlatform {
+		preview.Warnings = append(preview.Warnings, "requested_platform_differs_from_group_platform")
+	}
+	if groupPlatform == "" {
+		preview.Warnings = append(preview.Warnings, "no_group_platform_loaded")
+	}
+
+	ch, ok := cache.channelByGroupID[groupID]
+	if !ok || ch == nil || !ch.IsActive() {
+		preview.Warnings = append(preview.Warnings, "no_active_channel_for_group")
+		return preview, nil
+	}
+
+	lk := &channelLookup{cache: cache, channel: ch, platform: groupPlatform}
+	mapping := resolveMapping(lk, groupID, model)
+	preview.ChannelID = ch.ID
+	preview.ChannelName = ch.Name
+	preview.ChannelStatus = ch.Status
+	preview.BillingModelSource = mapping.BillingModelSource
+	preview.MappedModel = mapping.MappedModel
+	preview.Mapped = mapping.Mapped
+
+	restrictionModel := billingModelForRestriction(mapping.BillingModelSource, model, mapping.MappedModel)
+	preview.RestrictionModel = restrictionModel
+	if restrictionModel == "" && mapping.BillingModelSource == BillingModelSourceUpstream {
+		preview.RequiresAccountLevelRestrictionCheck = true
+		preview.Warnings = append(preview.Warnings, "requires_account_level_restriction_check")
+		return preview, nil
+	}
+	if restrictionModel == "" {
+		return preview, nil
+	}
+
+	modelLower := strings.ToLower(restrictionModel)
+	if pricing := lookupPricingAcrossPlatforms(cache, groupID, groupPlatform, modelLower); pricing != nil {
+		cp := pricing.Clone()
+		preview.Pricing = &cp
+	} else {
+		preview.Warnings = append(preview.Warnings, "no_channel_pricing_for_restriction_model")
+	}
+
+	preview.Restricted = checkRestricted(lk, groupID, restrictionModel)
+	if preview.Restricted {
+		preview.Warnings = append(preview.Warnings, "model_restricted_by_channel")
+	}
+
+	return preview, nil
 }
 
 // ResolveChannelMapping 解析渠道级模型映射（热路径 O(1)）

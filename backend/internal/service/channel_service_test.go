@@ -1131,6 +1131,81 @@ func TestResolveChannelMappingAndRestrict_NoMapping(t *testing.T) {
 	require.Equal(t, "unknown-model", mapping.MappedModel)
 }
 
+func TestPreviewRoute_WithMappedRestrictedModel(t *testing.T) {
+	ch := Channel{
+		ID:                 12,
+		Name:               "gpt-bridge",
+		Status:             StatusActive,
+		GroupIDs:           []int64{8},
+		BillingModelSource: BillingModelSourceChannelMapped,
+		RestrictModels:     true,
+		ModelPricing: []ChannelModelPricing{
+			{
+				Platform:    "openai",
+				Models:      []string{"gpt-5.5"},
+				BillingMode: BillingModeToken,
+				InputPrice:  testPtrFloat64(0.01),
+			},
+		},
+		ModelMapping: map[string]map[string]string{
+			"openai": {"gpt-5.5": "gpt-5.5-mini"},
+		},
+	}
+	repo := makeStandardRepo(ch, map[int64]string{8: "openai"})
+	svc := newTestChannelService(repo)
+
+	preview, err := svc.PreviewRoute(context.Background(), 8, "openai", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Equal(t, int64(8), preview.GroupID)
+	require.Equal(t, "openai", preview.RequestedPlatform)
+	require.Equal(t, "openai", preview.GroupPlatform)
+	require.Equal(t, "gpt-5.5", preview.RequestedModel)
+	require.True(t, preview.Mapped)
+	require.Equal(t, "gpt-5.5-mini", preview.MappedModel)
+	require.Equal(t, int64(12), preview.ChannelID)
+	require.Equal(t, "gpt-bridge", preview.ChannelName)
+	require.Equal(t, BillingModelSourceChannelMapped, preview.BillingModelSource)
+	require.Equal(t, "gpt-5.5-mini", preview.RestrictionModel)
+	require.True(t, preview.Restricted)
+	require.Nil(t, preview.Pricing)
+	require.Contains(t, preview.Warnings, "no_channel_pricing_for_restriction_model")
+	require.Contains(t, preview.Warnings, "model_restricted_by_channel")
+}
+
+func TestPreviewRoute_UpstreamNeedsAccountCheck(t *testing.T) {
+	ch := Channel{
+		ID:                 13,
+		Name:               "gpt-upstream",
+		Status:             StatusActive,
+		GroupIDs:           []int64{9},
+		BillingModelSource: BillingModelSourceUpstream,
+		RestrictModels:     true,
+	}
+	repo := makeStandardRepo(ch, map[int64]string{9: "openai"})
+	svc := newTestChannelService(repo)
+
+	preview, err := svc.PreviewRoute(context.Background(), 9, "openai", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.True(t, preview.RequiresAccountLevelRestrictionCheck)
+	require.False(t, preview.Restricted)
+	require.Empty(t, preview.RestrictionModel)
+	require.Contains(t, preview.Warnings, "requires_account_level_restriction_check")
+}
+
+func TestPreviewRoute_NoActiveChannel(t *testing.T) {
+	repo := makeStandardRepo(Channel{}, map[int64]string{8: "openai"})
+	svc := newTestChannelService(repo)
+
+	preview, err := svc.PreviewRoute(context.Background(), 8, "openai", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Contains(t, preview.Warnings, "no_active_channel_for_group")
+	require.Equal(t, "gpt-5.5", preview.MappedModel)
+	require.Zero(t, preview.ChannelID)
+}
+
 // --- 4.6 Cache Building Specifics ---
 
 func TestBuildCache_DBError(t *testing.T) {

@@ -158,6 +158,8 @@ After creating a channel/upstream, verify:
 - The bound group has active/schedulable accounts for the platform.
 - The requested model is either directly priced/supported or mapped by channel mapping.
 - If `restrict_models` is enabled, the requested model appears in the channel pricing list or matches a configured wildcard.
+- Run the read-only Sub2API route preview before exposing the model:
+  `GET /api/v1/admin/channels/route-preview?group_id=<id>&platform=<platform>&model=<model>`.
 - Usage logs show the expected `group_id`, `channel_id`, and `model_mapping_chain`.
 - In a NewAPI-fronted setup, the NewAPI channel uses the correct Sub2API key for the intended Sub2API group.
 
@@ -184,16 +186,26 @@ After creating a channel/upstream, verify:
   - Check channel-level mapping.
   - Check account-level model mapping; account mapping can still change the final upstream model.
 
-## Suggested Future Improvement
+## Admin Route Preview
 
-Add an admin "routing preview" tool:
+Sub2API now includes an admin route preview tool:
 
 ```text
-input: api_key_id or group_id + platform + requested model
-output: channel_id, mapped model, billing model, restrict decision, candidate account count
+input: group_id + platform + requested model
+output: channel_id, mapped model, restriction model, restrict decision, matching pricing, warnings
 ```
 
-That would make future upstream onboarding safer because operators could confirm the exact routing path before giving a key to a user.
+Use it before:
+
+- adding a new model to a NewAPI user-facing group;
+- creating a dedicated bridge key for a product family;
+- attaching a Sub2API group to a new upstream fallback;
+- changing channel mapping or `billing_model_source`.
+
+The preview is intentionally read-only and does not call real upstreams. If it
+returns `requires_account_level_restriction_check`, the channel is using
+`billing_model_source=upstream`, so the final allow/deny decision depends on
+the account-level upstream model selected by the scheduler.
 
 ## Capacity Notes
 
