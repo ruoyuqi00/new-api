@@ -94,6 +94,99 @@ func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsLatestUser(t *
 	require.Equal(t, "Q2", input.Text)
 }
 
+func TestExtractContentModerationInput_MultimodalImagesAcrossProtocols(t *testing.T) {
+	cases := []struct {
+		name           string
+		protocol       string
+		body           []byte
+		expectedText   string
+		expectedImages []string
+	}{
+		{
+			name:     "anthropic_source_image",
+			protocol: ContentModerationProtocolAnthropicMessages,
+			body: []byte(`{
+				"messages": [
+					{"role":"user","content":[
+						{"type":"text","text":"inspect this reference"},
+						{"type":"image","source":{"type":"base64","media_type":"image/png","data":"abc123"}}
+					]}
+				]
+			}`),
+			expectedText:   "inspect this reference",
+			expectedImages: []string{"data:image/png;base64,abc123"},
+		},
+		{
+			name:     "openai_chat_image_url",
+			protocol: ContentModerationProtocolOpenAIChat,
+			body: []byte(`{
+				"messages": [
+					{"role":"user","content":[
+						{"type":"text","text":"inspect this reference"},
+						{"type":"image_url","image_url":{"url":"https://example.test/ref.png"}},
+						{"type":"image_url","image_url":{"url":"https://example.test/ref.png"}}
+					]}
+				]
+			}`),
+			expectedText:   "inspect this reference",
+			expectedImages: []string{"https://example.test/ref.png"},
+		},
+		{
+			name:     "openai_responses_input_image",
+			protocol: ContentModerationProtocolOpenAIResponses,
+			body: []byte(`{
+				"input": [
+					{"type":"message","role":"user","content":[
+						{"type":"input_text","text":"inspect this reference"},
+						{"type":"input_image","image_url":"https://example.test/response-ref.png"}
+					]}
+				]
+			}`),
+			expectedText:   "inspect this reference",
+			expectedImages: []string{"https://example.test/response-ref.png"},
+		},
+		{
+			name:     "gemini_inline_data",
+			protocol: ContentModerationProtocolGemini,
+			body: []byte(`{
+				"contents": [
+					{"role":"user","parts":[
+						{"text":"inspect this reference"},
+						{"inline_data":{"mime_type":"image/jpeg","data":"xyz789"}}
+					]}
+				]
+			}`),
+			expectedText:   "inspect this reference",
+			expectedImages: []string{"data:image/jpeg;base64,xyz789"},
+		},
+		{
+			name:     "openai_images_reference_images",
+			protocol: ContentModerationProtocolOpenAIImages,
+			body: []byte(`{
+				"prompt": "edit this reference",
+				"images": [
+					{"url":"https://example.test/image-edit.png"},
+					{"mime_type":"image/png","data":"editdata"}
+				]
+			}`),
+			expectedText: "edit this reference",
+			expectedImages: []string{
+				"https://example.test/image-edit.png",
+				"data:image/png;base64,editdata",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := ExtractContentModerationInput(tc.protocol, tc.body)
+
+			require.Equal(t, tc.expectedText, input.Text)
+			require.Equal(t, tc.expectedImages, input.Images)
+		})
+	}
+}
+
 func TestExtractContentModerationInput_GeminiAgentToolLoopSkipsAudit(t *testing.T) {
 	body := []byte(`{
 		"contents": [

@@ -29,6 +29,7 @@ This document records what is already true, what is still incomplete, and how th
 - Admin Risk Control UI exposes key-level auto-disable settings.
 - Admin Risk Control logs can now be filtered by `api_key_id`, so an operator can quickly inspect the exact downstream key that triggered risk hits before deciding whether to re-enable, delete, or keep it disabled.
 - The service test suite now includes a cross-protocol built-in block matrix for Anthropic, OpenAI Chat, OpenAI Responses, Gemini, and OpenAI Images.
+- The content-moderation input extractor now has cross-protocol multimodal regression coverage for Anthropic source images, OpenAI Chat image URLs, OpenAI Responses `input_image`, Gemini inline image data, and OpenAI Images reference images.
 - Production verification on 2026-06-17:
   - public `/health` returned HTTP 200;
   - Sub2API container was healthy on `risk-keyguard-20260617`;
