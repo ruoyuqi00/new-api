@@ -462,6 +462,11 @@ type GatewayCache interface {
 	DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error
 }
 
+type GatewayAccountSelectionCooldownCache interface {
+	SetAccountSelectionCooldowns(ctx context.Context, groupID int64, model string, accountIDs []int64, ttl time.Duration) error
+	GetAccountSelectionCooldowns(ctx context.Context, groupID int64, model string, accountIDs []int64) (map[int64]struct{}, error)
+}
+
 // derefGroupID safely dereferences *int64 to int64, returning 0 if nil
 func derefGroupID(groupID *int64) int64 {
 	if groupID == nil {
@@ -1508,6 +1513,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 			"model", requestedModel)
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
+	s.seedAccountSelectionCooldowns(ctx, groupID, requestedModel, excludedIDs)
 
 	// anthropic/gemini 分组支持混合调度（包含启用了 mixed_scheduling 的 antigravity 账户）
 	// 注意：强制平台模式不走混合调度
@@ -1560,6 +1566,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			"model", requestedModel)
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
+	s.seedAccountSelectionCooldowns(ctx, groupID, requestedModel, excludedIDs)
 
 	var stickyAccountID int64
 	var stickySource string
@@ -1605,6 +1612,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			account, err := s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded)
 			if err != nil {
 				return nil, err
+			}
+			if s.isAccountSelectionCooling(ctx, groupID, requestedModel, account.ID) {
+				localExcluded[account.ID] = struct{}{}
+				continue
 			}
 
 			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
@@ -1662,6 +1673,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
 	ctx = s.withRPMPrefetch(ctx, accounts)
+	selectionCooldowns := s.getAccountSelectionCooldowns(ctx, groupID, requestedModel, accounts)
 
 	// 提前构建 accountByID（供 Layer 1 和 Layer 1.5 使用）
 	accountByID := make(map[int64]*Account, len(accounts))
@@ -1670,10 +1682,15 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 	isExcluded := func(accountID int64) bool {
 		if excludedIDs == nil {
-			return false
+			_, cooling := selectionCooldowns[accountID]
+			return cooling
 		}
 		_, excluded := excludedIDs[accountID]
-		return excluded
+		if excluded {
+			return true
+		}
+		_, cooling := selectionCooldowns[accountID]
+		return cooling
 	}
 
 	// 获取模型路由配置（仅 anthropic 平台）
@@ -2216,13 +2233,116 @@ func (s *GatewayService) schedulingConfig() config.GatewaySchedulingConfig {
 		return s.cfg.Gateway.Scheduling
 	}
 	return config.GatewaySchedulingConfig{
-		StickySessionMaxWaiting:  3,
-		StickySessionWaitTimeout: 45 * time.Second,
-		FallbackWaitTimeout:      30 * time.Second,
-		FallbackMaxWaiting:       100,
-		LoadBatchEnabled:         true,
-		SlotCleanupInterval:      30 * time.Second,
+		StickySessionMaxWaiting:            3,
+		StickySessionWaitTimeout:           45 * time.Second,
+		FallbackWaitTimeout:                30 * time.Second,
+		FallbackMaxWaiting:                 100,
+		LoadBatchEnabled:                   true,
+		AccountSelectionCooldownTTLSeconds: 8,
+		SlotCleanupInterval:                30 * time.Second,
 	}
+}
+
+func (s *GatewayService) accountSelectionCooldownCache() GatewayAccountSelectionCooldownCache {
+	if s == nil || s.cache == nil {
+		return nil
+	}
+	cache, ok := s.cache.(GatewayAccountSelectionCooldownCache)
+	if !ok {
+		return nil
+	}
+	return cache
+}
+
+func (s *GatewayService) accountSelectionCooldownTTL() time.Duration {
+	cfg := s.schedulingConfig()
+	if cfg.AccountSelectionCooldownTTLSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(cfg.AccountSelectionCooldownTTLSeconds) * time.Second
+}
+
+func (s *GatewayService) seedAccountSelectionCooldowns(ctx context.Context, groupID *int64, requestedModel string, excludedIDs map[int64]struct{}) {
+	if len(excludedIDs) == 0 {
+		return
+	}
+	cache := s.accountSelectionCooldownCache()
+	ttl := s.accountSelectionCooldownTTL()
+	if cache == nil || ttl <= 0 {
+		return
+	}
+	accountIDs := make([]int64, 0, len(excludedIDs))
+	for accountID := range excludedIDs {
+		if accountID > 0 {
+			accountIDs = append(accountIDs, accountID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return
+	}
+	if err := cache.SetAccountSelectionCooldowns(ctx, derefGroupID(groupID), requestedModel, accountIDs, ttl); err != nil {
+		slog.Debug("account_selection_cooldown_seed_failed",
+			"group_id", derefGroupID(groupID),
+			"model", requestedModel,
+			"count", len(accountIDs),
+			"error", err)
+	}
+}
+
+func (s *GatewayService) getAccountSelectionCooldowns(ctx context.Context, groupID *int64, requestedModel string, accounts []Account) map[int64]struct{} {
+	cache := s.accountSelectionCooldownCache()
+	ttl := s.accountSelectionCooldownTTL()
+	if cache == nil || ttl <= 0 || len(accounts) == 0 {
+		return nil
+	}
+	accountIDs := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		if accounts[i].ID > 0 {
+			accountIDs = append(accountIDs, accounts[i].ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	cooldowns, err := cache.GetAccountSelectionCooldowns(ctx, derefGroupID(groupID), requestedModel, accountIDs)
+	if err != nil {
+		slog.Debug("account_selection_cooldown_load_failed",
+			"group_id", derefGroupID(groupID),
+			"model", requestedModel,
+			"count", len(accountIDs),
+			"error", err)
+		return nil
+	}
+	if len(cooldowns) == 0 {
+		return nil
+	}
+	slog.Debug("account_selection_cooldown_hit",
+		"group_id", derefGroupID(groupID),
+		"model", requestedModel,
+		"cooldown_count", len(cooldowns))
+	return cooldowns
+}
+
+func (s *GatewayService) isAccountSelectionCooling(ctx context.Context, groupID *int64, requestedModel string, accountID int64) bool {
+	if accountID <= 0 {
+		return false
+	}
+	cache := s.accountSelectionCooldownCache()
+	ttl := s.accountSelectionCooldownTTL()
+	if cache == nil || ttl <= 0 {
+		return false
+	}
+	cooldowns, err := cache.GetAccountSelectionCooldowns(ctx, derefGroupID(groupID), requestedModel, []int64{accountID})
+	if err != nil {
+		slog.Debug("account_selection_cooldown_single_load_failed",
+			"group_id", derefGroupID(groupID),
+			"model", requestedModel,
+			"account_id", accountID,
+			"error", err)
+		return false
+	}
+	_, ok := cooldowns[accountID]
+	return ok
 }
 
 func (s *GatewayService) withGroupContext(ctx context.Context, group *Group) context.Context {

@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -209,6 +210,8 @@ var _ AccountRepository = (*mockAccountRepoForPlatform)(nil)
 type mockGatewayCacheForPlatform struct {
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
+	cooldowns       map[string]map[int64]struct{}
+	cooldownSetIDs  []int64
 }
 
 func (m *mockGatewayCacheForPlatform) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
@@ -240,6 +243,48 @@ func (m *mockGatewayCacheForPlatform) DeleteSessionAccountID(ctx context.Context
 	m.deletedSessions[sessionHash]++
 	delete(m.sessionBindings, sessionHash)
 	return nil
+}
+
+func gatewayTestCooldownKey(groupID int64, model string) string {
+	return fmt.Sprintf("%d:%s", groupID, model)
+}
+
+func (m *mockGatewayCacheForPlatform) SetAccountSelectionCooldowns(ctx context.Context, groupID int64, model string, accountIDs []int64, ttl time.Duration) error {
+	if ttl <= 0 {
+		return nil
+	}
+	key := gatewayTestCooldownKey(groupID, model)
+	if m.cooldowns == nil {
+		m.cooldowns = make(map[string]map[int64]struct{})
+	}
+	if m.cooldowns[key] == nil {
+		m.cooldowns[key] = make(map[int64]struct{})
+	}
+	for _, accountID := range accountIDs {
+		if accountID <= 0 {
+			continue
+		}
+		m.cooldowns[key][accountID] = struct{}{}
+		m.cooldownSetIDs = append(m.cooldownSetIDs, accountID)
+	}
+	return nil
+}
+
+func (m *mockGatewayCacheForPlatform) GetAccountSelectionCooldowns(ctx context.Context, groupID int64, model string, accountIDs []int64) (map[int64]struct{}, error) {
+	out := make(map[int64]struct{})
+	if m.cooldowns == nil {
+		return out, nil
+	}
+	cooling := m.cooldowns[gatewayTestCooldownKey(groupID, model)]
+	if len(cooling) == 0 {
+		return out, nil
+	}
+	for _, accountID := range accountIDs {
+		if _, ok := cooling[accountID]; ok {
+			out[accountID] = struct{}{}
+		}
+	}
+	return out, nil
 }
 
 type mockGroupRepoForGateway struct {
@@ -2260,6 +2305,81 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.NotNil(t, result)
 		require.NotNil(t, result.Account)
 		require.Equal(t, int64(2), result.Account.ID, "不应选择被排除的账号")
+	})
+
+	t.Run("excluded account is cooled down for following load-aware selections", func(t *testing.T) {
+		const model = "claude-3-5-sonnet-20241022"
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5},
+				{ID: 2, Platform: PlatformAnthropic, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 5},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{}
+		cfg := testConfig()
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+		cfg.Gateway.Scheduling.AccountSelectionCooldownTTLSeconds = 8
+		concurrencyCache := &mockConcurrencyCache{}
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(concurrencyCache),
+		}
+
+		excludedIDs := map[int64]struct{}{1: {}}
+		first, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "", model, excludedIDs, "", int64(0))
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.Equal(t, int64(2), first.Account.ID)
+		require.Equal(t, []int64{1}, cache.cooldownSetIDs)
+
+		second, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "", model, nil, "", int64(0))
+		require.NoError(t, err)
+		require.NotNil(t, second)
+		require.Equal(t, int64(2), second.Account.ID, "cooldown should keep the failed high-priority account out of the next selection")
+	})
+
+	t.Run("sticky account in selection cooldown falls back to healthy account", func(t *testing.T) {
+		const model = "claude-3-5-sonnet-20241022"
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5},
+				{ID: 2, Platform: PlatformAnthropic, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 5},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{
+			sessionBindings: map[string]int64{"sticky": 1},
+			cooldowns: map[string]map[int64]struct{}{
+				gatewayTestCooldownKey(0, model): {1: {}},
+			},
+		}
+		cfg := testConfig()
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+		cfg.Gateway.Scheduling.AccountSelectionCooldownTTLSeconds = 8
+		concurrencyCache := &mockConcurrencyCache{}
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(concurrencyCache),
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "sticky", model, nil, "", int64(0))
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, int64(2), result.Account.ID)
+		require.Equal(t, int64(2), cache.sessionBindings["sticky"], "new healthy selection should replace sticky binding")
 	})
 
 	t.Run("粘性命中-不调用GetByID", func(t *testing.T) {

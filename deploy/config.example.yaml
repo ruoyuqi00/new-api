@@ -427,6 +427,9 @@ gateway:
     # Tiny in-process TTL for batch load reads in milliseconds (0 disables)
     # 调度批量负载读取的进程内短缓存 TTL（毫秒，0 表示禁用）
     load_batch_cache_ttl_ms: 200
+    # Short Redis cooldown after an account fails and enters per-request exclusions (seconds, 0 disables)
+    # 账号失败进入本次请求排除列表后的 Redis 短冷却（秒，0 表示禁用）
+    account_selection_cooldown_ttl_seconds: 8
     # Slot cleanup interval (duration)
     # 并发槽位清理周期（时间段）
     slot_cleanup_interval: 30s

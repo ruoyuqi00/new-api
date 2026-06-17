@@ -1631,6 +1631,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 			"model", requestedModel)
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
+	s.seedAccountSelectionCooldowns(ctx, groupID, requestedModel, excludedIDs)
 
 	// 1. 尝试粘性会话命中
 	// Try sticky session hit
@@ -1644,10 +1645,11 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
+	selectionCooldowns := s.getAccountSelectionCooldowns(ctx, groupID, requestedModel, accounts)
 
 	// 3. 按优先级 + LRU 选择最佳账号
 	// Select by priority + LRU
-	selected, compactBlocked := s.selectBestAccount(ctx, groupID, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability)
+	selected, compactBlocked := s.selectBestAccount(ctx, groupID, accounts, requestedModel, excludedIDs, selectionCooldowns, requireCompact, requiredCapability)
 
 	if selected == nil {
 		return nil, noAvailableOpenAISelectionError(requestedModel, compactBlocked)
@@ -1687,6 +1689,9 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	}
 
 	if _, excluded := excludedIDs[accountID]; excluded {
+		return nil
+	}
+	if s.isAccountSelectionCooling(ctx, groupID, requestedModel, accountID) {
 		return nil
 	}
 
@@ -1735,7 +1740,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 // Returns nil if no available account. The second return reports whether at
 // least one candidate was filtered out solely because it lacks compact support
 // (only meaningful when requireCompact=true).
-func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *int64, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability) (*Account, bool) {
+func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *int64, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, selectionCooldowns map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability) (*Account, bool) {
 	var selected *Account
 	selectedCompactTier := -1
 	compactBlocked := false
@@ -1747,6 +1752,9 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		// 跳过被排除的账号
 		// Skip excluded accounts
 		if _, excluded := excludedIDs[acc.ID]; excluded {
+			continue
+		}
+		if _, cooling := selectionCooldowns[acc.ID]; cooling {
 			continue
 		}
 
@@ -1841,6 +1849,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			"model", requestedModel)
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
+	s.seedAccountSelectionCooldowns(ctx, groupID, requestedModel, excludedIDs)
 
 	cfg := s.schedulingConfig()
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
@@ -1885,13 +1894,19 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if len(accounts) == 0 {
 		return nil, ErrNoAvailableAccounts
 	}
+	selectionCooldowns := s.getAccountSelectionCooldowns(ctx, groupID, requestedModel, accounts)
 
 	isExcluded := func(accountID int64) bool {
 		if excludedIDs == nil {
-			return false
+			_, cooling := selectionCooldowns[accountID]
+			return cooling
 		}
 		_, excluded := excludedIDs[accountID]
-		return excluded
+		if excluded {
+			return true
+		}
+		_, cooling := selectionCooldowns[accountID]
+		return cooling
 	}
 
 	// ============ Layer 1: Sticky session ============
@@ -2270,13 +2285,116 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 		return s.cfg.Gateway.Scheduling
 	}
 	return config.GatewaySchedulingConfig{
-		StickySessionMaxWaiting:  3,
-		StickySessionWaitTimeout: 45 * time.Second,
-		FallbackWaitTimeout:      30 * time.Second,
-		FallbackMaxWaiting:       100,
-		LoadBatchEnabled:         true,
-		SlotCleanupInterval:      30 * time.Second,
+		StickySessionMaxWaiting:            3,
+		StickySessionWaitTimeout:           45 * time.Second,
+		FallbackWaitTimeout:                30 * time.Second,
+		FallbackMaxWaiting:                 100,
+		LoadBatchEnabled:                   true,
+		AccountSelectionCooldownTTLSeconds: 8,
+		SlotCleanupInterval:                30 * time.Second,
 	}
+}
+
+func (s *OpenAIGatewayService) accountSelectionCooldownCache() GatewayAccountSelectionCooldownCache {
+	if s == nil || s.cache == nil {
+		return nil
+	}
+	cache, ok := s.cache.(GatewayAccountSelectionCooldownCache)
+	if !ok {
+		return nil
+	}
+	return cache
+}
+
+func (s *OpenAIGatewayService) accountSelectionCooldownTTL() time.Duration {
+	cfg := s.schedulingConfig()
+	if cfg.AccountSelectionCooldownTTLSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(cfg.AccountSelectionCooldownTTLSeconds) * time.Second
+}
+
+func (s *OpenAIGatewayService) seedAccountSelectionCooldowns(ctx context.Context, groupID *int64, requestedModel string, excludedIDs map[int64]struct{}) {
+	if len(excludedIDs) == 0 {
+		return
+	}
+	cache := s.accountSelectionCooldownCache()
+	ttl := s.accountSelectionCooldownTTL()
+	if cache == nil || ttl <= 0 {
+		return
+	}
+	accountIDs := make([]int64, 0, len(excludedIDs))
+	for accountID := range excludedIDs {
+		if accountID > 0 {
+			accountIDs = append(accountIDs, accountID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return
+	}
+	if err := cache.SetAccountSelectionCooldowns(ctx, derefGroupID(groupID), requestedModel, accountIDs, ttl); err != nil {
+		slog.Debug("openai_account_selection_cooldown_seed_failed",
+			"group_id", derefGroupID(groupID),
+			"model", requestedModel,
+			"count", len(accountIDs),
+			"error", err)
+	}
+}
+
+func (s *OpenAIGatewayService) getAccountSelectionCooldowns(ctx context.Context, groupID *int64, requestedModel string, accounts []Account) map[int64]struct{} {
+	cache := s.accountSelectionCooldownCache()
+	ttl := s.accountSelectionCooldownTTL()
+	if cache == nil || ttl <= 0 || len(accounts) == 0 {
+		return nil
+	}
+	accountIDs := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		if accounts[i].ID > 0 {
+			accountIDs = append(accountIDs, accounts[i].ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	cooldowns, err := cache.GetAccountSelectionCooldowns(ctx, derefGroupID(groupID), requestedModel, accountIDs)
+	if err != nil {
+		slog.Debug("openai_account_selection_cooldown_load_failed",
+			"group_id", derefGroupID(groupID),
+			"model", requestedModel,
+			"count", len(accountIDs),
+			"error", err)
+		return nil
+	}
+	if len(cooldowns) == 0 {
+		return nil
+	}
+	slog.Debug("openai_account_selection_cooldown_hit",
+		"group_id", derefGroupID(groupID),
+		"model", requestedModel,
+		"cooldown_count", len(cooldowns))
+	return cooldowns
+}
+
+func (s *OpenAIGatewayService) isAccountSelectionCooling(ctx context.Context, groupID *int64, requestedModel string, accountID int64) bool {
+	if accountID <= 0 {
+		return false
+	}
+	cache := s.accountSelectionCooldownCache()
+	ttl := s.accountSelectionCooldownTTL()
+	if cache == nil || ttl <= 0 {
+		return false
+	}
+	cooldowns, err := cache.GetAccountSelectionCooldowns(ctx, derefGroupID(groupID), requestedModel, []int64{accountID})
+	if err != nil {
+		slog.Debug("openai_account_selection_cooldown_single_load_failed",
+			"group_id", derefGroupID(groupID),
+			"model", requestedModel,
+			"account_id", accountID,
+			"error", err)
+		return false
+	}
+	_, ok := cooldowns[accountID]
+	return ok
 }
 
 // GetAccessToken gets the access token for an OpenAI account

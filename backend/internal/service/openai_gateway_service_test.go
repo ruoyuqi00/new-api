@@ -394,6 +394,8 @@ func (c stubConcurrencyCache) GetAccountWaitingCount(ctx context.Context, accoun
 type stubGatewayCache struct {
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
+	cooldowns       map[string]map[int64]struct{}
+	cooldownSetIDs  []int64
 }
 
 func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
@@ -425,6 +427,48 @@ func (c *stubGatewayCache) DeleteSessionAccountID(ctx context.Context, groupID i
 	c.deletedSessions[sessionHash]++
 	delete(c.sessionBindings, sessionHash)
 	return nil
+}
+
+func openAITestCooldownKey(groupID int64, model string) string {
+	return fmt.Sprintf("%d:%s", groupID, model)
+}
+
+func (c *stubGatewayCache) SetAccountSelectionCooldowns(ctx context.Context, groupID int64, model string, accountIDs []int64, ttl time.Duration) error {
+	if ttl <= 0 {
+		return nil
+	}
+	key := openAITestCooldownKey(groupID, model)
+	if c.cooldowns == nil {
+		c.cooldowns = make(map[string]map[int64]struct{})
+	}
+	if c.cooldowns[key] == nil {
+		c.cooldowns[key] = make(map[int64]struct{})
+	}
+	for _, accountID := range accountIDs {
+		if accountID <= 0 {
+			continue
+		}
+		c.cooldowns[key][accountID] = struct{}{}
+		c.cooldownSetIDs = append(c.cooldownSetIDs, accountID)
+	}
+	return nil
+}
+
+func (c *stubGatewayCache) GetAccountSelectionCooldowns(ctx context.Context, groupID int64, model string, accountIDs []int64) (map[int64]struct{}, error) {
+	out := make(map[int64]struct{})
+	if c.cooldowns == nil {
+		return out, nil
+	}
+	cooling := c.cooldowns[openAITestCooldownKey(groupID, model)]
+	if len(cooling) == 0 {
+		return out, nil
+	}
+	for _, accountID := range accountIDs {
+		if _, ok := cooling[accountID]; ok {
+			out[accountID] = struct{}{}
+		}
+	}
+	return out, nil
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_FiltersUnschedulable(t *testing.T) {
@@ -470,6 +514,48 @@ func TestOpenAISelectAccountWithLoadAwareness_FiltersUnschedulable(t *testing.T)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_SelectionCooldownSkipsFailedAccount(t *testing.T) {
+	const model = "gpt-5.2"
+	groupID := int64(1)
+	preferred := Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+	}
+	fallback := Account{
+		ID:          2,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+
+	cache := &stubGatewayCache{}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{preferred, fallback}},
+		cache:              cache,
+		cfg:                &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: true, AccountSelectionCooldownTTLSeconds: 8}}},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	first, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", model, map[int64]struct{}{preferred.ID: {}})
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, fallback.ID, first.Account.ID)
+	require.Equal(t, []int64{preferred.ID}, cache.cooldownSetIDs)
+
+	second, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", model, nil)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, fallback.ID, second.Account.ID)
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_ImageRateLimitSkipsOnlyImageRequests(t *testing.T) {
