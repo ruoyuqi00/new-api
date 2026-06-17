@@ -80,6 +80,12 @@ Quota or overage-style upstream text is not treated as a dead account signal.
 Only hard authentication failures during token refresh, such as invalid or
 revoked tokens, disable a stored credential.
 
+As of 2026-06-17, clearly terminal Kiro Web text such as temporary suspension,
+account lock, or verification-required responses is also treated as a dead
+credential signal and removed from future selection. This is intentionally
+narrower than quota handling and should not be applied to ordinary "monthly
+usage limit" style responses.
+
 Context handling is model-aware but conservative:
 
 - `claude-opus-4.8` is advertised and mapped as the newest Opus family alias

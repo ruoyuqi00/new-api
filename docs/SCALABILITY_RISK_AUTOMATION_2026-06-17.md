@@ -42,6 +42,10 @@ This document records what is already true, what is still incomplete, and how th
   - `sub2api-provider-adapters:risk-log-key-filter-20260617` was deployed with `docker compose up -d --no-deps sub2api`;
   - public `/health` returned HTTP 200;
   - Sub2API container was healthy on the new image.
+- Kiro hard-dead credential handling was live-checked on 2026-06-17 after the adapter update:
+  - `sub2api-kiro-web-adapter` was running on the server;
+  - `/opt/sub2api/kiro-rs/config/credentials.json` had shrunk from 28 credentials to 27;
+  - the server-side adapter file at `/opt/sub2api/kiro-web-adapter/kiro_web_adapter.py` contained the hard-dead delete path.
 
 ## What Is Still Not Finished
 

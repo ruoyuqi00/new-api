@@ -117,6 +117,22 @@ class KiroCredentialAuthError(RuntimeError):
     """Raised when a stored credential is no longer accepted upstream."""
 
 
+HARD_DEAD_TEXT_MARKERS = (
+    "temporarily suspended",
+    "account has been suspended",
+    "account suspended",
+    "user id is temporarily suspended",
+    "suspended for terms of service",
+    "suspended due to policy violation",
+    "identity verification is required",
+    "identity verification required",
+    "policy violation",
+    "terms of service violation",
+    "account locked",
+    "account disabled",
+)
+
+
 def now_utc() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -184,6 +200,14 @@ def credential_id(cred: dict[str, Any], index: int) -> str:
     if isinstance(fingerprint, str) and fingerprint.strip():
         return f"kiro_{sha256_hex(fingerprint.strip())[:12]}"
     return f"kiro_account_{index + 1}"
+
+
+def credential_runtime_marker(cred: dict[str, Any], index: int | None) -> str:
+    for key in ("runtime_id", "credential_runtime_id"):
+        value = cred.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return credential_id(cred, index if isinstance(index, int) else 0)
 
 
 def sanitize_credential_for_admin(cred: dict[str, Any], index: int) -> dict[str, Any]:
@@ -304,6 +328,18 @@ def auth_failure_from_response(status: int, message: str) -> bool:
             "unauthorized",
         )
     )
+
+
+def hard_dead_reason(message: str) -> str | None:
+    lower = message.lower()
+    for marker in HARD_DEAD_TEXT_MARKERS:
+        if marker in lower:
+            return marker
+    return None
+
+
+def is_hard_dead_credential_text(message: str) -> bool:
+    return hard_dead_reason(message) is not None
 
 
 def estimate_tokens_from_string(value: str) -> int:
@@ -804,6 +840,7 @@ class PortalSession:
     user_id: str | None
     visitor_id: str
     profile_arn: str | None
+    credential_runtime_id: str
     expires_at: float
 
 
@@ -824,23 +861,35 @@ class KiroWebClient:
         )
 
     def load_credentials(self, model: str | None = None) -> tuple[list[tuple[dict[str, Any], int | None]], Any]:
-        loaded = json.loads(self.creds_path.read_text(encoding="utf-8"))
-        candidates = loaded if isinstance(loaded, list) else [loaded]
-        if not isinstance(candidates, list):
-            raise RuntimeError("credentials file must contain an object or object array")
-        usable: list[tuple[dict[str, Any], int | None]] = []
-        for idx, item in enumerate(candidates):
-            if isinstance(item, dict) and not item.get("disabled"):
-                if (
-                    pick(item, "refreshToken", "refresh_token", "accessToken", "access_token")
-                    and credential_supports_model(item, model)
-                ):
-                    usable.append((dict(item), idx if isinstance(loaded, list) else None))
-        if not usable:
-            suffix = f" for model {map_model(model)}" if model else ""
-            raise RuntimeError(f"no enabled Kiro credential with token material{suffix}")
-        usable.sort(key=lambda pair: (int(pair[0].get("priority") or 0), self.credential_runtime_id(pair[0], pair[1])))
-        return usable, loaded
+        with self.lock:
+            loaded = json.loads(self.creds_path.read_text(encoding="utf-8"))
+            candidates = loaded if isinstance(loaded, list) else [loaded]
+            if not isinstance(candidates, list):
+                raise RuntimeError("credentials file must contain an object or object array")
+            changed = False
+            usable: list[tuple[dict[str, Any], int | None]] = []
+            for idx, item in enumerate(candidates):
+                if not isinstance(item, dict):
+                    continue
+                runtime_id = credential_runtime_marker(item, idx if isinstance(loaded, list) else None)
+                if item.get("runtime_id") != runtime_id:
+                    item["runtime_id"] = runtime_id
+                    changed = True
+                if not item.get("disabled"):
+                    if (
+                        pick(item, "refreshToken", "refresh_token", "accessToken", "access_token")
+                        and credential_supports_model(item, model)
+                    ):
+                        usable.append((dict(item), idx if isinstance(loaded, list) else None))
+            if changed:
+                tmp = self.creds_path.with_suffix(self.creds_path.suffix + ".tmp")
+                tmp.write_text(json.dumps(loaded, ensure_ascii=False, indent=2), encoding="utf-8")
+                tmp.replace(self.creds_path)
+            if not usable:
+                suffix = f" for model {map_model(model)}" if model else ""
+                raise RuntimeError(f"no enabled Kiro credential with token material{suffix}")
+            usable.sort(key=lambda pair: (int(pair[0].get("priority") or 0), self.credential_runtime_id(pair[0], pair[1])))
+            return usable, loaded
 
     def admin_credentials(self) -> dict[str, Any]:
         try:
@@ -920,7 +969,7 @@ class KiroWebClient:
         return dict(cred), idx, loaded
 
     def credential_runtime_id(self, cred: dict[str, Any], index: int | None) -> str:
-        return credential_id(cred, index if isinstance(index, int) else 0)
+        return credential_runtime_marker(cred, index)
 
     def read_runtime_state(self) -> dict[str, Any]:
         try:
@@ -1071,6 +1120,39 @@ class KiroWebClient:
         updated["disabled_reason"] = reason[:500]
         updated["disabled_at"] = now_utc().isoformat()
         self.persist_credential(updated, index, loaded)
+
+    def delete_credential_runtime_id(self, runtime_id: str, reason: str) -> bool:
+        if not runtime_id:
+            return False
+
+        with self.lock:
+            try:
+                loaded = json.loads(self.creds_path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, OSError, json.JSONDecodeError):
+                return False
+
+            if isinstance(loaded, list):
+                for idx, item in enumerate(loaded):
+                    if not isinstance(item, dict):
+                        continue
+                    if self.credential_runtime_id(item, idx) != runtime_id:
+                        continue
+                    updated = [entry for i, entry in enumerate(loaded) if i != idx]
+                    tmp = self.creds_path.with_suffix(self.creds_path.suffix + ".tmp")
+                    tmp.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+                    tmp.replace(self.creds_path)
+                    self.session_cache.clear()
+                    return True
+                return False
+
+            if isinstance(loaded, dict) and self.credential_runtime_id(loaded, None) == runtime_id:
+                tmp = self.creds_path.with_suffix(self.creds_path.suffix + ".tmp")
+                tmp.write_text("[]", encoding="utf-8")
+                tmp.replace(self.creds_path)
+                self.session_cache.clear()
+                return True
+
+        return False
 
     def ensure_access_token(
         self,
@@ -1224,10 +1306,26 @@ class KiroWebClient:
         encoded = cbor_encode(call_body)
         req = urllib.request.Request(url, data=encoded, method="POST", headers=headers)
         if stream:
-            return urllib.request.urlopen(req, timeout=timeout)
+            try:
+                return urllib.request.urlopen(req, timeout=timeout)
+            except urllib.error.HTTPError as exc:
+                raw = exc.read()
+                message = raw.decode("utf-8", "replace")[:500] if raw else ""
+                detail = f"Kiro portal {operation} failed with status {exc.code}"
+                if message:
+                    detail = f"{detail}: {message}"
+                if is_hard_dead_credential_text(message):
+                    raise KiroCredentialAuthError(detail) from exc
+                raise RuntimeError(detail) from exc
         status, headers_out, raw = http_json_request("POST", url, headers, encoded, timeout)
         if status < 200 or status >= 300:
-            raise RuntimeError(f"Kiro portal {operation} failed with status {status}")
+            message = raw.decode("utf-8", "replace")[:500] if raw else ""
+            detail = f"Kiro portal {operation} failed with status {status}"
+            if message:
+                detail = f"{detail}: {message}"
+            if is_hard_dead_credential_text(message):
+                raise KiroCredentialAuthError(detail)
+            raise RuntimeError(detail)
         content_type = (headers_out.get("content-type") or headers_out.get("Content-Type") or "").lower()
         if "application/cbor" in content_type:
             return cbor_decode(raw)
@@ -1308,11 +1406,18 @@ class KiroWebClient:
                         user_id=None,
                         visitor_id=visitor_id,
                         profile_arn=profile_arn,
+                        credential_runtime_id=runtime_id,
                         expires_at=time.time() + 600,
                     )
                     try:
                         self.portal_call(tmp, "GetUserInfo", {"origin": "KIRO_IDE"}, timeout=30)
                         working_idp = idp
+                        break
+                    except KiroCredentialAuthError as exc:
+                        self.delete_credential_runtime_id(runtime_id, str(exc))
+                        self.session_cache.clear()
+                        last_error = exc
+                        skipped.add(runtime_id)
                         break
                     except Exception as exc:
                         last_error = exc
@@ -1332,9 +1437,16 @@ class KiroWebClient:
                         user_id=meta.get("user_id"),
                         visitor_id=visitor_id,
                         profile_arn=profile_arn,
+                        credential_runtime_id=runtime_id,
                         expires_at=time.time() + 900,
                     )
                     self.warm_portal_session(session)
+                except KiroCredentialAuthError as exc:
+                    self.delete_credential_runtime_id(runtime_id, str(exc))
+                    self.session_cache.pop(cache_key, None)
+                    last_error = exc
+                    skipped.add(runtime_id)
+                    continue
                 except Exception as exc:
                     last_error = exc
                     self.session_cache.pop(cache_key, None)
@@ -1377,7 +1489,11 @@ class KiroWebClient:
 
     def send_message_events(self, prompt: str, model: str, affinity_key: str | None = None) -> Iterator[dict[str, Any]]:
         session = self.prepare_session(model=model, affinity_key=affinity_key)
-        space_id = self.create_space(session)
+        try:
+            space_id = self.create_space(session)
+        except KiroCredentialAuthError as exc:
+            self.delete_credential_runtime_id(session.credential_runtime_id, str(exc))
+            raise
         prompt = trim_prompt_for_model(prompt, model)
         body = {
             "spaceId": space_id,
@@ -1385,17 +1501,30 @@ class KiroWebClient:
             "contentBlocks": [{"text": {"text": prompt}}],
             "modelId": map_model(model),
         }
-        response = self.portal_call(
-            session,
-            "StreamSendMessage",
-            body,
-            timeout=120,
-            accept="application/cbor",
-            stream=True,
-        )
-        with response:
-            for event in iter_eventstream(response):
-                yield event
+        try:
+            response = self.portal_call(
+                session,
+                "StreamSendMessage",
+                body,
+                timeout=120,
+                accept="application/cbor",
+                stream=True,
+            )
+        except KiroCredentialAuthError as exc:
+            self.delete_credential_runtime_id(session.credential_runtime_id, str(exc))
+            raise
+        chunks: list[str] = []
+        try:
+            with response:
+                for event in iter_eventstream(response):
+                    text, _ = event_text(event)
+                    if text:
+                        chunks.append(text)
+                    yield event
+        finally:
+            reason = hard_dead_reason("".join(chunks)) if chunks else None
+            if reason:
+                self.delete_credential_runtime_id(session.credential_runtime_id, f"hard upstream failure: {reason}")
 
     def collect_text(
         self,

@@ -139,6 +139,10 @@ Detection rules should include:
 - HTTP 429 / "Too many requests": cooldown, then retry another credential.
 - "monthly usage limit" or similar quota text: do not disable, delete, or mark permanently exhausted. Record `soft_limit_seen_until` for observability and optionally use a short cooldown/retry another credential for this request only.
 - Kiro high-traffic text: short cooldown, retry another credential.
+- Clearly terminal suspension, lock, policy-violation, or verification-required
+  text is a dead-account signal. As of 2026-06-17, `kiro_web_adapter.py`
+  removes that credential from future selection instead of keeping it in the
+  pool.
 
 ### 2. Selection Strategy
 
