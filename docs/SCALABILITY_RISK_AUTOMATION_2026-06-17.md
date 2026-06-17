@@ -106,7 +106,7 @@ Needed next:
 The follow-up automation should:
 
 1. Work only in `D:\wflogin\sub2api-private`.
-2. Never inspect `D:\wflogin\注册机相关项目`.
+2. Never inspect the isolated Chinese-named registration-project folder under `D:\wflogin`.
 3. Preserve NewAPI unless the user explicitly asks for NewAPI changes.
 4. Prefer small, reviewable hardening increments.
 5. Run focused backend/frontend tests after each code change.
@@ -125,6 +125,30 @@ Priority order:
 5. Review and add DB indexes for risk log and API key lookup paths if missing.
 6. Add Redis-backed counters for suspicious downstream behavior beyond content hits, such as high invalid-request rate or repeated blocked models.
 7. Add a short production runbook for scaling users, issuing keys, handling false positives, and unblocking users safely.
+
+## Pre-Launch Domain Access Checklist
+
+Use this before opening the service to more downstream users.
+
+1. Keep at least two API hostnames:
+   - a production hostname that blocks normal mainland China access;
+   - a short-term fallback or transition hostname that can be disabled or given
+     the same block rule quickly.
+2. Put all user-facing API hostnames behind the same CDN/WAF control plane.
+   Do not rely on changing to an overseas domain registrar by itself.
+3. Block mainland China at the edge while allowing Hong Kong and Taiwan:
+   - block country code `CN`;
+   - do not block `HK` or `TW`;
+   - decide separately whether `MO` should be allowed.
+4. Prevent origin bypass:
+   - allow only the CDN/WAF IP ranges to reach origin ports 80/443, or use an
+     origin tunnel;
+   - do not publish a user-facing hostname that points directly at the server IP.
+5. Keep the admin hostname separate from user API hostnames. Prefer IP allowlist
+   or access-control login for the admin hostname.
+6. Before final launch, make all generated configs, CCS snippets, docs, and user
+   onboarding point to the blocked production hostname. Retire or block the
+   transition hostname once migration is complete.
 
 ## Server Storage Runbook
 
