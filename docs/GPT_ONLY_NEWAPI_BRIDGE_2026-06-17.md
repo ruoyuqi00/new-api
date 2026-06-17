@@ -170,3 +170,32 @@ For the GPT-only bridge, verify:
 - Each exposed GPT model has at least one successful bridge smoke test.
 
 If any of these fail, do not add more product families yet. Fix the GPT bridge first.
+
+## Production Configuration Applied
+
+Applied on 2026-06-17 after the GPT-only routing decision:
+
+- Sub2API has a dedicated internal API key named `newapi-bridge-gpt`, bound to group `GPT5.5` / id `8`.
+- Sub2API has `channel-newapi-gpt`, active, attached only to `GPT5.5`.
+- `channel-newapi-gpt` pricing/model scope is OpenAI token billing for:
+  - `gpt-5.5`
+  - `gpt-5.4`
+  - `gpt-5.4-mini`
+  - `gpt-5.3-codex`
+  - `gpt-5.3-codex-spark`
+  - `gpt-5.2`
+- NewAPI now has channel `sub2api-gpt`.
+  - Base URL: internal Docker network URL `http://sub2api:8080`.
+  - NewAPI group: `gpt`.
+  - Model list: the six GPT models above.
+  - Tag: `bridge-gpt`.
+- Existing active NewAPI tokens in group `gpt` were updated from single-model `gpt-5.5` visibility to the six-model GPT list above.
+- NewAPI channel cache refresh returned HTTP 200.
+- NewAPI was not restarted.
+
+Operational verification:
+
+- `GET /v1/models` with an existing NewAPI `gpt` token returned all six GPT model ids.
+- A tiny `gpt-5.4-mini` chat smoke no longer fails on NewAPI disk pressure after Docker build cache cleanup.
+- The current chat smoke reached the bridge but returned `Upstream authentication failed, please contact administrator`, so the remaining failure is upstream GPT supply/account health, not NewAPI model visibility.
+- Root filesystem was at 97% and NewAPI returned `system_disk_overloaded`; `docker builder prune -f` safely reclaimed build cache and lowered `/` usage to 89%.
