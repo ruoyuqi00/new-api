@@ -18,6 +18,7 @@ This document records what is already true, what is still incomplete, and how th
 - NewAPI was not restarted during this deployment.
 - The independent Chinese-named registration project under `D:\wflogin` must stay isolated and must not be inspected unless the user explicitly changes that constraint.
 - Server storage note: if the root disk is tight, prefer moving Docker's data root and the persistent compose volumes to the spare server disk such as `/www`. Moving only the app directory usually helps much less, because image layers, build cache, and container metadata can still stay under `/var/lib/docker`.
+- Server storage status on 2026-06-17: DockerRootDir was migrated to `/www/docker`; Sub2API and NewAPI were brought back healthy after the move.
 
 ## What Is Done
 
