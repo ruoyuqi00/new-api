@@ -23,6 +23,8 @@ This protects upstream OAuth/API accounts from being banned by downstream misuse
 - Hits are written to the existing risk-control audit log with redacted input excerpts.
 - In `pre_block` mode, the request is rejected before upstream routing.
 - In `observe` mode, the request is allowed but logged as a risk hit and participates in the existing hash/side-effect pipeline.
+- Repeated risk hits can now disable only the offending downstream API key before user-level auto-ban is reached. This keeps other keys usable when one downstream customer abuses the gateway.
+- If the async record queue is full, risk-hit logging and side effects fall back to a bounded synchronous persist path, so a blocked request does not silently skip audit or auto-disable actions during high load.
 
 ## Actions And Categories
 
@@ -55,11 +57,21 @@ Recommended production config:
   "all_groups": true,
   "keyword_blocking_mode": "keyword_and_api",
   "pre_hash_check_enabled": true,
+  "auto_disable_api_keys_enabled": true,
+  "api_key_ban_threshold": 3,
+  "api_key_violation_window_hours": 24,
   "auto_ban_enabled": true,
   "ban_threshold": 10,
   "violation_window_hours": 720
 }
 ```
+
+Operational meaning:
+
+- `auto_disable_api_keys_enabled`: disables the downstream API key that repeatedly triggers risk hits.
+- `api_key_ban_threshold`: default is 3 hits.
+- `api_key_violation_window_hours`: default is 24 hours.
+- `auto_ban_enabled`: still applies at user level as a wider fallback after the user threshold is reached.
 
 External moderation API keys are still useful for general content safety, but they are no longer required for the local reverse-engineering/abuse guard.
 
@@ -69,6 +81,9 @@ Local checks run on 2026-06-17:
 
 ```bash
 go test ./internal/service -run 'ContentModeration|BuiltIn'
+go test ./internal/repository -run 'ContentModeration'
+go test ./internal/handler -run 'ContentModeration|OpenAIResponsesWebSocket_ContentModeration'
+go test ./cmd/server
 vue-tsc --noEmit
 ```
 
@@ -85,3 +100,5 @@ Expected behavior:
 - For broader cases, add composite action + target + instruction terms to reduce false positives.
 - Keep user-visible block messages generic; do not reveal exact rule internals to downstream clients.
 - Keep audit excerpts redacted and short. Do not log full prompts or secrets.
+- For large downstream expansion, prefer issuing separate API keys per customer/app. The key-level auto-disable path depends on `api_key_id`; shared keys make attribution and containment weaker.
+- If a key is disabled by mistake, re-enable it from API key management after reviewing the latest Risk Control logs. The previous risk hits still count until the configured key window expires.

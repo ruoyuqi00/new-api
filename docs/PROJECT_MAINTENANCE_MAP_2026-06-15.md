@@ -37,7 +37,7 @@ The current docs that matter most for maintenance are:
 - `docs/UPSTREAM_MERGE_2026-06-10.md`
 - `docs/UPSTREAM_PROTOCOL_CHECK_2026-06-15.md`
 - `docs/SCHEDULER_CONCURRENCY_CACHE_2026-06-17.md`
-- `docs/RISK_CONTROL_DOWNSTREAM_GUARD_2026-06-17.md`
+- `docs/RISK_CONTROL_DOWNSTREAM_GUARD_2026-06-17.md` - downstream request guard and key-level auto-disable behavior for large-scale expansion.
 - `docs/SUB2API_AND_COCKPIT_TOOLS_AUDIT_2026-05-27.md`
 - `docs/UPSTREAM_PROTOCOL_AUDIT_2026-05-25.md`
 - `docs/KIRO_UPSTREAM_AUDIT_2026-05-23.md`

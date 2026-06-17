@@ -110,6 +110,22 @@ func (r *contentModerationTestRepo) CountFlaggedByUserSince(ctx context.Context,
 	return count, nil
 }
 
+func (r *contentModerationTestRepo) CountFlaggedByAPIKeySince(ctx context.Context, apiKeyID int64, since time.Time) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, log := range r.logs {
+		if log.APIKeyID == nil || *log.APIKeyID != apiKeyID || !log.Flagged || log.Action == ContentModerationActionHashBlock {
+			continue
+		}
+		if log.CreatedAt.IsZero() || log.CreatedAt.Before(since) {
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
 func (r *contentModerationTestRepo) CleanupExpiredLogs(ctx context.Context, hitBefore time.Time, nonHitBefore time.Time) (*ContentModerationCleanupResult, error) {
 	return &ContentModerationCleanupResult{}, nil
 }
@@ -295,6 +311,25 @@ func (i *contentModerationTestAuthCacheInvalidator) InvalidateAuthCacheByUserID(
 }
 
 func (i *contentModerationTestAuthCacheInvalidator) InvalidateAuthCacheByGroupID(ctx context.Context, groupID int64) {
+}
+
+type contentModerationTestAPIKeyDisabler struct {
+	disabledIDs []int64
+	key         *APIKey
+	disabled    bool
+	err         error
+}
+
+func (d *contentModerationTestAPIKeyDisabler) DisableForRiskControl(ctx context.Context, apiKeyID int64) (*APIKey, bool, error) {
+	d.disabledIDs = append(d.disabledIDs, apiKeyID)
+	if d.err != nil {
+		return nil, false, d.err
+	}
+	key := d.key
+	if key == nil {
+		key = &APIKey{ID: apiKeyID, Name: "downstream", Status: StatusAPIKeyDisabled}
+	}
+	return key, d.disabled, nil
 }
 
 func (c *contentModerationTestHashCache) RecordFlaggedInputHash(ctx context.Context, inputHash string) error {
@@ -1542,6 +1577,52 @@ func TestContentModerationAutoBanDisablesRegularUserAtThreshold(t *testing.T) {
 	require.Equal(t, []int64{userID}, invalidator.userIDs)
 }
 
+func TestContentModerationAutoDisablesAPIKeyAtThreshold(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.AutoDisableAPIKeysEnabled = true
+	cfg.APIKeyBanThreshold = 2
+	cfg.APIKeyViolationWindowHours = 24
+	cfg.BanThreshold = 100
+
+	userID := int64(1001)
+	apiKeyID := int64(7001)
+	repo := &contentModerationTestRepo{}
+	require.NoError(t, repo.CreateLog(context.Background(), newContentModerationFlaggedAPIKeyLog(userID, apiKeyID)))
+	disabler := &contentModerationTestAPIKeyDisabler{
+		key:      &APIKey{ID: apiKeyID, Name: "customer-a", Status: StatusAPIKeyDisabled},
+		disabled: true,
+	}
+	svc := NewContentModerationService(nil, repo, nil, nil, nil, nil, nil)
+	svc.SetAPIKeyDisabler(disabler)
+
+	svc.persistContentModerationLog(context.Background(), cfg, newContentModerationFlaggedAPIKeyLog(userID, apiKeyID), "", false, true)
+
+	logs := requireContentModerationLogCount(t, repo, 2)
+	require.Equal(t, 2, logs[1].ViolationCount)
+	require.False(t, logs[1].AutoBanned)
+	require.Equal(t, []int64{apiKeyID}, disabler.disabledIDs)
+}
+
+func TestContentModerationAutoDisableAPIKeyBelowThresholdDoesNotDisable(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.AutoDisableAPIKeysEnabled = true
+	cfg.APIKeyBanThreshold = 3
+	cfg.APIKeyViolationWindowHours = 24
+	cfg.BanThreshold = 100
+
+	userID := int64(1001)
+	apiKeyID := int64(7001)
+	repo := &contentModerationTestRepo{}
+	disabler := &contentModerationTestAPIKeyDisabler{disabled: true}
+	svc := NewContentModerationService(nil, repo, nil, nil, nil, nil, nil)
+	svc.SetAPIKeyDisabler(disabler)
+
+	svc.persistContentModerationLog(context.Background(), cfg, newContentModerationFlaggedAPIKeyLog(userID, apiKeyID), "", false, true)
+
+	requireContentModerationLogCount(t, repo, 1)
+	require.Empty(t, disabler.disabledIDs)
+}
+
 func TestContentModerationAdminBelowBanThresholdRecordsViolationOnly(t *testing.T) {
 	cfg := defaultContentModerationConfig()
 	cfg.BanThreshold = 2
@@ -1572,6 +1653,13 @@ func newContentModerationFlaggedLog(userID int64) *ContentModerationLog {
 		HighestScore:    0.9,
 		CreatedAt:       time.Now(),
 	}
+}
+
+func newContentModerationFlaggedAPIKeyLog(userID int64, apiKeyID int64) *ContentModerationLog {
+	log := newContentModerationFlaggedLog(userID)
+	log.APIKeyID = &apiKeyID
+	log.APIKeyName = "customer-a"
+	return log
 }
 
 func TestContentModerationCheck_PreBlockFlaggedWritesRedisHashCache(t *testing.T) {

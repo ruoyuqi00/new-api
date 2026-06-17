@@ -33,6 +33,9 @@ export interface ContentModerationConfig {
   auto_ban_enabled: boolean
   ban_threshold: number
   violation_window_hours: number
+  auto_disable_api_keys_enabled: boolean
+  api_key_ban_threshold: number
+  api_key_violation_window_hours: number
   retry_count: number
   hit_retention_days: number
   non_hit_retention_days: number
@@ -108,6 +111,9 @@ export interface UpdateContentModerationConfig {
   auto_ban_enabled?: boolean
   ban_threshold?: number
   violation_window_hours?: number
+  auto_disable_api_keys_enabled?: boolean
+  api_key_ban_threshold?: number
+  api_key_violation_window_hours?: number
   retry_count?: number
   hit_retention_days?: number
   non_hit_retention_days?: number

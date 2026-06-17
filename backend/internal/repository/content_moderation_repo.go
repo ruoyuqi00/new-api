@@ -202,6 +202,25 @@ WHERE user_id = $1
 	return count, nil
 }
 
+func (r *contentModerationRepository) CountFlaggedByAPIKeySince(ctx context.Context, apiKeyID int64, since time.Time) (int, error) {
+	if apiKeyID <= 0 {
+		return 0, nil
+	}
+	var count int
+	err := r.db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM content_moderation_logs
+WHERE api_key_id = $1
+  AND flagged = TRUE
+  AND action <> 'hash_block'
+  AND created_at >= $2
+`, apiKeyID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count api key content moderation flagged logs: %w", err)
+	}
+	return count, nil
+}
+
 func (r *contentModerationRepository) CleanupExpiredLogs(ctx context.Context, hitBefore time.Time, nonHitBefore time.Time) (*service.ContentModerationCleanupResult, error) {
 	result := &service.ContentModerationCleanupResult{FinishedAt: time.Now()}
 	if r == nil || r.db == nil {

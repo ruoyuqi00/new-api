@@ -666,6 +666,29 @@ func (s *APIKeyService) Delete(ctx context.Context, id int64, userID int64) erro
 	return nil
 }
 
+// DisableForRiskControl disables a downstream API key after repeated risk-control hits.
+// It intentionally bypasses user ownership checks because it is called from server-side
+// moderation after the key has already authenticated the gateway request.
+func (s *APIKeyService) DisableForRiskControl(ctx context.Context, apiKeyID int64) (*APIKey, bool, error) {
+	if s == nil || s.apiKeyRepo == nil || apiKeyID <= 0 {
+		return nil, false, ErrAPIKeyNotFound
+	}
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, apiKeyID)
+	if err != nil {
+		return nil, false, fmt.Errorf("get api key: %w", err)
+	}
+	if apiKey.Status == StatusAPIKeyDisabled || apiKey.Status == StatusDisabled {
+		return apiKey, false, nil
+	}
+	apiKey.Status = StatusAPIKeyDisabled
+	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+		return nil, false, fmt.Errorf("disable api key for risk control: %w", err)
+	}
+	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+	s.lastUsedTouchL1.Delete(apiKeyID)
+	return apiKey, true, nil
+}
+
 // ValidateKey 验证API Key是否有效（用于认证中间件）
 func (s *APIKeyService) ValidateKey(ctx context.Context, key string) (*APIKey, *User, error) {
 	// 获取API Key

@@ -881,6 +881,13 @@
                 </div>
                 <Toggle v-model="configForm.auto_ban_enabled" />
               </div>
+              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.autoDisableApiKeys') }}</p>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.autoDisableApiKeysHint') }}</p>
+                </div>
+                <Toggle v-model="configForm.auto_disable_api_keys_enabled" />
+              </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.banThreshold') }}</label>
                 <input v-model.number="configForm.ban_threshold" type="number" min="1" max="1000" class="input" />
@@ -888,6 +895,14 @@
               <div>
                 <label class="input-label">{{ t('admin.riskControl.violationWindowHours') }}</label>
                 <input v-model.number="configForm.violation_window_hours" type="number" min="1" max="8760" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.apiKeyBanThreshold') }}</label>
+                <input v-model.number="configForm.api_key_ban_threshold" type="number" min="1" max="1000" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.apiKeyViolationWindowHours') }}</label>
+                <input v-model.number="configForm.api_key_violation_window_hours" type="number" min="1" max="8760" class="input" />
               </div>
             </div>
           </div>
@@ -1228,6 +1243,9 @@ const configForm = reactive({
   auto_ban_enabled: true,
   ban_threshold: 10,
   violation_window_hours: 720,
+  auto_disable_api_keys_enabled: true,
+  api_key_ban_threshold: 3,
+  api_key_violation_window_hours: 24,
   hit_retention_days: 180,
   non_hit_retention_days: 3,
   pre_hash_check_enabled: false,
@@ -1704,6 +1722,9 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.auto_ban_enabled = config.auto_ban_enabled ?? true
   configForm.ban_threshold = config.ban_threshold || 10
   configForm.violation_window_hours = config.violation_window_hours || 720
+  configForm.auto_disable_api_keys_enabled = config.auto_disable_api_keys_enabled ?? true
+  configForm.api_key_ban_threshold = config.api_key_ban_threshold || 3
+  configForm.api_key_violation_window_hours = config.api_key_violation_window_hours || 24
   configForm.hit_retention_days = config.hit_retention_days || 180
   configForm.non_hit_retention_days = Math.min(Math.max(config.non_hit_retention_days || 3, 1), 3)
   configForm.pre_hash_check_enabled = config.pre_hash_check_enabled ?? false
@@ -1784,6 +1805,9 @@ async function saveConfig() {
       auto_ban_enabled: configForm.auto_ban_enabled,
       ban_threshold: Number(configForm.ban_threshold) || 10,
       violation_window_hours: Number(configForm.violation_window_hours) || 720,
+      auto_disable_api_keys_enabled: configForm.auto_disable_api_keys_enabled,
+      api_key_ban_threshold: Number(configForm.api_key_ban_threshold) || 3,
+      api_key_violation_window_hours: Number(configForm.api_key_violation_window_hours) || 24,
       hit_retention_days: Number(configForm.hit_retention_days) || 180,
       non_hit_retention_days: Math.min(Math.max(Number(configForm.non_hit_retention_days) || 3, 1), 3),
       pre_hash_check_enabled: configForm.pre_hash_check_enabled,
