@@ -203,6 +203,7 @@ export interface ListContentModerationLogsParams {
   page?: number
   page_size?: number
   result?: string
+  api_key_id?: number
   group_id?: number
   endpoint?: string
   search?: string

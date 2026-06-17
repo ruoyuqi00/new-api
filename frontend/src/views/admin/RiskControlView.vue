@@ -263,10 +263,21 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
               <Select v-model="filters.result" :options="resultOptions" @change="reloadLogsFromFirstPage" />
               <Select v-model="filters.group_id" :options="groupFilterOptions" @change="reloadLogsFromFirstPage" />
               <Select v-model="filters.endpoint" :options="endpointOptions" @change="reloadLogsFromFirstPage" />
+              <input
+                v-model.trim="filters.api_key_id"
+                data-test="risk-log-api-key-id-filter"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                :placeholder="t('admin.riskControl.filters.apiKeyId')"
+                @change="reloadLogsFromFirstPage"
+                @keyup.enter="reloadLogsFromFirstPage"
+              />
               <input v-model.trim="filters.search" type="search" class="input" :placeholder="t('admin.riskControl.filters.search')" @keyup.enter="reloadLogsFromFirstPage" />
               <input v-model="filters.from" type="datetime-local" class="input" :title="t('admin.riskControl.filters.from')" @change="reloadLogsFromFirstPage" />
               <input v-model="filters.to" type="datetime-local" class="input" :title="t('admin.riskControl.filters.to')" @change="reloadLogsFromFirstPage" />
@@ -1266,6 +1277,7 @@ const pagination = reactive({
 const filters = reactive({
   result: '',
   group_id: 0,
+  api_key_id: '',
   endpoint: '',
   search: '',
   from: '',
@@ -1849,6 +1861,7 @@ async function loadLogs() {
       page: pagination.page,
       page_size: pagination.page_size,
       result: filters.result || undefined,
+      api_key_id: positiveIntegerFilter(filters.api_key_id),
       group_id: filters.group_id || undefined,
       endpoint: filters.endpoint || undefined,
       search: filters.search || undefined,
@@ -2337,6 +2350,12 @@ function normalizeDateTimeLocal(value: string): string | undefined {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return undefined
   return date.toISOString()
+}
+
+function positiveIntegerFilter(value: string): number | undefined {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return undefined
+  return Math.floor(numeric)
 }
 
 function formatDateTime(value: string): string {

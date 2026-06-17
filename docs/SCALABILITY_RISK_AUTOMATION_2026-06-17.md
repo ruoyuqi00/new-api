@@ -27,6 +27,7 @@ This document records what is already true, what is still incomplete, and how th
 - Repeated risk hits can disable the specific downstream API key.
 - User-level auto-ban remains as a broader fallback.
 - Admin Risk Control UI exposes key-level auto-disable settings.
+- Admin Risk Control logs can now be filtered by `api_key_id`, so an operator can quickly inspect the exact downstream key that triggered risk hits before deciding whether to re-enable, delete, or keep it disabled.
 - The service test suite now includes a cross-protocol built-in block matrix for Anthropic, OpenAI Chat, OpenAI Responses, Gemini, and OpenAI Images.
 - Production verification on 2026-06-17:
   - public `/health` returned HTTP 200;
@@ -56,7 +57,7 @@ Needed next:
 
 - Document and enforce one-customer-per-key operating practice.
 - Prefer per-key quotas, RPM limits, IP ACLs, and group binding.
-- Add admin views or filters that make it easy to find risky keys by hit count, IP, group, model, and endpoint.
+- Add aggregate admin reporting that ranks risky keys by hit count, IP, group, model, and endpoint.
 - Consider key quarantine state separate from ordinary disabled state, so admin can distinguish risk-control action from manual disabling.
 
 ### 3. High-Concurrency Readiness
@@ -111,7 +112,7 @@ The follow-up automation should:
 Priority order:
 
 1. Add more risk-control extraction tests across all supported request protocols.
-2. Add admin filtering or reporting for risk hits by API key and group.
+2. Add aggregate reporting for risk hits by API key, group, endpoint, and IP.
 3. Add a dedicated `risk_disabled` or `quarantined` status if it fits the existing API key status model.
 4. Add load-test scripts for auth + risk pre-block + scheduler hot paths.
 5. Review and add DB indexes for risk log and API key lookup paths if missing.

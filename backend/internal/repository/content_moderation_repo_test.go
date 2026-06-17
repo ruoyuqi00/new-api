@@ -21,6 +21,21 @@ func TestBuildContentModerationLogWhere_BlockedIncludesAllBlockActions(t *testin
 	require.NotContains(t, sql, "l.action = 'block'")
 }
 
+func TestBuildContentModerationLogWhere_FiltersByAPIKeyID(t *testing.T) {
+	apiKeyID := int64(7001)
+	groupID := int64(12)
+
+	where, args := buildContentModerationLogWhere(service.ContentModerationLogFilter{
+		APIKeyID: &apiKeyID,
+		GroupID:  &groupID,
+	})
+
+	sql := strings.Join(where, " AND ")
+	require.Contains(t, sql, "l.api_key_id = $1")
+	require.Contains(t, sql, "l.group_id = $2")
+	require.Equal(t, []any{apiKeyID, groupID}, args)
+}
+
 func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesHashBlock(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

@@ -167,6 +167,14 @@ func (h *ContentModerationHandler) ListLogs(c *gin.Context) {
 		Endpoint: c.Query("endpoint"),
 		Search:   c.Query("search"),
 	}
+	if raw := strings.TrimSpace(c.Query("api_key_id")); raw != "" {
+		apiKeyID, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || apiKeyID <= 0 {
+			response.BadRequest(c, "Invalid api_key_id")
+			return
+		}
+		filter.APIKeyID = &apiKeyID
+	}
 	if raw := strings.TrimSpace(c.Query("group_id")); raw != "" {
 		groupID, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || groupID <= 0 {

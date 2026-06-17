@@ -413,6 +413,7 @@ type ContentModerationLog struct {
 type ContentModerationLogFilter struct {
 	Pagination pagination.PaginationParams
 	Result     string
+	APIKeyID   *int64
 	GroupID    *int64
 	Endpoint   string
 	Search     string

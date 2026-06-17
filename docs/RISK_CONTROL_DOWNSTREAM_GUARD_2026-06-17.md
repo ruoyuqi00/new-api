@@ -25,6 +25,7 @@ This protects upstream OAuth/API accounts from being banned by downstream misuse
 - In `observe` mode, the request is allowed but logged as a risk hit and participates in the existing hash/side-effect pipeline.
 - Repeated risk hits can now disable only the offending downstream API key before user-level auto-ban is reached. This keeps other keys usable when one downstream customer abuses the gateway.
 - If the async record queue is full, risk-hit logging and side effects fall back to a bounded synchronous persist path, so a blocked request does not silently skip audit or auto-disable actions during high load.
+- The admin logs API and Risk Control page support `api_key_id` filtering, making it possible to inspect only the records for one downstream key after an auto-disable or customer report.
 
 ## Actions And Categories
 
@@ -85,6 +86,8 @@ go test ./internal/repository -run 'ContentModeration'
 go test ./internal/handler -run 'ContentModeration|OpenAIResponsesWebSocket_ContentModeration'
 go test ./cmd/server
 vue-tsc --noEmit
+vitest run src/views/admin/__tests__/RiskControlView.spec.ts
+vitest run src/i18n/__tests__/riskControlLocales.spec.ts
 ```
 
 Expected behavior:
@@ -102,3 +105,4 @@ Expected behavior:
 - Keep audit excerpts redacted and short. Do not log full prompts or secrets.
 - For large downstream expansion, prefer issuing separate API keys per customer/app. The key-level auto-disable path depends on `api_key_id`; shared keys make attribution and containment weaker.
 - If a key is disabled by mistake, re-enable it from API key management after reviewing the latest Risk Control logs. The previous risk hits still count until the configured key window expires.
+- Use the Risk Control log `api_key_id` filter when investigating a disabled key; it is faster and less error-prone than searching by key name or user email.

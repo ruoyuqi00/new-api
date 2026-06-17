@@ -272,6 +272,9 @@ func buildContentModerationLogWhere(filter service.ContentModerationLogFilter) (
 	case "error":
 		where = append(where, "l.error <> ''")
 	}
+	if filter.APIKeyID != nil {
+		add("l.api_key_id = $%d", *filter.APIKeyID)
+	}
 	if filter.GroupID != nil {
 		add("l.group_id = $%d", *filter.GroupID)
 	}

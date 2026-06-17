@@ -246,6 +246,37 @@ describe('admin RiskControlView', () => {
     expect(showError).not.toHaveBeenCalled()
   })
 
+  it('filters audit logs by API key id', async () => {
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        },
+      },
+    })
+
+    await flushPromises()
+    listLogs.mockClear()
+
+    const input = wrapper.get('[data-test="risk-log-api-key-id-filter"]')
+    await input.setValue('123')
+    await input.trigger('keyup.enter')
+    await flushPromises()
+
+    expect(listLogs).toHaveBeenCalledWith(expect.objectContaining({
+      page: 1,
+      page_size: 20,
+      api_key_id: 123,
+    }))
+    expect(showError).not.toHaveBeenCalled()
+  })
+
   it('submits edited risk control thresholds when saving moderation config', async () => {
     const wrapper = mount(RiskControlView, {
       global: {
