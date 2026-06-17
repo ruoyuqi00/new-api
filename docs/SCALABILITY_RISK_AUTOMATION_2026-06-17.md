@@ -142,6 +142,9 @@ disk has enough spare capacity.
    move. Do not print secrets while collecting diagnostics.
 4. Prefer moving Docker's `data-root` to the spare disk, for example
    `/www/docker`, instead of only moving `/opt/sub2api` or `/opt/newapi`.
+   The repository includes `deploy/migrate-docker-data-root.sh` for this flow.
+   Its default mode is a dry-run diagnosis; the actual move requires
+   `--execute` and should only be run during a maintenance window.
 5. After the move, verify:
    - `docker info --format '{{.DockerRootDir}}'` points at the new disk;
    - `docker compose ps` shows Sub2API and NewAPI healthy;
