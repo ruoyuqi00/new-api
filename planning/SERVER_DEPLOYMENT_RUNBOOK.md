@@ -470,7 +470,7 @@ Preferred manual path:
 
 If API is used later, use `/api/v1/admin/accounts` after confirming admin auth and request schema.
 
-## URL allowlist risk
+## Internal host routing
 
 Sub2API has URL allowlist/security configuration. If account test rejects Docker service hosts, add explicit internal hosts to server config:
 
@@ -485,7 +485,9 @@ security:
       - 127.0.0.1
 ```
 
-Exact config path must be verified against current server `config.yaml`.
+Exact config path must be verified against current server `config.yaml`. Keep this
+limited to service-to-service routing; do not use IP whitelists as the primary
+way to manage the admin UI, so you can still operate from changing networks.
 
 ## Smoke tests after deployment
 

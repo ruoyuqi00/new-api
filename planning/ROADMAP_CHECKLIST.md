@@ -59,6 +59,7 @@
 - [ ] 记录每个代理的请求头、鉴权方式、错误格式、SSE 格式。
 - [ ] 记录可用模型名、不可用模型错误、限流错误。
 - [ ] 确认 Sub2API 对内网 `base_url` 的 URL allowlist 要求。
+- [ ] 后台管理入口不要依赖固定 IP 白名单，改用登录态 + MFA / Cloudflare Access。
 - [ ] 确认 Sub2API UI 是否能直接创建 `base_url=http://windsurf-api:3003` 这种 Docker service name。
 
 产出：

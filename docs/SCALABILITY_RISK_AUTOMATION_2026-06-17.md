@@ -171,8 +171,9 @@ Use this before opening the service to more downstream users.
    - allow only the CDN/WAF IP ranges to reach origin ports 80/443, or use an
      origin tunnel;
    - do not publish a user-facing hostname that points directly at the server IP.
-5. Keep the admin hostname separate from user API hostnames. Prefer IP allowlist
-   or access-control login for the admin hostname.
+5. Keep the admin hostname separate from user API hostnames. Do not rely on a
+   fixed IP whitelist for admin access; use normal login plus MFA or Cloudflare
+   Access so management still works from mobile or changing networks.
 6. Before final launch, make all generated configs, CCS snippets, docs, and user
    onboarding point to the blocked production hostname. Retire or block the
    transition hostname once migration is complete.
