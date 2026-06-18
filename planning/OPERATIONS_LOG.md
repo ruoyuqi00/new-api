@@ -1782,3 +1782,50 @@ Usage note:
 - Use the Responses API shape with `stream=true` and list-form `input`.
 - The usable model name is `gpt-5.5`; `gpt-5.5-codex` is rejected upstream for
   these ChatGPT/Codex accounts.
+
+## 2026-06-18 Sub2API GPT account-pool cleanup
+
+After the user cleaned the Sub2API account list manually, production was
+audited again from the database and through live smoke probes. No secrets or
+full account payloads were recorded.
+
+Pre-cleanup state:
+
+- Active account rows: 684.
+- `gpt-team`, `gpt-plus`, and `gpt-pro` each had the same 684 linked accounts.
+- Only 3 accounts were initially schedulable.
+
+Cleanup actions:
+
+- Soft-deleted 77 OpenAI OAuth accounts already marked with revoked,
+  invalidated, authentication-failed, or 401 errors.
+- Sampled access-token-only OpenAI OAuth accounts that lacked refresh tokens;
+  samples returned 401 expired, and their stored `expires_at` values were
+  already in the past.
+- Soft-deleted 604 expired access-token-only OpenAI OAuth accounts with no
+  refresh token.
+- Soft-deleted 1 OpenAI OAuth account that failed live probing with workspace
+  deactivated.
+- Removed 2 internal Kiro adapter accounts from the GPT pool by soft-deleting
+  them, because they were the only remaining active rows and did not provide
+  usable GPT supply.
+- Added missing Sub2API allowed-group rows for user `1` so the dedicated
+  NewAPI bridge keys are permitted to bind `gpt-team`, `gpt-plus`, and
+  `gpt-pro`.
+- Published API-key auth cache invalidation messages for the bridge keys.
+
+Final state:
+
+- Active Sub2API account rows: 0.
+- `gpt-team`, `gpt-plus`, and `gpt-pro`: 0 linked accounts and 0 schedulable
+  accounts.
+- `https://api.vyywcw.cn/health` returned `{"status":"ok"}`.
+- `https://newapi.vyywcw.cn/api/status` returned success.
+
+Operational implication:
+
+- NewAPI and Sub2API are healthy, and the bridge group permission issue was
+  fixed, but GPT traffic currently has no usable Sub2API supply behind it.
+- Before opening GPT traffic again, import fresh upstream API-key accounts or
+  CPA/OAuth accounts with refresh tokens into the intended Sub2API tier:
+  `gpt-team`, `gpt-plus`, or `gpt-pro`.
