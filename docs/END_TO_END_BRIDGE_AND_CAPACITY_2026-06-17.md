@@ -14,20 +14,24 @@ Do not record real API keys, refresh tokens, passwords, or full account payloads
 ```text
 User
   -> NewAPI user key
-  -> NewAPI user-visible group: gpt
-  -> NewAPI admin-only channel: sub2api-gpt
-  -> Sub2API internal bridge key: newapi-bridge-gpt
-  -> Sub2API GPT supply group: GPT5.5
-  -> Sub2API GPT channel / scheduler / account pool
-  -> upstream account or external fallback channel
+  -> NewAPI user-visible group: gpt-team / gpt-plus / gpt-pro
+  -> NewAPI dedicated bridge channel:
+       sub2api-gpt-team / sub2api-gpt-plus / sub2api-gpt-pro
+  -> Sub2API internal bridge key:
+       newapi-bridge-gpt-team / newapi-bridge-gpt-plus / newapi-bridge-gpt-pro
+  -> Sub2API GPT supply group:
+       gpt-team / gpt-plus / gpt-pro
+  -> Sub2API channel / scheduler / account pool
+  -> upstream account or upstream OpenAI-compatible API account
 ```
 
 This is the important rule:
 
 - NewAPI is the public product/control plane.
 - Sub2API is the internal supply/scheduler plane.
-- The bridge key is internal only.
-- Users should only see the NewAPI-facing product group and model list.
+- The bridge keys are internal only.
+- Users should only see the NewAPI-facing product groups and model lists.
+- Upstream provider API keys should be imported into Sub2API accounts, not exposed as direct NewAPI channels.
 
 ## 2. Upstream Bridge Shape
 
@@ -68,8 +72,16 @@ Operational control points:
 - Kiro hard-dead credential deletion is live.
 - The Sub2API and NewAPI containers are healthy on the server.
 - Docker data root has already been moved off the tight root disk.
-- GPT-only bridge wiring has already been documented and applied.
-- An external GPT-compatible upstream fallback channel also exists for admin-only supply.
+- GPT bridge wiring has been split into three user-facing NewAPI tiers:
+  `gpt-team`, `gpt-plus`, and `gpt-pro`.
+- NewAPI now only has those three GPT bridge channels enabled for this rollout.
+- The previous single `sub2api-gpt` channel, direct external GPT upstream channel,
+  and image bridge channel are disabled in NewAPI.
+- Sub2API has matching internal supply groups, channels, and bridge keys for
+  `gpt-team`, `gpt-plus`, and `gpt-pro`.
+- The historical `GPT5.5` pool remains available as the source pool; its accounts
+  were temporarily linked into the three new Sub2API groups so traffic does not
+  hit an empty pool while dedicated upstreams are attached.
 - Sub2API now has a read-only admin route preview endpoint for checking
   `group_id + platform + model` before exposing a model through NewAPI or
   adding a new upstream fallback.
@@ -97,7 +109,64 @@ NewAPI user group
 
 That keeps GPT, Opus, Grok, Kiro, Gemini, and image traffic separable instead of turning into one mixed pool.
 
-## 7. Admin Route Preview
+For the current GPT rollout, use the same pattern per tier:
+
+```text
+gpt-team -> sub2api-gpt-team -> newapi-bridge-gpt-team -> gpt-team
+gpt-plus -> sub2api-gpt-plus -> newapi-bridge-gpt-plus -> gpt-plus
+gpt-pro  -> sub2api-gpt-pro  -> newapi-bridge-gpt-pro  -> gpt-pro
+```
+
+Attach new upstream API accounts in Sub2API by binding them to the intended
+Sub2API group. Do not add direct user-facing upstream channels in NewAPI unless
+the product strategy intentionally changes.
+
+## 7. Production Reorg Snapshot - 2026-06-18
+
+Backups created before the production database edits:
+
+- NewAPI: `/opt/newapi/backups/channel-reorg-20260618-101100.sql`
+- Sub2API: `/opt/sub2api/backups/channel-reorg-20260618-101138.sql`
+
+NewAPI enabled channels after the reorg:
+
+| Channel | Group | Base URL | Models |
+| --- | --- | --- | --- |
+| `sub2api-gpt-team` | `gpt-team` | `http://sub2api:8080` | GPT six-model list |
+| `sub2api-gpt-plus` | `gpt-plus` | `http://sub2api:8080` | GPT six-model list |
+| `sub2api-gpt-pro` | `gpt-pro` | `http://sub2api:8080` | GPT six-model list |
+
+Disabled NewAPI channels:
+
+- `sub2api-gpt`
+- `external-gpt-upstream-s2cf`
+- `Sub2API GPT5.5 image2 upstream`
+
+NewAPI options were reduced to:
+
+- `GroupRatio`: `gpt-team`, `gpt-plus`, `gpt-pro`
+- `UserUsableGroups`: `GPT Team`, `GPT Plus`, `GPT Pro`
+- `AutoGroups`: empty
+- `TopupGroupRatio`: `gpt-team`, `gpt-plus`, `gpt-pro`
+
+Existing NewAPI users and active GPT tokens were migrated to `gpt-team` so
+existing keys keep using the base GPT tier instead of orphaned historical
+groups.
+
+Sub2API internal objects:
+
+| Tier | Group | Channel | Bridge key name |
+| --- | --- | --- | --- |
+| Team | `gpt-team` | `channel-newapi-gpt-team` | `newapi-bridge-gpt-team` |
+| Plus | `gpt-plus` | `channel-newapi-gpt-plus` | `newapi-bridge-gpt-plus` |
+| Pro | `gpt-pro` | `channel-newapi-gpt-pro` | `newapi-bridge-gpt-pro` |
+
+The three Sub2API groups are OpenAI-platform, active, and exclusive. They
+currently share the historical GPT account pool as a transitional capacity
+source. When adding a real upstream for a tier, import it as a Sub2API OpenAI
+API-key account and bind it to only that tier's group.
+
+## 8. Admin Route Preview
 
 Use the Sub2API admin route preview before changing the user-visible NewAPI
 model list, creating a new bridge key, or attaching a new upstream fallback.

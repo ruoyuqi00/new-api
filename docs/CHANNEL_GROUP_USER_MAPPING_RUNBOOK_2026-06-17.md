@@ -146,6 +146,31 @@ For every mapping target:
 
 Do not put several NewAPI groups with different intended Sub2API pools into one NewAPI channel. One NewAPI channel has one upstream key, so it can only hit the one Sub2API group bound to that key.
 
+### Current GPT Tier Mapping
+
+Production was reorganized on 2026-06-18 so NewAPI exposes only three GPT
+product groups during the first rollout:
+
+```text
+NewAPI gpt-team -> NewAPI sub2api-gpt-team -> Sub2API key newapi-bridge-gpt-team -> Sub2API group gpt-team
+NewAPI gpt-plus -> NewAPI sub2api-gpt-plus -> Sub2API key newapi-bridge-gpt-plus -> Sub2API group gpt-plus
+NewAPI gpt-pro  -> NewAPI sub2api-gpt-pro  -> Sub2API key newapi-bridge-gpt-pro  -> Sub2API group gpt-pro
+```
+
+For new GPT upstream capacity, create or import OpenAI-compatible API-key
+accounts in Sub2API and bind them to the intended group:
+
+- team upstreams -> `gpt-team`
+- plus upstreams -> `gpt-plus`
+- pro upstreams -> `gpt-pro`
+
+Do not create direct NewAPI upstream channels for these providers. NewAPI should
+remain the user-facing product layer; Sub2API should own provider supply,
+account health, scheduler behavior, and later fallback policy.
+
+The old NewAPI `gpt` group and `sub2api-gpt` channel are disabled for this
+rollout. Historical tokens were moved to `gpt-team` to preserve service.
+
 ## Verification Checklist
 
 After creating a channel/upstream, verify:
@@ -211,9 +236,9 @@ the account-level upstream model selected by the scheduler.
 
 For the current GPT-first rollout, keep these practical rules:
 
-- keep the public user-facing group as `gpt`;
-- keep the Sub2API bridge key internal only;
-- do not reuse a bridge key across unrelated families;
+- keep the public user-facing groups as `gpt-team`, `gpt-plus`, and `gpt-pro`;
+- keep all Sub2API bridge keys internal only;
+- do not reuse a bridge key across tiers or unrelated families;
 - keep account growth separated from user-key growth so scheduler pressure stays visible;
 - use group-level RPM / concurrency controls before expanding the pool size;
 - treat rate-limit text as a cooldown signal, not a dead-account signal;

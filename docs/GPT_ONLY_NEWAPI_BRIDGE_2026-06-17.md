@@ -10,15 +10,29 @@ For now, only the GPT line should be connected to NewAPI.
 
 Other families such as Kiro, Windsurf, Opus, Grok, Gemini, and image-only products are not abandoned. They should simply stay out of the current NewAPI bridge until they are intentionally created as separate product lines.
 
+Update on 2026-06-18: the single `gpt` bridge described in the original
+2026-06-17 notes has been superseded by three GPT tiers:
+
+- `gpt-team`
+- `gpt-plus`
+- `gpt-pro`
+
+Sub2API is still the internal scheduler/supply layer. The change is not a
+retirement of Sub2API; it is a cleanup that makes each NewAPI user-visible tier
+map to a dedicated Sub2API bridge key and supply group.
+
 ## Target Shape
 
 ```text
 User
   -> NewAPI user key
-  -> NewAPI user-visible group: gpt
-  -> NewAPI admin-only channel: sub2api-gpt
-  -> Sub2API internal bridge key: newapi-bridge-gpt
-  -> Sub2API GPT supply group: GPT5.5 for now, later supply-gpt
+  -> NewAPI user-visible group: gpt-team / gpt-plus / gpt-pro
+  -> NewAPI admin-only bridge channel:
+       sub2api-gpt-team / sub2api-gpt-plus / sub2api-gpt-pro
+  -> Sub2API internal bridge key:
+       newapi-bridge-gpt-team / newapi-bridge-gpt-plus / newapi-bridge-gpt-pro
+  -> Sub2API GPT supply group:
+       gpt-team / gpt-plus / gpt-pro
   -> Sub2API account scheduler / upstream fallback
 ```
 
@@ -103,29 +117,32 @@ Use stable, boring names so future expansion stays readable:
 
 | Layer | Name | Visibility | Purpose |
 | --- | --- | --- | --- |
-| NewAPI group | `gpt` | User-visible | The product group users select/use. |
-| NewAPI channel | `sub2api-gpt` | Admin-only | Routes NewAPI GPT traffic to Sub2API. |
-| Sub2API API key | `newapi-bridge-gpt` | Internal only | Bridge credential used only by NewAPI. |
-| Sub2API group | `GPT5.5` now, later `supply-gpt` | Internal/supply | Current GPT account pool. It can serve multiple GPT models if accounts/mapping support them. |
-| Sub2API channel | `channel-newapi-gpt` | Internal/admin | Optional but recommended for channel-level pricing/mapping/restriction. |
+| NewAPI group | `gpt-team` / `gpt-plus` / `gpt-pro` | User-visible | Product tiers users select/use. |
+| NewAPI channel | `sub2api-gpt-team` / `sub2api-gpt-plus` / `sub2api-gpt-pro` | Admin-only | Routes each NewAPI tier to Sub2API. |
+| Sub2API API key | `newapi-bridge-gpt-team` / `newapi-bridge-gpt-plus` / `newapi-bridge-gpt-pro` | Internal only | Bridge credentials used only by NewAPI. |
+| Sub2API group | `gpt-team` / `gpt-plus` / `gpt-pro` | Internal/supply | GPT account/upstream pool boundary for each tier. |
+| Sub2API channel | `channel-newapi-gpt-team` / `channel-newapi-gpt-plus` / `channel-newapi-gpt-pro` | Internal/admin | Channel-level pricing/mapping/restriction per tier. |
 
-Avoid renaming `GPT5.5` during the first cleanup pass. A rename is cosmetic, while breaking existing keys or scripts would be expensive.
+The historical `GPT5.5` group remains as a legacy source pool. Its accounts
+were linked into the three new groups during the transition so the new tiers do
+not start empty. Future upstream capacity should be imported directly into the
+intended tier group.
 
 ## Setup Steps
 
-1. In Sub2API, keep `GPT5.5` as the current GPT supply group, but treat it as the multi-model GPT pool.
-2. In Sub2API, create a new API key named `newapi-bridge-gpt` and bind it to `GPT5.5`.
-3. In Sub2API, create `channel-newapi-gpt` only if channel-level pricing, visible supported models, model restrictions, or model mapping are needed now.
-   - Attach only `GPT5.5` to this channel.
+1. In Sub2API, create or confirm `gpt-team`, `gpt-plus`, and `gpt-pro`.
+2. In Sub2API, create one bridge key per tier and bind it to the matching group.
+3. In Sub2API, create one channel per tier only if channel-level pricing, visible supported models, model restrictions, or model mapping are needed now.
+   - Attach each channel only to its matching group.
    - Add every GPT model that NewAPI will expose, not just `gpt-5.5`.
    - Keep `restrict_models` enabled only if the intended GPT model list is complete and tested.
    - Keep model mapping stable so NewAPI can expose your chosen model names.
-4. In NewAPI, create one channel named `sub2api-gpt`.
+4. In NewAPI, create one channel per tier.
    - `base_url`: Sub2API OpenAI-compatible base URL, preferably internal network URL if NewAPI and Sub2API share a Docker network; otherwise use the public HTTPS Sub2API endpoint.
-   - `key`: the `newapi-bridge-gpt` Sub2API key.
+   - `key`: the matching `newapi-bridge-gpt-*` Sub2API key.
    - `models`: all GPT names users should see/use now, and only those already tested through the bridge.
-   - `group`: only the NewAPI `gpt` group.
-5. In NewAPI, give users NewAPI keys assigned to the `gpt` group.
+   - `group`: only the matching NewAPI tier group.
+5. In NewAPI, give users NewAPI keys assigned to the intended tier.
 
 ## What Not To Do Yet
 
@@ -173,7 +190,7 @@ If any of these fail, do not add more product families yet. Fix the GPT bridge f
 
 ## Production Configuration Applied
 
-Applied on 2026-06-17 after the GPT-only routing decision:
+Applied on 2026-06-17 after the first GPT-only routing decision:
 
 - Sub2API has a dedicated internal API key named `newapi-bridge-gpt`, bound to group `GPT5.5` / id `8`.
 - Sub2API has `channel-newapi-gpt`, active, attached only to `GPT5.5`.
@@ -199,6 +216,37 @@ Operational verification:
 - A tiny `gpt-5.4-mini` chat smoke no longer fails on NewAPI disk pressure after Docker build cache cleanup.
 - The current chat smoke reached the bridge but returned `Upstream authentication failed, please contact administrator`, so the remaining failure is upstream GPT supply/account health, not NewAPI model visibility.
 - Root filesystem was at 97% and NewAPI returned `system_disk_overloaded`; `docker builder prune -f` safely reclaimed build cache and lowered `/` usage to 89%.
+
+## Production Reorg Applied - 2026-06-18
+
+The 2026-06-17 single `gpt` NewAPI bridge was replaced with the tiered GPT
+bridge:
+
+| NewAPI group | NewAPI channel | Sub2API key name | Sub2API group | Sub2API channel |
+| --- | --- | --- | --- | --- |
+| `gpt-team` | `sub2api-gpt-team` | `newapi-bridge-gpt-team` | `gpt-team` | `channel-newapi-gpt-team` |
+| `gpt-plus` | `sub2api-gpt-plus` | `newapi-bridge-gpt-plus` | `gpt-plus` | `channel-newapi-gpt-plus` |
+| `gpt-pro` | `sub2api-gpt-pro` | `newapi-bridge-gpt-pro` | `gpt-pro` | `channel-newapi-gpt-pro` |
+
+NewAPI visible groups are now only:
+
+- `gpt-team`
+- `gpt-plus`
+- `gpt-pro`
+
+Disabled NewAPI channels:
+
+- `sub2api-gpt`
+- `external-gpt-upstream-s2cf`
+- `Sub2API GPT5.5 image2 upstream`
+
+The direct external GPT upstream channel was intentionally disabled because
+user traffic should reach upstream supply through Sub2API, not through direct
+NewAPI channels. Add upstream API keys and base URLs as Sub2API OpenAI API-key
+accounts, then bind those accounts to `gpt-team`, `gpt-plus`, or `gpt-pro`.
+
+Existing NewAPI users and GPT tokens were moved to `gpt-team` to preserve the
+base tier while hiding historical temporary groups.
 
 ## External GPT Upstream Added
 
