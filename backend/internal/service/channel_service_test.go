@@ -186,11 +186,73 @@ func (m *mockChannelAuthCacheInvalidator) InvalidateAuthCacheByGroupID(_ context
 }
 
 // ---------------------------------------------------------------------------
+// Mock: GroupRepository
+// ---------------------------------------------------------------------------
+
+type mockChannelGroupRepository struct {
+	getAccountCountFn func(ctx context.Context, groupID int64) (int64, int64, error)
+}
+
+func (m *mockChannelGroupRepository) Create(context.Context, *Group) error {
+	panic("unexpected Create")
+}
+func (m *mockChannelGroupRepository) GetByID(context.Context, int64) (*Group, error) {
+	panic("unexpected GetByID")
+}
+func (m *mockChannelGroupRepository) GetByIDLite(context.Context, int64) (*Group, error) {
+	panic("unexpected GetByIDLite")
+}
+func (m *mockChannelGroupRepository) Update(context.Context, *Group) error {
+	panic("unexpected Update")
+}
+func (m *mockChannelGroupRepository) Delete(context.Context, int64) error { panic("unexpected Delete") }
+func (m *mockChannelGroupRepository) DeleteCascade(context.Context, int64) ([]int64, error) {
+	panic("unexpected DeleteCascade")
+}
+func (m *mockChannelGroupRepository) List(context.Context, pagination.PaginationParams) ([]Group, *pagination.PaginationResult, error) {
+	panic("unexpected List")
+}
+func (m *mockChannelGroupRepository) ListWithFilters(context.Context, pagination.PaginationParams, string, string, string, *bool) ([]Group, *pagination.PaginationResult, error) {
+	panic("unexpected ListWithFilters")
+}
+func (m *mockChannelGroupRepository) ListActive(context.Context) ([]Group, error) {
+	panic("unexpected ListActive")
+}
+func (m *mockChannelGroupRepository) ListActiveByPlatform(context.Context, string) ([]Group, error) {
+	panic("unexpected ListActiveByPlatform")
+}
+func (m *mockChannelGroupRepository) ExistsByName(context.Context, string) (bool, error) {
+	panic("unexpected ExistsByName")
+}
+func (m *mockChannelGroupRepository) GetAccountCount(ctx context.Context, groupID int64) (int64, int64, error) {
+	if m.getAccountCountFn != nil {
+		return m.getAccountCountFn(ctx, groupID)
+	}
+	return 0, 0, nil
+}
+func (m *mockChannelGroupRepository) DeleteAccountGroupsByGroupID(context.Context, int64) (int64, error) {
+	panic("unexpected DeleteAccountGroupsByGroupID")
+}
+func (m *mockChannelGroupRepository) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
+	panic("unexpected GetAccountIDsByGroupIDs")
+}
+func (m *mockChannelGroupRepository) BindAccountsToGroup(context.Context, int64, []int64) error {
+	panic("unexpected BindAccountsToGroup")
+}
+func (m *mockChannelGroupRepository) UpdateSortOrders(context.Context, []GroupSortOrderUpdate) error {
+	panic("unexpected UpdateSortOrders")
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 func newTestChannelService(repo *mockChannelRepository) *ChannelService {
 	return NewChannelService(repo, nil, nil, nil)
+}
+
+func newTestChannelServiceWithGroup(repo *mockChannelRepository, groupRepo GroupRepository) *ChannelService {
+	return NewChannelService(repo, groupRepo, nil, nil)
 }
 
 func newTestChannelServiceWithAuth(repo *mockChannelRepository, auth *mockChannelAuthCacheInvalidator) *ChannelService {
@@ -1171,6 +1233,87 @@ func TestPreviewRoute_WithMappedRestrictedModel(t *testing.T) {
 	require.Nil(t, preview.Pricing)
 	require.Contains(t, preview.Warnings, "no_channel_pricing_for_restriction_model")
 	require.Contains(t, preview.Warnings, "model_restricted_by_channel")
+}
+
+func TestPreviewRoute_IncludesGroupAccountCounts(t *testing.T) {
+	ch := Channel{
+		ID:                 21,
+		Name:               "gpt-bridge",
+		Status:             StatusActive,
+		GroupIDs:           []int64{8},
+		BillingModelSource: BillingModelSourceChannelMapped,
+		ModelPricing: []ChannelModelPricing{
+			{Platform: "openai", Models: []string{"gpt-5.5"}},
+		},
+	}
+	repo := makeStandardRepo(ch, map[int64]string{8: "openai"})
+	groupRepo := &mockChannelGroupRepository{
+		getAccountCountFn: func(_ context.Context, groupID int64) (int64, int64, error) {
+			require.Equal(t, int64(8), groupID)
+			return 12, 7, nil
+		},
+	}
+	svc := newTestChannelServiceWithGroup(repo, groupRepo)
+
+	preview, err := svc.PreviewRoute(context.Background(), 8, "openai", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Equal(t, int64(12), preview.GroupAccountCount)
+	require.Equal(t, int64(7), preview.GroupActiveAccountCount)
+}
+
+func TestPreviewRoute_WarnsWhenGroupHasNoAccounts(t *testing.T) {
+	ch := Channel{
+		ID:                 22,
+		Name:               "gpt-bridge",
+		Status:             StatusActive,
+		GroupIDs:           []int64{8},
+		BillingModelSource: BillingModelSourceChannelMapped,
+		ModelPricing: []ChannelModelPricing{
+			{Platform: "openai", Models: []string{"gpt-5.5"}},
+		},
+	}
+	repo := makeStandardRepo(ch, map[int64]string{8: "openai"})
+	groupRepo := &mockChannelGroupRepository{
+		getAccountCountFn: func(_ context.Context, groupID int64) (int64, int64, error) {
+			require.Equal(t, int64(8), groupID)
+			return 0, 0, nil
+		},
+	}
+	svc := newTestChannelServiceWithGroup(repo, groupRepo)
+
+	preview, err := svc.PreviewRoute(context.Background(), 8, "openai", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Contains(t, preview.Warnings, "group_has_no_accounts")
+	require.NotContains(t, preview.Warnings, "group_has_no_active_accounts")
+}
+
+func TestPreviewRoute_WarnsWhenGroupHasNoActiveAccounts(t *testing.T) {
+	ch := Channel{
+		ID:                 23,
+		Name:               "gpt-bridge",
+		Status:             StatusActive,
+		GroupIDs:           []int64{8},
+		BillingModelSource: BillingModelSourceChannelMapped,
+		ModelPricing: []ChannelModelPricing{
+			{Platform: "openai", Models: []string{"gpt-5.5"}},
+		},
+	}
+	repo := makeStandardRepo(ch, map[int64]string{8: "openai"})
+	groupRepo := &mockChannelGroupRepository{
+		getAccountCountFn: func(_ context.Context, groupID int64) (int64, int64, error) {
+			require.Equal(t, int64(8), groupID)
+			return 9, 0, nil
+		},
+	}
+	svc := newTestChannelServiceWithGroup(repo, groupRepo)
+
+	preview, err := svc.PreviewRoute(context.Background(), 8, "openai", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Contains(t, preview.Warnings, "group_has_no_active_accounts")
+	require.NotContains(t, preview.Warnings, "group_has_no_accounts")
 }
 
 func TestPreviewRoute_UpstreamNeedsAccountCheck(t *testing.T) {

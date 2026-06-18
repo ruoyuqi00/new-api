@@ -46,6 +46,11 @@ This document records what is already true, what is still incomplete, and how th
   - `sub2api-provider-adapters:route-preview-20260617-ae80f49c` was loaded and deployed with `docker compose up -d --no-deps sub2api`;
   - public `/health` returned HTTP 200;
   - `GET /api/v1/admin/channels/route-preview` is now available in the running stack and remains admin-authenticated.
+- Stability probe tooling added on 2026-06-17:
+  - `tools/sub2api_load_probe.py` can measure request latency, status distribution, and first-byte latency for `/health`, `/v1/models`, normal OpenAI-compatible chat, and the local risk-block path;
+  - it reads API keys only from an environment variable or local file and does not print credentials or full response bodies;
+  - `risk-block` treats HTTP 403 as a success signal, because the purpose of the probe is to confirm the guard is blocking cleanly rather than to treat the block as a failure;
+  - use it before and after account-pool growth, upstream fallback changes, or gateway/scheduler hardening so p50/p95/p99 changes are recorded instead of guessed.
 - Kiro hard-dead credential handling was live-checked on 2026-06-17 after the adapter update:
   - `sub2api-kiro-web-adapter` was running on the server;
   - `/opt/sub2api/kiro-rs/config/credentials.json` had shrunk from 28 credentials to 27;
@@ -53,6 +58,7 @@ This document records what is already true, what is still incomplete, and how th
 - Sub2API admin channel route preview was added on 2026-06-17:
   - `GET /api/v1/admin/channels/route-preview?group_id=<id>&platform=<platform>&model=<model>`;
   - read-only cache-backed check for group platform, active channel, model mapping, restriction model, matching channel pricing, and warnings;
+  - the response now includes `group_account_count` and `group_active_account_count`, and it flags `group_has_no_accounts` or `group_has_no_active_accounts` so operators can tell an empty pool from a dead pool;
   - useful before exposing NewAPI models, creating bridge keys, or attaching upstream fallback channels.
 
 ## What Is Still Not Finished
@@ -85,7 +91,7 @@ The stack has several good pieces already, including Redis caches, auth cache in
 
 Needed next:
 
-- Run repeatable load tests for auth, scheduler, risk guard, and hot gateway endpoints.
+- Run repeatable load tests for auth, scheduler, risk guard, and hot gateway endpoints. Start with `tools/sub2api_load_probe.py` and keep the same request count/concurrency between before/after comparisons.
 - Record p50/p95/p99 latency and error rate before and after changes.
 - Review DB indexes for high-volume tables such as usage logs, risk logs, API keys, account groups, and account status.
 - Add backpressure behavior notes for when upstream pools, Redis, DB, or risk queues are stressed.
@@ -102,7 +108,8 @@ Needed next:
 - Keep sticky-session behavior fast but bounded, with clear TTLs and cleanup.
 - Expand tests around model routing, fallback groups, and account capability filtering.
 - Extend the route preview with candidate account counts and account-capability
-  filtering once the first read-only preview has proven useful in production.
+  filtering now that the first read-only preview already exposes group pool size
+  and dead-pool warnings in production.
 
 ### 5. Protocol Drift Tracking
 
@@ -135,7 +142,7 @@ Priority order:
 1. Add more risk-control extraction tests across all supported request protocols.
 2. Add aggregate reporting for risk hits by API key, group, endpoint, and IP.
 3. Add a dedicated `risk_disabled` or `quarantined` status if it fits the existing API key status model.
-4. Add load-test scripts for auth + risk pre-block + scheduler hot paths.
+4. Expand `tools/sub2api_load_probe.py` into a repeatable load-test profile for auth + risk pre-block + scheduler hot paths.
 5. Review and add DB indexes for risk log and API key lookup paths if missing.
 6. Add Redis-backed counters for suspicious downstream behavior beyond content hits, such as high invalid-request rate or repeated blocked models.
 7. Add a short production runbook for scaling users, issuing keys, handling false positives, and unblocking users safely.

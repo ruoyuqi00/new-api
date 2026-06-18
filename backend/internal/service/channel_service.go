@@ -106,6 +106,8 @@ type ChannelRoutePreview struct {
 	GroupID                              int64
 	RequestedPlatform                    string
 	GroupPlatform                        string
+	GroupAccountCount                    int64
+	GroupActiveAccountCount              int64
 	RequestedModel                       string
 	MappedModel                          string
 	Mapped                               bool
@@ -522,6 +524,21 @@ func (s *ChannelService) PreviewRoute(ctx context.Context, groupID int64, reques
 
 	groupPlatform := cache.groupPlatform[groupID]
 	preview.GroupPlatform = groupPlatform
+	if s.groupRepo != nil {
+		if total, active, countErr := s.groupRepo.GetAccountCount(ctx, groupID); countErr == nil {
+			preview.GroupAccountCount = total
+			preview.GroupActiveAccountCount = active
+			switch {
+			case total == 0:
+				preview.Warnings = append(preview.Warnings, "group_has_no_accounts")
+			case active == 0:
+				preview.Warnings = append(preview.Warnings, "group_has_no_active_accounts")
+			}
+		} else {
+			slog.Warn("failed to load group account count for route preview", "group_id", groupID, "error", countErr)
+			preview.Warnings = append(preview.Warnings, "group_account_count_unavailable")
+		}
+	}
 	if requestedPlatform != "" && groupPlatform != "" && requestedPlatform != groupPlatform {
 		preview.Warnings = append(preview.Warnings, "requested_platform_differs_from_group_platform")
 	}

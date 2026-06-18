@@ -110,6 +110,8 @@ type channelRoutePreviewResponse struct {
 	GroupID                              int64                        `json:"group_id"`
 	RequestedPlatform                    string                       `json:"requested_platform"`
 	GroupPlatform                        string                       `json:"group_platform"`
+	GroupAccountCount                    int64                        `json:"group_account_count"`
+	GroupActiveAccountCount              int64                        `json:"group_active_account_count"`
 	RequestedModel                       string                       `json:"requested_model"`
 	MappedModel                          string                       `json:"mapped_model"`
 	Mapped                               bool                         `json:"mapped"`
@@ -316,6 +318,8 @@ func channelRoutePreviewToResponse(preview *service.ChannelRoutePreview) *channe
 		GroupID:                              preview.GroupID,
 		RequestedPlatform:                    preview.RequestedPlatform,
 		GroupPlatform:                        preview.GroupPlatform,
+		GroupAccountCount:                    preview.GroupAccountCount,
+		GroupActiveAccountCount:              preview.GroupActiveAccountCount,
 		RequestedModel:                       preview.RequestedModel,
 		MappedModel:                          preview.MappedModel,
 		Mapped:                               preview.Mapped,

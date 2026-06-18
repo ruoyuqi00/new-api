@@ -485,6 +485,13 @@ func TestSyncPricingModels_ValidPlatform_EmptyService(t *testing.T) {
 type channelPreviewRepo struct {
 	channel       service.Channel
 	groupPlatform map[int64]string
+	accountCount  int64
+	activeCount   int64
+}
+
+type channelPreviewGroupRepo struct {
+	accountCount int64
+	activeCount  int64
 }
 
 func (r *channelPreviewRepo) Create(context.Context, *service.Channel) error { return nil }
@@ -521,6 +528,9 @@ func (r *channelPreviewRepo) GetGroupsInOtherChannels(context.Context, int64, []
 func (r *channelPreviewRepo) GetGroupPlatforms(context.Context, []int64) (map[int64]string, error) {
 	return r.groupPlatform, nil
 }
+func (r *channelPreviewRepo) GetAccountCount(context.Context, int64) (int64, int64, error) {
+	return r.accountCount, r.activeCount, nil
+}
 func (r *channelPreviewRepo) ListModelPricing(context.Context, int64) ([]service.ChannelModelPricing, error) {
 	return nil, nil
 }
@@ -535,10 +545,63 @@ func (r *channelPreviewRepo) ReplaceModelPricing(context.Context, int64, []servi
 	return nil
 }
 
+func (r *channelPreviewGroupRepo) Create(context.Context, *service.Group) error {
+	panic("unexpected Create call")
+}
+func (r *channelPreviewGroupRepo) GetByID(context.Context, int64) (*service.Group, error) {
+	panic("unexpected GetByID call")
+}
+func (r *channelPreviewGroupRepo) GetByIDLite(context.Context, int64) (*service.Group, error) {
+	panic("unexpected GetByIDLite call")
+}
+func (r *channelPreviewGroupRepo) Update(context.Context, *service.Group) error {
+	panic("unexpected Update call")
+}
+func (r *channelPreviewGroupRepo) Delete(context.Context, int64) error {
+	panic("unexpected Delete call")
+}
+func (r *channelPreviewGroupRepo) DeleteCascade(context.Context, int64) ([]int64, error) {
+	panic("unexpected DeleteCascade call")
+}
+func (r *channelPreviewGroupRepo) List(context.Context, pagination.PaginationParams) ([]service.Group, *pagination.PaginationResult, error) {
+	panic("unexpected List call")
+}
+func (r *channelPreviewGroupRepo) ListWithFilters(context.Context, pagination.PaginationParams, string, string, string, *bool) ([]service.Group, *pagination.PaginationResult, error) {
+	panic("unexpected ListWithFilters call")
+}
+func (r *channelPreviewGroupRepo) ListActive(context.Context) ([]service.Group, error) {
+	panic("unexpected ListActive call")
+}
+func (r *channelPreviewGroupRepo) ListActiveByPlatform(context.Context, string) ([]service.Group, error) {
+	panic("unexpected ListActiveByPlatform call")
+}
+func (r *channelPreviewGroupRepo) ExistsByName(context.Context, string) (bool, error) {
+	panic("unexpected ExistsByName call")
+}
+func (r *channelPreviewGroupRepo) GetAccountCount(context.Context, int64) (int64, int64, error) {
+	return r.accountCount, r.activeCount, nil
+}
+func (r *channelPreviewGroupRepo) DeleteAccountGroupsByGroupID(context.Context, int64) (int64, error) {
+	panic("unexpected DeleteAccountGroupsByGroupID call")
+}
+func (r *channelPreviewGroupRepo) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
+	panic("unexpected GetAccountIDsByGroupIDs call")
+}
+func (r *channelPreviewGroupRepo) BindAccountsToGroup(context.Context, int64, []int64) error {
+	panic("unexpected BindAccountsToGroup call")
+}
+func (r *channelPreviewGroupRepo) UpdateSortOrders(context.Context, []service.GroupSortOrderUpdate) error {
+	panic("unexpected UpdateSortOrders call")
+}
+
 func setupPreviewRouteRouter(repo *channelPreviewRepo) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	svc := service.NewChannelService(repo, nil, nil, nil)
+	groupRepo := &channelPreviewGroupRepo{
+		accountCount: repo.accountCount,
+		activeCount:  repo.activeCount,
+	}
+	svc := service.NewChannelService(repo, groupRepo, nil, nil)
 	h := NewChannelHandler(svc, nil, nil)
 	router.GET("/channels/route-preview", h.PreviewRoute)
 	return router
@@ -571,6 +634,8 @@ func TestPreviewRoute_Success(t *testing.T) {
 			},
 		},
 		groupPlatform: map[int64]string{8: "openai"},
+		accountCount:  10,
+		activeCount:   6,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/channels/route-preview?group_id=8&platform=openai&model=gpt-5.5", nil)
@@ -585,6 +650,8 @@ func TestPreviewRoute_Success(t *testing.T) {
 	require.Equal(t, int64(8), body.Data.GroupID)
 	require.Equal(t, "gpt-5.5-mini", body.Data.MappedModel)
 	require.True(t, body.Data.Mapped)
+	require.Equal(t, int64(10), body.Data.GroupAccountCount)
+	require.Equal(t, int64(6), body.Data.GroupActiveAccountCount)
 	require.False(t, body.Data.Restricted)
 	require.Empty(t, body.Data.Warnings)
 	require.NotNil(t, body.Data.Pricing)
