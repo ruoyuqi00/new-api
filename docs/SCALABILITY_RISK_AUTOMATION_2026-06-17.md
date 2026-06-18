@@ -13,7 +13,7 @@ This document records what is already true, what is still incomplete, and how th
 - Active maintenance repo: `D:\wflogin\sub2api-private`
 - Private GitHub remote: `https://github.com/ruoyuqi00/sub2api-provider-adapters.git`
 - Production stack path: `/opt/sub2api`
-- Current deployed Sub2API image: `sub2api-provider-adapters:route-preview-20260617-ae80f49c`
+- Current deployed Sub2API image: `sub2api-provider-adapters:pool-health-20260618-96126acd`
 - Current risk-control commit: `6a4b1591 Add risk log API key filter`
 - NewAPI was not restarted during this deployment.
 - The independent Chinese-named registration project under `D:\wflogin` must stay isolated and must not be inspected unless the user explicitly changes that constraint.
@@ -60,6 +60,12 @@ This document records what is already true, what is still incomplete, and how th
   - read-only cache-backed check for group platform, active channel, model mapping, restriction model, matching channel pricing, and warnings;
   - the response now includes `group_account_count` and `group_active_account_count`, and it flags `group_has_no_accounts` or `group_has_no_active_accounts` so operators can tell an empty pool from a dead pool;
   - useful before exposing NewAPI models, creating bridge keys, or attaching upstream fallback channels.
+- Pool-health deployment on 2026-06-18:
+  - commit `96126acd` was built as `sub2api-provider-adapters:pool-health-20260618-96126acd`;
+  - only the `sub2api` service was recreated with `docker compose up -d --no-deps sub2api`;
+  - NewAPI was not restarted;
+  - server-side container health was `healthy`;
+  - public `https://api.vyywcw.cn/health` and `https://www.vyywcw.cn/health` returned HTTP 200.
 
 ## What Is Still Not Finished
 
