@@ -19,7 +19,7 @@ This document records what is already true, what is still incomplete, and how th
 - The independent Chinese-named registration project under `D:\wflogin` must stay isolated and must not be inspected unless the user explicitly changes that constraint.
 - Server storage note: if the root disk is tight, prefer moving Docker's data root and the persistent compose volumes to the spare server disk such as `/www`. Moving only the app directory usually helps much less, because image layers, build cache, and container metadata can still stay under `/var/lib/docker`.
 - Server storage status on 2026-06-17: DockerRootDir was migrated to `/www/docker`; Sub2API and NewAPI were brought back healthy after the move.
-- NewAPI domain/email status on 2026-06-19 is recorded in `docs/NEWAPI_DOMAIN_EMAIL_2026-06-19.md`: email verification is enabled with QQ SMTP settings, `dtrljm.com` routes to NewAPI, and Cloudflare subdomain DNS records are still needed before `api/admin/newapi.dtrljm.com` can obtain certificates.
+- NewAPI domain/email status on 2026-06-19 is recorded in `docs/NEWAPI_DOMAIN_EMAIL_2026-06-19.md`: email verification is enabled with QQ SMTP settings, `dtrljm.com` and its intended `www/api/admin/newapi` subdomains route to NewAPI, and production Let's Encrypt certificates were issued after Cloudflare DNS propagated.
 
 ## What Is Done
 
@@ -72,6 +72,7 @@ This document records what is already true, what is still incomplete, and how th
   - Caddy was validated and reloaded to route `dtrljm.com` to NewAPI;
   - NewAPI status reported `server_address=https://dtrljm.com`;
   - server-side SMTP TLS connectivity to `smtp.qq.com:465` succeeded.
+  - after Cloudflare DNS propagation, only the Caddy container was restarted to clear ACME backoff; `www/api/admin/newapi.dtrljm.com` then obtained production Let's Encrypt certificates and returned HTTP 200 from `/api/status`.
 
 ## What Is Still Not Finished
 

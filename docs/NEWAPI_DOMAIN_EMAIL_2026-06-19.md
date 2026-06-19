@@ -66,24 +66,32 @@ The old NewAPI route remains available on:
 
 This preserves existing clients while the new domain is rolled out.
 
-## Cloudflare DNS Follow-Up
+## Cloudflare DNS And Certificate Status
 
-Only `dtrljm.com` resolved publicly from the server during verification.
+The Cloudflare DNS records are now active for the root domain and the intended subdomains.
 
-The server saw the following subdomains as `NXDOMAIN`, so Caddy could not obtain certificates for them yet:
+Verified public HTTPS status:
+
+- `https://dtrljm.com/api/status` returned HTTP 200.
+- `https://www.dtrljm.com/api/status` returned HTTP 200.
+- `https://api.dtrljm.com/api/status` returned HTTP 200.
+- `https://admin.dtrljm.com/api/status` returned HTTP 200.
+- `https://newapi.dtrljm.com/api/status` returned HTTP 200.
+
+Caddy obtained production Let's Encrypt certificates for:
 
 - `api.dtrljm.com`
 - `admin.dtrljm.com`
 - `newapi.dtrljm.com`
+- `www.dtrljm.com`
 
-To activate those subdomains, add Cloudflare DNS records such as:
+Operational note:
 
-- `A api -> 154.219.122.197`
-- `A admin -> 154.219.122.197`
-- `A newapi -> 154.219.122.197`
-- optional: `A www -> 154.219.122.197`
+- While DNS was still propagating, Caddy's ACME attempts saw `NXDOMAIN` and backed off.
+- After public resolvers returned all subdomains, only the Caddy container was restarted to clear the ACME backoff and trigger certificate issuance.
+- NewAPI was not restarted.
 
-After DNS is public, Caddy can obtain certificates on first request or after a reload. Use:
+For future Caddy config changes, use:
 
 ```bash
 docker exec sub2api-caddy caddy validate --config /etc/caddy/Caddyfile
