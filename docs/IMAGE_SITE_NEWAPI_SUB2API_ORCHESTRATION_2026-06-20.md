@@ -230,3 +230,131 @@ For the current stack:
 - GPT image: UAG image product -> hidden image bridge -> image-specific supply group.
 - Grok/video: UAG native pool unless a dedicated tested bridge is created.
 - Future Opus/Gemini/etc.: create separate NewAPI/Sub2API families later; do not mix them into the GPT image path.
+
+## 13. Production Placeholder Created - 2026-06-20
+
+On 2026-06-20, a disabled/hidden GPT Image2 supply line was created so the upstream URL and key can be filled later from the admin UI without mixing image traffic into GPT text channels.
+
+Backups created before the database changes:
+
+- NewAPI: `/opt/newapi/backups/image2-placeholder-20260620-022645.sql`
+- UAG: `/opt/unified-ai-gateway/backups/image2-placeholder-20260620-022645.sql`
+- Sub2API: `/opt/sub2api/backups/image2-placeholder-20260620-022645.sql`
+
+No real upstream key was written to this document.
+
+### NewAPI
+
+Created a disabled placeholder channel:
+
+| Field | Value |
+| --- | --- |
+| Channel id | `2296` |
+| Name | `uag-gpt-image2-upstream` |
+| Type | OpenAI-compatible (`type = 1`) |
+| Status | disabled (`status = 2`) |
+| Group | `image` |
+| Models | `gpt-image-2` |
+| Tag | `uag-image2` |
+| Base URL | placeholder only; replace in admin before enabling |
+| Key | placeholder only; replace in admin before enabling |
+
+The historical disabled channel `2150 / Sub2API GPT5.5 image2 upstream` was left in place for reference. Do not use it for the new path unless it is intentionally migrated and re-tested.
+
+NewAPI options after the change:
+
+- `GroupRatio` includes internal `image`.
+- `TopupGroupRatio` includes internal `image`.
+- `UserUsableGroups` still only exposes `gpt-team`, `gpt-plus`, and `gpt-pro`.
+- `AutoGroups` remains empty.
+
+This means normal NewAPI users should not see or automatically receive the `image` group.
+
+### UAG
+
+Created a dedicated UAG account group:
+
+| Field | Value |
+| --- | --- |
+| Group id | `5` |
+| Provider | `gpt` |
+| Code | `gpt-image2-newapi` |
+| Name | `GPT Image2 NewAPI Bridge` |
+| Status | active |
+
+Created a disabled UAG model entry:
+
+| Field | Value |
+| --- | --- |
+| Model id | `14` |
+| Code | `gpt-image-2` |
+| Name | `GPT Image 2` |
+| Kind | `image` |
+| Provider | `gpt` |
+| Group | `gpt-image2-newapi` |
+| Default params | `route=api`, `resolution=1K`, `quality=high` |
+| Status | disabled (`status = 0`) |
+
+The model is intentionally disabled until the NewAPI channel is filled and a real UAG smoke test succeeds.
+
+Current UAG still has the older active account:
+
+- account name: `newapi-gpt-image-2`
+- provider: `gpt`
+- auth type: `api_key`
+- group: `gpt-image-default`
+- whitelist: `gpt-image-2`
+
+Do not assume that old account is the new production path. Prefer moving or recreating the provider account into `gpt-image2-newapi` after the new NewAPI channel is configured.
+
+### Sub2API
+
+Created a dedicated image supply group and channel:
+
+| Layer | Value |
+| --- | --- |
+| Group id | `16` |
+| Group name | `image-gpt` |
+| Platform | `openai` |
+| Status | active |
+| Image generation | enabled |
+| Model list | `gpt-image-2` |
+| Channel id | `10` |
+| Channel name | `channel-newapi-image-gpt` |
+| Channel features | `image` |
+
+No upstream accounts were moved into this group during this pass. The group is a clean landing zone for future image-specific supply.
+
+### How To Finish Configuration Later
+
+If using NewAPI as the UAG bridge:
+
+1. Open NewAPI admin.
+2. Find channel `uag-gpt-image2-upstream`.
+3. Replace the placeholder base URL with the real upstream base URL.
+4. Replace the placeholder key with the real upstream key.
+5. Keep group as `image` and model list as `gpt-image-2`.
+6. Enable the channel only after the upstream provider is known to support image generation.
+7. In UAG admin, add or move a GPT API-key provider account into `gpt-image2-newapi` using the NewAPI image base URL/key.
+8. Enable UAG model `gpt-image-2`.
+9. Run one UAG web image task and one `https://image-api.vyywcw.cn/v1/images/generations` smoke test.
+
+If using Sub2API as the underlying supply:
+
+1. Import or create image-capable upstream accounts into Sub2API group `image-gpt`.
+2. Keep image capacity out of `gpt-team`, `gpt-plus`, `gpt-pro`, and the historical mixed `GPT5.5` group unless intentionally sharing capacity.
+3. Use a dedicated bridge key such as `newapi-bridge-image-gpt` if NewAPI calls Sub2API.
+4. Point the NewAPI `uag-gpt-image2-upstream` channel to Sub2API only after a direct image route smoke test succeeds.
+
+### Verification Performed
+
+After creating the placeholders:
+
+- `https://dtrljm.com` returned HTTP 200.
+- `https://api.dtrljm.com` returned HTTP 200.
+- `https://image.vyywcw.cn` returned HTTP 200.
+- `https://image.vyywcw.cn/api/v1/ping` returned HTTP 200.
+- `https://api.vyywcw.cn` returned HTTP 200.
+- `newapi`, `sub2api`, `uag-api`, and related containers remained up/healthy.
+
+No service restart was performed for this configuration-only pass.
