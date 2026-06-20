@@ -289,3 +289,48 @@ Operational interpretation:
 - NewAPI can now route the `gpt` group through both the Sub2API bridge channel and the external OpenAI-compatible channel.
 - Do not create a separate user-visible group for this upstream unless it becomes a distinct product/package later.
 - When another upstream is added, use the same pattern: a dedicated NewAPI channel, a clear tag, only the intended user-visible group, and at least one successful smoke test for every exposed model before making it available to users.
+
+## NewAPI Pricing Alignment - 2026-06-20
+
+NewAPI is the user-facing billing plane. Sub2API is the supply/scheduler plane.
+Changing Sub2API channel pricing alone does not change what NewAPI users see or
+what NewAPI deducts from user quota.
+
+On 2026-06-20 the NewAPI GPT model pricing was aligned with the Sub2API GPT
+fallback pricing for the six exposed GPT models. The change was applied through
+NewAPI's `/api/option/` root setting API so the running process picked up the
+new values without a NewAPI restart.
+
+Backup before the edit:
+
+- NewAPI options table: `/opt/newapi/backups/pricing-align-20260620-181134.sql`
+
+Models aligned:
+
+| Model | Input $/MTok | Output $/MTok | Cache read $/MTok | Cache write $/MTok |
+| --- | ---: | ---: | ---: | ---: |
+| `gpt-5.5` | 2.5 | 15 | 0.25 | 2.5 |
+| `gpt-5.4` | 2.5 | 15 | 0.25 | 2.5 |
+| `gpt-5.4-mini` | 0.75 | 4.5 | 0.075 | 0.75 |
+| `gpt-5.3-codex` | 1.75 | 14 | 0.175 | 1.75 |
+| `gpt-5.3-codex-spark` | 1.25 | 10 | 0.125 | 1.25 |
+| `gpt-5.2` | 1.75 | 14 | 0.175 | 1.75 |
+
+NewAPI stores these as legacy ratio maps:
+
+- `ModelRatio = input_price_per_mtok / 2`
+- `CompletionRatio = output_price_per_mtok / input_price_per_mtok`
+- `CacheRatio = cache_read_price_per_mtok / input_price_per_mtok`
+- `CreateCacheRatio = cache_write_price_per_mtok / input_price_per_mtok`
+
+Validation after the change:
+
+- `GET http://127.0.0.1:3001/api/pricing` returned the six GPT models with the
+  input/output/cache read/cache write prices above.
+- NewAPI was not restarted.
+
+Important: NewAPI `GroupRatio` still applies on top of the base model price.
+For example, if `gpt-pro` remains `1.8`, the user-facing `gpt-pro` price will be
+1.8x the base price. This is a product-tier markup, not a Sub2API supply-price
+setting. If the public price should exactly equal Sub2API base pricing for every
+group, set the corresponding NewAPI group ratios to `1`.
