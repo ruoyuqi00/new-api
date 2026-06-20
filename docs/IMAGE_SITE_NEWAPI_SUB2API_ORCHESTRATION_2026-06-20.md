@@ -261,14 +261,19 @@ Created a disabled placeholder channel:
 
 The historical disabled channel `2150 / Sub2API GPT5.5 image2 upstream` was left in place for reference. Do not use it for the new path unless it is intentionally migrated and re-tested.
 
-NewAPI options after the change:
+NewAPI options after the original placeholder change:
 
 - `GroupRatio` includes internal `image`.
 - `TopupGroupRatio` includes internal `image`.
-- `UserUsableGroups` still only exposes `gpt-team`, `gpt-plus`, and `gpt-pro`.
 - `AutoGroups` remains empty.
 
-This means normal NewAPI users should not see or automatically receive the `image` group.
+Current status check on 2026-06-20:
+
+- `UserUsableGroups` now includes `image` as `GPT-image`.
+- `AutoGroups` remains empty, so new users should not receive `image` automatically unless an operator or package grants it.
+- `uag-gpt-image2-upstream` is enabled in NewAPI, but its base URL was still the placeholder `https://fill-in-upstream.example/v1` during the check.
+
+Operationally, do not treat GPT Image2 as a working public route until the placeholder URL/key are replaced with a real image-capable upstream and one UAG web/API smoke test succeeds.
 
 ### UAG
 
@@ -358,3 +363,134 @@ After creating the placeholders:
 - `newapi`, `sub2api`, `uag-api`, and related containers remained up/healthy.
 
 No service restart was performed for this configuration-only pass.
+
+## 14. Grok And Gemini Bridge Placeholders - 2026-06-20
+
+On 2026-06-20, two separate bridge families were created for Grok and Gemini so both the user-facing API site and the image/video site can later reuse the same supply pattern without mixing these models into the GPT text or GPT image groups.
+
+No upstream provider key, user key, refresh token, or account payload is recorded here.
+
+Backups created before the database changes:
+
+- NewAPI: `/opt/newapi/backups/grok-gemini-bridge-20260620-201601.sql`
+- UAG: `/opt/unified-ai-gateway/backups/grok-gemini-bridge-20260620-201601.sql`
+- Sub2API: `/opt/sub2api/backups/grok-gemini-bridge-20260620-201601.sql`
+
+An earlier failed SQL attempt was blocked inside a transaction before any rows were written; the successful backup timestamp is the one above.
+
+### Public API Surface
+
+For normal external API users, the public OpenAI-compatible endpoint remains:
+
+```text
+https://api.dtrljm.com/v1
+```
+
+For image-site users or external image API callers, the UAG OpenAI-compatible endpoint is:
+
+```text
+https://image-api.vyywcw.cn/v1
+```
+
+For image generation, callers should use:
+
+```text
+POST https://image-api.vyywcw.cn/v1/images/generations
+```
+
+The image web product remains:
+
+```text
+https://image.vyywcw.cn
+```
+
+Sub2API bridge keys are internal only and should not be handed to external users.
+
+### Sub2API
+
+Created supply groups:
+
+| Group id | Name | Platform | Purpose |
+| ---: | --- | --- | --- |
+| `17` | `grok` | `openai` | Internal Grok supply group for NewAPI/UAG bridge traffic. |
+| `18` | `gemini` | `openai` | Internal Gemini supply group for NewAPI/UAG bridge traffic. |
+
+Created bridge channels:
+
+| Channel id | Name | Group | Status | Model family |
+| ---: | --- | --- | --- | --- |
+| `11` | `channel-newapi-grok` | `grok` | active | `grok-3-beta`, `grok-3-fast-beta`, `grok-3-mini-beta`, `grok-3-mini-fast-beta`, `grok-2`, `grok-2-vision` |
+| `12` | `channel-newapi-gemini` | `gemini` | active | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-pro-latest`, `gemini-1.5-flash-latest` |
+
+Created internal bridge API keys:
+
+| Key name | Bound group | Usage |
+| --- | --- | --- |
+| `newapi-bridge-grok` | `grok` | Stored in the NewAPI `sub2api-grok` channel. |
+| `newapi-bridge-gemini` | `gemini` | Stored in the NewAPI `sub2api-gemini` channel. |
+
+Add future upstream API-key accounts or provider accounts into the matching Sub2API group first, then enable the matching NewAPI channel only after smoke tests pass.
+
+### NewAPI
+
+Created disabled placeholder channels:
+
+| Channel id | Name | Status | Group | Base URL | Models |
+| ---: | --- | --- | --- | --- | --- |
+| `2297` | `sub2api-grok` | disabled | `grok` | `http://sub2api:8080` | `grok-3-beta`, `grok-3-fast-beta`, `grok-3-mini-beta`, `grok-3-mini-fast-beta`, `grok-2`, `grok-2-vision` |
+| `2298` | `sub2api-gemini` | disabled | `gemini` | `http://sub2api:8080` | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-pro-latest`, `gemini-1.5-flash-latest` |
+
+NewAPI group options after this pass:
+
+- `GroupRatio` includes `grok: 1` and `gemini: 1`.
+- `TopupGroupRatio` includes `grok: 1` and `gemini: 1`.
+- `UserUsableGroups` was not expanded for `grok` or `gemini`.
+- `AutoGroups` remains empty.
+
+This means Grok/Gemini are prepared as admin-controlled product groups, but are not automatically given to normal users yet.
+
+### UAG
+
+Created UAG account groups:
+
+| Group id | Provider | Code | Status | Purpose |
+| ---: | --- | --- | --- | --- |
+| `6` | `gemini` | `gemini-newapi-bridge` | active | Landing group for Gemini through NewAPI/Sub2API. |
+| `7` | `grok` | `grok-newapi-bridge` | active | Optional landing group for Grok through NewAPI/Sub2API. |
+
+Created disabled Gemini model placeholders:
+
+| Model id | Code | Kind | Provider | Group | Status |
+| ---: | --- | --- | --- | --- | --- |
+| `15` | `gemini-2.5-flash` | text | `gemini` | `gemini-newapi-bridge` | disabled |
+| `16` | `gemini-2.5-pro` | text | `gemini` | `gemini-newapi-bridge` | disabled |
+
+Existing UAG Grok groups and models were left unchanged. They are still the native Grok web/video path and should not be overwritten by the new bridge until a specific migration is tested.
+
+### Verification Performed
+
+After the Grok/Gemini placeholders were created:
+
+- Sub2API groups `grok` and `gemini` existed and were active.
+- Sub2API channels `channel-newapi-grok` and `channel-newapi-gemini` were active and bound to the matching group.
+- Sub2API bridge keys `newapi-bridge-grok` and `newapi-bridge-gemini` existed and were bound to the matching group.
+- NewAPI channels `sub2api-grok` and `sub2api-gemini` existed, pointed to `http://sub2api:8080`, and remained disabled.
+- NewAPI `UserUsableGroups` was not expanded for `grok` or `gemini`.
+- UAG `gemini-newapi-bridge` and `grok-newapi-bridge` account groups existed.
+- `https://dtrljm.com` returned HTTP 200.
+- `https://api.dtrljm.com` returned HTTP 200.
+- `https://image.vyywcw.cn` returned HTTP 200.
+- `https://image-api.vyywcw.cn/v1/models` returned HTTP 401 without an API key, which confirms the endpoint is protected rather than public.
+
+No NewAPI, Sub2API, or UAG service restart was performed.
+
+### Enablement Order
+
+For Grok or Gemini external upstream-first rollout:
+
+1. Add the upstream API URL and key as an account/channel in Sub2API under the matching `grok` or `gemini` group.
+2. Smoke test the upstream directly from the server.
+3. Smoke test through Sub2API using the matching bridge group/key.
+4. Enable the matching NewAPI channel `sub2api-grok` or `sub2api-gemini`.
+5. Add `grok` or `gemini` to the intended NewAPI user/package group only after the NewAPI route returns a real answer.
+6. If the image/video site should use the same capability, add a UAG provider account pointing at the tested NewAPI or Sub2API route and enable the UAG model after a real task succeeds.
