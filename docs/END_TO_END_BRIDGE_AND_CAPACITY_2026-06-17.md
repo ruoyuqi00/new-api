@@ -227,7 +227,30 @@ Future Sub2API builds should still prefer local build plus image upload when
 possible, because the server root disk remains modest. If building on the
 server, check `/`, `/www`, DockerRootDir, and containerd root first.
 
-## 10. Admin Route Preview
+## 10. Live Supply Snapshot - 2026-06-20
+
+Read-only production check after the storage migration:
+
+| Sub2API group | Active schedulable supply | Notes |
+| --- | ---: | --- |
+| `gpt-team` | 0 accounts | Empty pool. Do not sell or route base-tier traffic here until a team upstream is attached, or explicitly make a temporary cross-tier capacity decision. |
+| `gpt-plus` | 2 OpenAI-compatible API accounts | Both active and schedulable; configured concurrency sum was 20. |
+| `gpt-pro` | 2 OpenAI-compatible API accounts | Both active and schedulable; configured concurrency sum was 10010 because one upstream was configured with a very high hard concurrency. |
+| `image-gpt` | 0 accounts | Empty pool. GPT image traffic should not depend on this group until an image-capable upstream is attached and smoke-tested. |
+| `grok` | 0 active schedulable accounts | One linked account existed but was `error` and not schedulable. Replace or fix the upstream key/base URL before exposing Grok. |
+| `gemini` | 0 accounts | Empty pool. Add a Gemini upstream before exposing Gemini text or image capabilities. |
+
+This means the multi-upstream scheduling mechanism is ready, but current live
+capacity is only present for `gpt-plus` and `gpt-pro`. `gpt-team`, `image-gpt`,
+`grok`, and `gemini` require upstream attachment or repair before they can carry
+normal user traffic.
+
+If the intent is for every configured pro upstream to carry some traffic instead
+of letting the high-concurrency upstream dominate, set `load_factor` separately
+from `concurrency`. Keep `concurrency` as the hard slot limit, and use
+`load_factor` as the scheduling weight.
+
+## 11. Admin Route Preview
 
 Use the Sub2API admin route preview before changing the user-visible NewAPI
 model list, creating a new bridge key, or attaching a new upstream fallback.
