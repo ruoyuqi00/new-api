@@ -2569,6 +2569,140 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 	return accounts, nil
 }
 
+func (s *adminServiceImpl) applyOpenAICompatibleGroupModelMapping(ctx context.Context, account *Account, groupIDs []int64) error {
+	if account == nil || account.Platform != PlatformOpenAI || len(groupIDs) == 0 || s.groupRepo == nil {
+		return nil
+	}
+	groupModels, err := s.openAICompatibleGroupModels(ctx, groupIDs)
+	if err != nil {
+		return err
+	}
+	if len(groupModels) == 0 {
+		return nil
+	}
+
+	currentMapping := stringMappingFromRaw(account.Credentials["model_mapping"])
+	if len(currentMapping) > 0 && !shouldReplaceOpenAICompatibleModelMapping(currentMapping, groupModels) {
+		return nil
+	}
+
+	credentials := cloneAccountCredentials(account.Credentials)
+	credentials["model_mapping"] = selfModelMappingAny(groupModels)
+	account.Credentials = credentials
+	return nil
+}
+
+func (s *adminServiceImpl) openAICompatibleGroupModels(ctx context.Context, groupIDs []int64) ([]string, error) {
+	seen := make(map[string]struct{})
+	models := make([]string, 0)
+	for _, groupID := range groupIDs {
+		if groupID <= 0 {
+			continue
+		}
+		group, err := s.groupRepo.GetByIDLite(ctx, groupID)
+		if err != nil {
+			return nil, err
+		}
+		if group == nil || group.Platform != PlatformOpenAI {
+			continue
+		}
+		for _, model := range group.ModelsListConfig.Models {
+			model = strings.TrimSpace(model)
+			if model == "" {
+				continue
+			}
+			if _, ok := seen[model]; ok {
+				continue
+			}
+			seen[model] = struct{}{}
+			models = append(models, model)
+		}
+	}
+	return models, nil
+}
+
+func cloneAccountCredentials(credentials map[string]any) map[string]any {
+	out := make(map[string]any, len(credentials)+1)
+	for key, value := range credentials {
+		out[key] = value
+	}
+	return out
+}
+
+func selfModelMappingAny(models []string) map[string]any {
+	mapping := make(map[string]any, len(models))
+	for _, model := range models {
+		mapping[model] = model
+	}
+	return mapping
+}
+
+func isDefaultOpenAIModelMapping(mapping map[string]string) bool {
+	if len(mapping) == 0 {
+		return false
+	}
+
+	defaultIDs := make(map[string]struct{}, len(openai.DefaultModelIDs()))
+	for _, model := range openai.DefaultModelIDs() {
+		defaultIDs[model] = struct{}{}
+	}
+	hasDefaultModel := false
+	for model, mapped := range mapping {
+		if strings.TrimSpace(model) == "" || mapped != model {
+			return false
+		}
+		if _, ok := defaultIDs[model]; ok {
+			hasDefaultModel = true
+			continue
+		}
+		if !isOpenAIDefaultFamilyModel(model) {
+			return false
+		}
+	}
+	return hasDefaultModel
+}
+
+func shouldReplaceOpenAICompatibleModelMapping(mapping map[string]string, groupModels []string) bool {
+	if len(mapping) == 0 {
+		return true
+	}
+	if isDefaultOpenAIModelMapping(mapping) {
+		return true
+	}
+	if !hasNonOpenAIFamilyModel(groupModels) {
+		return false
+	}
+	for model, mapped := range mapping {
+		if strings.TrimSpace(model) == "" || mapped != model || !isOpenAIDefaultFamilyModel(model) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasNonOpenAIFamilyModel(models []string) bool {
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model != "" && !isOpenAIDefaultFamilyModel(model) {
+			return true
+		}
+	}
+	return false
+}
+
+func isOpenAIDefaultFamilyModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return false
+	}
+	return strings.HasPrefix(model, "gpt-") ||
+		strings.HasPrefix(model, "o1") ||
+		strings.HasPrefix(model, "o3") ||
+		strings.HasPrefix(model, "o4") ||
+		strings.HasPrefix(model, "chatgpt-") ||
+		strings.HasPrefix(model, "codex-")
+}
+
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
 	// 绑定分组
 	groupIDs := input.GroupIDs
@@ -2634,6 +2768,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 			return nil, errors.New("load_factor must be <= 10000")
 		}
 		account.LoadFactor = input.LoadFactor
+	}
+	if err := s.applyOpenAICompatibleGroupModelMapping(ctx, account, groupIDs); err != nil {
+		return nil, err
 	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
@@ -2781,6 +2918,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			if err := s.checkMixedChannelRisk(ctx, account.ID, account.Platform, *input.GroupIDs); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if input.GroupIDs != nil {
+		if err := s.applyOpenAICompatibleGroupModelMapping(ctx, account, *input.GroupIDs); err != nil {
+			return nil, err
 		}
 	}
 

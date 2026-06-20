@@ -494,3 +494,29 @@ For Grok or Gemini external upstream-first rollout:
 4. Enable the matching NewAPI channel `sub2api-grok` or `sub2api-gemini`.
 5. Add `grok` or `gemini` to the intended NewAPI user/package group only after the NewAPI route returns a real answer.
 6. If the image/video site should use the same capability, add a UAG provider account pointing at the tested NewAPI or Sub2API route and enable the UAG model after a real task succeeds.
+
+### 2026-06-20 OpenAI-Compatible Grok/Gemini Mapping Fix
+
+Problem found after adding a Grok upstream in Sub2API: the upstream account was stored as `platform=openai`, but its account-level `credentials.model_mapping` still contained GPT/OpenAI self-mapping defaults. The scheduler therefore rejected `grok-*` and `gemini-*` models even though the `grok` and `gemini` groups already had the right model lists.
+
+Backend fix deployed to Sub2API:
+
+- On admin account create/update, if `platform=openai` is bound to a group that has a custom model list, Sub2API now auto-populates account `model_mapping` from that group model list.
+- Existing custom mappings such as `custom-model -> upstream-model` are preserved.
+- Empty mappings, default GPT/OpenAI mappings, and pure GPT self-mappings are replaced when the target group model list is non-OpenAI-compatible family models such as `grok-*` or `gemini-*`.
+- Focused test run: `go test -tags unit ./internal/service -run "OpenAICompatible|DefaultOpenAIModelMapping"`.
+
+Production actions:
+
+- Database backup: `/opt/sub2api/backups/grok-gemini-model-mapping-fix-20260620-213631.sql`.
+- Updated existing Grok account `7925` to use only the `grok` group models in `model_mapping`.
+- Deployed Sub2API image `sub2api-provider-adapters:grok-gemini-model-map-20260620-214218`.
+- Only the `sub2api` service was recreated. NewAPI was not restarted.
+
+Verification:
+
+- `https://api.vyywcw.cn/health` returned HTTP 200.
+- `newapi-bridge-grok` `/v1/models` returned only:
+  `grok-2`, `grok-2-vision`, `grok-3-beta`, `grok-3-fast-beta`, `grok-3-mini-beta`, `grok-3-mini-fast-beta`.
+- A direct Grok chat test no longer failed with model selection/mapping errors, but returned upstream authentication failure. This means the model-mapping bug is fixed; the current Grok upstream API key or URL must be replaced with a valid upstream before exposing it in NewAPI.
+- No Gemini upstream account was bound at the time of this check, so Gemini will use the new auto-mapping path when the first upstream account is added to the `gemini` group.
