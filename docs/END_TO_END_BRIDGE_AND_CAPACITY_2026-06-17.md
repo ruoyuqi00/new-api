@@ -121,7 +121,52 @@ Attach new upstream API accounts in Sub2API by binding them to the intended
 Sub2API group. Do not add direct user-facing upstream channels in NewAPI unless
 the product strategy intentionally changes.
 
-## 7. Production Reorg Snapshot - 2026-06-18
+## 7. Multi-Upstream Concurrency Rule
+
+Multiple upstream accounts or upstream OpenAI-compatible API accounts can share
+traffic, but only inside the same matching supply pool.
+
+For GPT text tiers, the intended shape is:
+
+```text
+NewAPI visible group: gpt-team / gpt-plus / gpt-pro
+  -> one hidden NewAPI bridge channel for that tier
+  -> one Sub2API bridge key for that tier
+  -> one Sub2API supply group for that tier
+  -> many active, schedulable upstream accounts in that same group
+```
+
+Sub2API does not send one user request to every upstream. It selects one
+eligible account per request. Under concurrency, the scheduler spreads requests
+across all eligible accounts in the supply group, using the account status,
+`schedulable`, cooldown fields, requested-model support, `priority`,
+`concurrency`, `load_factor`, current Redis load, and recent-use state.
+
+Operational rules:
+
+- Put same-tier upstreams in the same Sub2API group if they should share user
+  load.
+- Keep model families separated. Do not mix normal GPT text, GPT image, Grok,
+  Gemini, Opus, Kiro, and video capacity into one pool.
+- Set `concurrency` to the real simultaneous request capacity for that upstream.
+  This controls the hard account slot limit.
+- Set `load_factor` only when the account should carry more or less scheduling
+  weight than its raw `concurrency`.
+- Keep `priority` aligned among peers that should share load. A lower priority
+  number is preferred, so a much better priority can starve fallback accounts.
+- Make model mappings consistent across all upstreams in the same pool. If one
+  account cannot support a model, it will be skipped for that model.
+- Do not expose upstream provider API keys as user-facing NewAPI channels. They
+  belong in Sub2API supply accounts; NewAPI should expose only the product
+  groups users buy or receive.
+
+For image/video, UAG has its own account group scheduler. Multiple UAG provider
+accounts in the same UAG account group can share image-site traffic when they
+are enabled, have the right model whitelist, and are not cooled down. When UAG
+bridges through NewAPI/Sub2API, that bridge account is only one UAG upstream
+unless more UAG accounts are added to the same UAG group.
+
+## 8. Production Reorg Snapshot - 2026-06-18
 
 Backups created before the production database edits:
 
@@ -166,7 +211,23 @@ currently share the historical GPT account pool as a transitional capacity
 source. When adding a real upstream for a tier, import it as a Sub2API OpenAI
 API-key account and bind it to only that tier's group.
 
-## 8. Admin Route Preview
+## 9. Runtime Storage Snapshot - 2026-06-20
+
+Runtime storage was adjusted so future image pulls/builds have room:
+
+- Docker data-root: `/www/docker`
+- containerd root: `/www/containerd`
+- root disk after migration: about 57% used, about 8.6G free
+- `/www` after migration: about 26% used, about 23G free
+- verification after migration: Docker and containerd active; Sub2API, NewAPI,
+  UAG, Redis, MySQL, and Postgres containers running/healthy where health checks
+  exist.
+
+Future Sub2API builds should still prefer local build plus image upload when
+possible, because the server root disk remains modest. If building on the
+server, check `/`, `/www`, DockerRootDir, and containerd root first.
+
+## 10. Admin Route Preview
 
 Use the Sub2API admin route preview before changing the user-visible NewAPI
 model list, creating a new bridge key, or attaching a new upstream fallback.

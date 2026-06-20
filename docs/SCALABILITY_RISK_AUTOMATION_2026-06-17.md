@@ -19,6 +19,7 @@ This document records what is already true, what is still incomplete, and how th
 - The independent Chinese-named registration project under `D:\wflogin` must stay isolated and must not be inspected unless the user explicitly changes that constraint.
 - Server storage note: if the root disk is tight, prefer moving Docker's data root and the persistent compose volumes to the spare server disk such as `/www`. Moving only the app directory usually helps much less, because image layers, build cache, and container metadata can still stay under `/var/lib/docker`.
 - Server storage status on 2026-06-17: DockerRootDir was migrated to `/www/docker`; Sub2API and NewAPI were brought back healthy after the move.
+- Server storage status on 2026-06-20: containerd root was migrated from `/var/lib/containerd` to `/www/containerd` after an online pre-sync and one Docker/containerd restart window. Docker still uses `/www/docker`. After cleanup, `/` improved from about 90% used to about 57% used, `/www` had about 23G free, and Sub2API, NewAPI, UAG, Redis, MySQL, and Postgres containers all returned healthy/running status.
 - NewAPI domain/email status on 2026-06-19 is recorded in `docs/NEWAPI_DOMAIN_EMAIL_2026-06-19.md`: email verification is enabled with QQ SMTP settings, `dtrljm.com` and its intended `www/api/admin/newapi` subdomains route to NewAPI, and production Let's Encrypt certificates were issued after Cloudflare DNS propagated.
 
 ## What Is Done
@@ -205,13 +206,27 @@ disk has enough spare capacity.
    The repository includes `deploy/migrate-docker-data-root.sh` for this flow.
    Its default mode is a dry-run diagnosis; the actual move requires
    `--execute` and should only be run during a maintenance window.
+   On this server, Docker's data-root is already `/www/docker`.
+4a. Also check containerd separately. Docker can still store image content and
+   snapshots under `/var/lib/containerd` even when DockerRootDir points at
+   `/www/docker`. If `/var/lib/containerd` is the root-disk pressure point:
+   - pre-sync `/var/lib/containerd/` to `/www/containerd/` with `rsync -aHAX`;
+   - back up `/etc/containerd/config.toml`;
+   - set `root = "/www/containerd"`;
+   - stop Docker/containerd only for the final sync and switch;
+   - restart containerd and Docker, then verify all containers and health checks;
+   - remove the old `/var/lib/containerd` only after confirming it is not mounted.
 5. After the move, verify:
    - `docker info --format '{{.DockerRootDir}}'` points at the new disk;
+   - `/etc/containerd/config.toml` points at the intended containerd root when
+     containerd was also moved;
    - `docker compose ps` shows Sub2API and NewAPI healthy;
    - public Sub2API `/health` returns 200;
    - NewAPI `/v1/models` still exposes the intended `gpt` models.
-6. Keep the old Docker directory until the stack has been stable long enough to
-   be confident rollback is not needed.
+6. Keep old runtime directories until the stack has been stable long enough to
+   be confident rollback is not needed, unless the root disk is too full. If the
+   old containerd directory must be removed immediately, first confirm with
+   `findmnt -R /var/lib/containerd` that no live mounts still reference it.
 
 ## Stop Conditions
 
