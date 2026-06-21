@@ -564,3 +564,51 @@ Verification:
   `grok-2`, `grok-2-vision`, `grok-3-beta`, `grok-3-fast-beta`, `grok-3-mini-beta`, `grok-3-mini-fast-beta`.
 - A direct Grok chat test no longer failed with model selection/mapping errors, but returned upstream authentication failure. This means the model-mapping bug is fixed; the current Grok upstream API key or URL must be replaced with a valid upstream before exposing it in NewAPI.
 - No Gemini upstream account was bound at the time of this check, so Gemini will use the new auto-mapping path when the first upstream account is added to the `gemini` group.
+
+### 2026-06-21 UAG GPT Image2 Invalid Token / Main Model Fix
+
+User-visible symptom:
+
+- The image site test user `33376394541` could log in, but every GPT image generation failed with:
+  `provider call: gpt image2 401 ... Invalid token`.
+
+Findings:
+
+- UAG image tasks for user id `2` reached UAG and NewAPI.
+- NewAPI logs showed `/v1/responses` rejected the UAG upstream credential as `Invalid token`.
+- UAG account `1` (`newapi-gpt-image-2`) still held an old encrypted NewAPI token and was marked broken.
+- NewAPI already had an enabled internal token named `uag-image-2` in group `image`.
+- After replacing the encrypted UAG credential with the enabled NewAPI internal token, `/v1/models` returned HTTP 200 and the 401 disappeared.
+- The next failure was `model_not_found`: UAG's GPT image2 `/v1/responses` body used top-level `model: gpt-5.5`, while the NewAPI image group/channel is intentionally image-only and only routes `gpt-image-2`.
+
+Production configuration fix:
+
+- Updated UAG account `1` encrypted credential from the enabled NewAPI internal token `uag-image-2`.
+- Kept the token value out of docs and logs; only compared SHA-256 internally.
+- Restored UAG account `1` to enabled status.
+- Moved UAG account `1` to the dedicated `gpt-image2-newapi` account group.
+- Enabled UAG model `gpt-image-2`, set its group to `gpt-image2-newapi`, and set default params to `route=api`, `quality=high`, `resolution=1K`.
+
+Code fix deployed to UAG:
+
+- Patch stored at `patches/uag/image2-newapi-token-and-main-model-20260621.patch`.
+- `backend/internal/provider/gpt/gpt.go` now uses top-level `gpt-image-2` for GPT image2 `/v1/responses` API-route calls instead of `gpt-5.5`.
+- Added a focused provider test for that default.
+- `frontend/apps/user/src/pages/create/CreateImagePage.tsx` now sends `params.route=api` and `params.main_model=gpt-image-2` when the user selects `gpt-image-2`.
+
+Verification:
+
+- `go test ./internal/provider/gpt` passed inside a `golang:1.24-alpine` container on the production server.
+- `docker compose --env-file ./env/.env.local build user-web` completed successfully.
+- `docker compose --env-file ./env/.env.local build api` completed successfully.
+- Recreated only UAG `api`, `openai`, `worker`, and `user-web`; NewAPI and Sub2API were not restarted.
+- `https://image.vyywcw.cn/api/v1/models` returned HTTP 200.
+- Direct NewAPI image2 smoke through `https://newapi.vyywcw.cn/v1/responses` returned HTTP 200 and produced an image stream.
+- UAG OpenAI-compatible smoke through `https://image-api.vyywcw.cn/v1/images/generations` with a temporary test key returned HTTP 200 and a non-empty `b64_json` image payload.
+- The temporary UAG test key was soft-deleted immediately after verification.
+- The successful UAG task was `76dc77edf56245dd8a07199731`, status `2`, progress `100`.
+- UAG public model pricing/config was cleaned so old GPT image aliases `img-v3`, `img-real`, `img-anime`, and `img-3d` are no longer exposed; `https://image.vyywcw.cn/api/v1/models` now exposes `gpt-image-2` as the GPT image model.
+
+Operational note:
+
+- Do not add `gpt-5.5` to the NewAPI `image` group just to satisfy UAG image2. The image route is image-only by design; UAG should send top-level `gpt-image-2` for this bridge.

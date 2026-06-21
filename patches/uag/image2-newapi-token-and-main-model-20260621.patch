@@ -1,0 +1,45 @@
+diff --git a/backend/internal/provider/gpt/gpt.go b/backend/internal/provider/gpt/gpt.go
+--- a/backend/internal/provider/gpt/gpt.go
++++ b/backend/internal/provider/gpt/gpt.go
+@@
+ func mainModelForImage2(model string) string {
+ 	model = strings.TrimSpace(model)
+ 	if idx := strings.LastIndex(model, "/"); idx > 0 {
+-		return model[:idx] + "/gpt-5.5"
++		return model[:idx] + "/gpt-image-2"
+ 	}
+-	return "gpt-5.5"
++	return "gpt-image-2"
+ }
+diff --git a/backend/internal/provider/gpt/image2_model_test.go b/backend/internal/provider/gpt/image2_model_test.go
+new file mode 100644
+--- /dev/null
++++ b/backend/internal/provider/gpt/image2_model_test.go
+@@
++package gpt
++
++import "testing"
++
++func TestMainModelForImage2UsesImageModel(t *testing.T) {
++	if got := mainModelForImage2("gpt-image-2"); got != "gpt-image-2" {
++		t.Fatalf("mainModelForImage2() = %q, want gpt-image-2", got)
++	}
++	if got := mainModelForImage2("vendor/gpt-image-2"); got != "vendor/gpt-image-2" {
++		t.Fatalf("mainModelForImage2(vendor) = %q, want vendor/gpt-image-2", got)
++	}
++}
+diff --git a/frontend/apps/user/src/pages/create/CreateImagePage.tsx b/frontend/apps/user/src/pages/create/CreateImagePage.tsx
+--- a/frontend/apps/user/src/pages/create/CreateImagePage.tsx
++++ b/frontend/apps/user/src/pages/create/CreateImagePage.tsx
+@@
+   const createMut = useMutation({
+     mutationFn: () =>
+-      genApi.createImage({ model, prompt, count, ratio, quality }),
++      genApi.createImage({
++        model,
++        prompt,
++        count,
++        ratio,
++        quality,
++        params: model === 'gpt-image-2' ? { route: 'api', main_model: 'gpt-image-2' } : undefined,
++      }),
