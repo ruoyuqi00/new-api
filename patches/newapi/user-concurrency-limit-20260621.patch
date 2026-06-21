@@ -1,0 +1,506 @@
+diff --git a/controller/option.go b/controller/option.go
+index b5fdfdc1..541a2f88 100644
+--- a/controller/option.go
++++ b/controller/option.go
+@@ -277,6 +277,15 @@ func UpdateOption(c *gin.Context) {
+ 			})
+ 			return
+ 		}
++	case "UserConcurrencyLimitGroup":
++		err = setting.CheckUserConcurrencyLimitGroup(option.Value.(string))
++		if err != nil {
++			c.JSON(http.StatusOK, gin.H{
++				"success": false,
++				"message": err.Error(),
++			})
++			return
++		}
+ 	case "AutomaticDisableStatusCodes":
+ 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
+ 		if err != nil {
+diff --git a/middleware/user-concurrency-limit.go b/middleware/user-concurrency-limit.go
+new file mode 100644
+index 00000000..4a08c296
+--- /dev/null
++++ b/middleware/user-concurrency-limit.go
+@@ -0,0 +1,89 @@
++package middleware
++
++import (
++	"fmt"
++	"net/http"
++	"strconv"
++	"sync"
++
++	"github.com/QuantumNous/new-api/common"
++	"github.com/QuantumNous/new-api/constant"
++	"github.com/QuantumNous/new-api/setting"
++	"github.com/gin-gonic/gin"
++)
++
++var userConcurrencyLimiter = newInMemoryConcurrencyLimiter()
++
++type inMemoryConcurrencyLimiter struct {
++	mu       sync.Mutex
++	counters map[string]int
++}
++
++func newInMemoryConcurrencyLimiter() *inMemoryConcurrencyLimiter {
++	return &inMemoryConcurrencyLimiter{counters: make(map[string]int)}
++}
++
++func (l *inMemoryConcurrencyLimiter) tryAcquire(key string, limit int) bool {
++	if limit <= 0 {
++		return true
++	}
++	l.mu.Lock()
++	defer l.mu.Unlock()
++	if l.counters[key] >= limit {
++		return false
++	}
++	l.counters[key]++
++	return true
++}
++
++func (l *inMemoryConcurrencyLimiter) release(key string, limit int) {
++	if limit <= 0 {
++		return
++	}
++	l.mu.Lock()
++	defer l.mu.Unlock()
++	if l.counters[key] <= 1 {
++		delete(l.counters, key)
++		return
++	}
++	l.counters[key]--
++}
++
++// UserConcurrencyLimit caps in-flight model requests per authenticated user.
++func UserConcurrencyLimit() gin.HandlerFunc {
++	return func(c *gin.Context) {
++		if !setting.UserConcurrencyLimitEnabled {
++			c.Next()
++			return
++		}
++
++		userID := c.GetInt("id")
++		if userID <= 0 {
++			c.Next()
++			return
++		}
++
++		limit := setting.UserConcurrencyLimit
++		group := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
++		if group == "" {
++			group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
++		}
++		if groupLimit, found := setting.GetGroupConcurrencyLimit(group); found {
++			limit = groupLimit
++		}
++
++		if limit <= 0 {
++			c.Next()
++			return
++		}
++
++		key := strconv.Itoa(userID)
++		if !userConcurrencyLimiter.tryAcquire(key, limit) {
++			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("concurrent request limit reached: maximum %d in-flight requests", limit))
++			return
++		}
++		defer userConcurrencyLimiter.release(key, limit)
++
++		c.Next()
++	}
++}
+diff --git a/middleware/user-concurrency-limit_test.go b/middleware/user-concurrency-limit_test.go
+new file mode 100644
+index 00000000..59a9e514
+--- /dev/null
++++ b/middleware/user-concurrency-limit_test.go
+@@ -0,0 +1,79 @@
++package middleware
++
++import (
++	"net/http"
++	"net/http/httptest"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/QuantumNous/new-api/setting"
++	"github.com/gin-gonic/gin"
++)
++
++func TestUserConcurrencyLimitRejectsOverflowAndReleases(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++
++	oldEnabled := setting.UserConcurrencyLimitEnabled
++	oldLimit := setting.UserConcurrencyLimit
++	oldGroup := setting.UserConcurrencyLimitGroup
++	defer func() {
++		setting.UserConcurrencyLimitEnabled = oldEnabled
++		setting.UserConcurrencyLimit = oldLimit
++		setting.UserConcurrencyLimitGroup = oldGroup
++		userConcurrencyLimiter = newInMemoryConcurrencyLimiter()
++	}()
++
++	setting.UserConcurrencyLimitEnabled = true
++	setting.UserConcurrencyLimit = 1
++	setting.UserConcurrencyLimitGroup = map[string]int{}
++	userConcurrencyLimiter = newInMemoryConcurrencyLimiter()
++
++	block := make(chan struct{})
++	started := make(chan struct{})
++	var startedOnce sync.Once
++	router := gin.New()
++	router.Use(func(c *gin.Context) {
++		c.Set("id", 42)
++		c.Next()
++	})
++	router.Use(UserConcurrencyLimit())
++	router.GET("/relay", func(c *gin.Context) {
++		startedOnce.Do(func() { close(started) })
++		<-block
++		c.Status(http.StatusOK)
++	})
++
++	var wg sync.WaitGroup
++	wg.Add(1)
++	go func() {
++		defer wg.Done()
++		rec := httptest.NewRecorder()
++		req := httptest.NewRequest(http.MethodGet, "/relay", nil)
++		router.ServeHTTP(rec, req)
++		if rec.Code != http.StatusOK {
++			t.Errorf("first request status = %d, want %d", rec.Code, http.StatusOK)
++		}
++	}()
++
++	select {
++	case <-started:
++	case <-time.After(time.Second):
++		t.Fatal("first request did not start")
++	}
++
++	overflow := httptest.NewRecorder()
++	router.ServeHTTP(overflow, httptest.NewRequest(http.MethodGet, "/relay", nil))
++	if overflow.Code != http.StatusTooManyRequests {
++		t.Fatalf("overflow status = %d, want %d", overflow.Code, http.StatusTooManyRequests)
++	}
++
++	close(block)
++	wg.Wait()
++
++	released := httptest.NewRecorder()
++	router.ServeHTTP(released, httptest.NewRequest(http.MethodGet, "/relay", nil))
++	if released.Code != http.StatusOK {
++		t.Fatalf("released status = %d, want %d", released.Code, http.StatusOK)
++	}
++}
+diff --git a/model/option.go b/model/option.go
+index ed1af72e..9b60f98a 100644
+--- a/model/option.go
++++ b/model/option.go
+@@ -137,6 +137,9 @@ func InitOptionMap() {
+ 	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestRateLimitDurationMinutes)
+ 	common.OptionMap["ModelRequestRateLimitSuccessCount"] = strconv.Itoa(setting.ModelRequestRateLimitSuccessCount)
+ 	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
++	common.OptionMap["UserConcurrencyLimitEnabled"] = strconv.FormatBool(setting.UserConcurrencyLimitEnabled)
++	common.OptionMap["UserConcurrencyLimit"] = strconv.Itoa(setting.UserConcurrencyLimit)
++	common.OptionMap["UserConcurrencyLimitGroup"] = setting.UserConcurrencyLimitGroup2JSONString()
+ 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
+ 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
+ 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
+@@ -346,6 +349,8 @@ func updateOptionMap(key string, value string) (err error) {
+ 			setting.CheckSensitiveOnPromptEnabled = boolValue
+ 		case "ModelRequestRateLimitEnabled":
+ 			setting.ModelRequestRateLimitEnabled = boolValue
++		case "UserConcurrencyLimitEnabled":
++			setting.UserConcurrencyLimitEnabled = boolValue
+ 		case "StopOnSensitiveEnabled":
+ 			setting.StopOnSensitiveEnabled = boolValue
+ 		case "SMTPSSLEnabled":
+@@ -512,6 +517,10 @@ func updateOptionMap(key string, value string) (err error) {
+ 		setting.ModelRequestRateLimitSuccessCount, _ = strconv.Atoi(value)
+ 	case "ModelRequestRateLimitGroup":
+ 		err = setting.UpdateModelRequestRateLimitGroupByJSONString(value)
++	case "UserConcurrencyLimit":
++		setting.UserConcurrencyLimit, _ = strconv.Atoi(value)
++	case "UserConcurrencyLimitGroup":
++		err = setting.UpdateUserConcurrencyLimitGroupByJSONString(value)
+ 	case "RetryTimes":
+ 		common.RetryTimes, _ = strconv.Atoi(value)
+ 	case "DataExportInterval":
+diff --git a/router/relay-router.go b/router/relay-router.go
+index 17a13cad..158b4ed3 100644
+--- a/router/relay-router.go
++++ b/router/relay-router.go
+@@ -70,6 +70,7 @@ func SetRelayRouter(router *gin.Engine) {
+ 	relayV1Router.Use(middleware.RouteTag("relay"))
+ 	relayV1Router.Use(middleware.SystemPerformanceCheck())
+ 	relayV1Router.Use(middleware.TokenAuth())
++	relayV1Router.Use(middleware.UserConcurrencyLimit())
+ 	relayV1Router.Use(middleware.ModelRequestRateLimit())
+ 	{
+ 		// WebSocket 路由（统一到 Relay）
+@@ -190,6 +191,7 @@ func SetRelayRouter(router *gin.Engine) {
+ 	relayGeminiRouter.Use(middleware.RouteTag("relay"))
+ 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
+ 	relayGeminiRouter.Use(middleware.TokenAuth())
++	relayGeminiRouter.Use(middleware.UserConcurrencyLimit())
+ 	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
+ 	relayGeminiRouter.Use(middleware.Distribute())
+ 	{
+diff --git a/setting/rate_limit.go b/setting/rate_limit.go
+index 413f3958..85be363f 100644
+--- a/setting/rate_limit.go
++++ b/setting/rate_limit.go
+@@ -15,6 +15,10 @@ var ModelRequestRateLimitCount = 0
+ var ModelRequestRateLimitSuccessCount = 1000
+ var ModelRequestRateLimitGroup = map[string][2]int{}
+ var ModelRequestRateLimitMutex sync.RWMutex
++var UserConcurrencyLimitEnabled = true
++var UserConcurrencyLimit = 5
++var UserConcurrencyLimitGroup = map[string]int{}
++var UserConcurrencyLimitMutex sync.RWMutex
+ 
+ func ModelRequestRateLimitGroup2JSONString() string {
+ 	ModelRequestRateLimitMutex.RLock()
+@@ -67,3 +71,64 @@ func CheckModelRequestRateLimitGroup(jsonStr string) error {
+ 
+ 	return nil
+ }
++
++func UserConcurrencyLimitGroup2JSONString() string {
++	UserConcurrencyLimitMutex.RLock()
++	defer UserConcurrencyLimitMutex.RUnlock()
++
++	jsonBytes, err := json.Marshal(UserConcurrencyLimitGroup)
++	if err != nil {
++		common.SysLog("error marshalling user concurrency limit group: " + err.Error())
++	}
++	return string(jsonBytes)
++}
++
++func UpdateUserConcurrencyLimitGroupByJSONString(jsonStr string) error {
++	UserConcurrencyLimitMutex.Lock()
++	defer UserConcurrencyLimitMutex.Unlock()
++
++	if jsonStr == "" {
++		UserConcurrencyLimitGroup = map[string]int{}
++		return nil
++	}
++
++	limits := make(map[string]int)
++	if err := json.Unmarshal([]byte(jsonStr), &limits); err != nil {
++		return err
++	}
++	UserConcurrencyLimitGroup = limits
++	return nil
++}
++
++func GetGroupConcurrencyLimit(group string) (limit int, found bool) {
++	UserConcurrencyLimitMutex.RLock()
++	defer UserConcurrencyLimitMutex.RUnlock()
++
++	if UserConcurrencyLimitGroup == nil {
++		return 0, false
++	}
++
++	limit, found = UserConcurrencyLimitGroup[group]
++	return limit, found
++}
++
++func CheckUserConcurrencyLimitGroup(jsonStr string) error {
++	if jsonStr == "" {
++		return nil
++	}
++	checkUserConcurrencyLimitGroup := make(map[string]int)
++	err := json.Unmarshal([]byte(jsonStr), &checkUserConcurrencyLimitGroup)
++	if err != nil {
++		return err
++	}
++	for group, limit := range checkUserConcurrencyLimitGroup {
++		if limit < 0 {
++			return fmt.Errorf("group %s has negative concurrency limit: %d", group, limit)
++		}
++		if limit > math.MaxInt32 {
++			return fmt.Errorf("group %s has max concurrency limit 2147483647", group)
++		}
++	}
++
++	return nil
++}
+diff --git a/web/default/src/features/system-settings/request-limits/rate-limit-section.tsx b/web/default/src/features/system-settings/request-limits/rate-limit-section.tsx
+index 864aabf5..9a726a5d 100644
+--- a/web/default/src/features/system-settings/request-limits/rate-limit-section.tsx
++++ b/web/default/src/features/system-settings/request-limits/rate-limit-section.tsx
+@@ -64,6 +64,23 @@ const isValidJSON = (value: string | undefined) => {
+   }
+ }
+ 
++const isValidConcurrencyJSON = (value: string | undefined) => {
++  if (!value || value.trim() === '') return true
++  try {
++    const parsed = JSON.parse(value)
++    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
++      return false
++    }
++    for (const [, val] of Object.entries(parsed)) {
++      if (typeof val !== 'number') return false
++      if (val < 0 || val > 2147483647) return false
++    }
++    return true
++  } catch {
++    return false
++  }
++}
++
+ const createRateLimitSchema = (t: (key: string) => string) =>
+   z.object({
+     ModelRequestRateLimitEnabled: z.boolean(),
+@@ -76,6 +93,14 @@ const createRateLimitSchema = (t: (key: string) => string) =>
+       .refine(isValidJSON, {
+         message: t('Invalid JSON format or values out of allowed range'),
+       }),
++    UserConcurrencyLimitEnabled: z.boolean(),
++    UserConcurrencyLimit: z.number().min(0).max(2147483647),
++    UserConcurrencyLimitGroup: z
++      .string()
++      .optional()
++      .refine(isValidConcurrencyJSON, {
++        message: t('Invalid JSON format or values out of allowed range'),
++      }),
+   })
+ 
+ type RateLimitFormValues = z.infer<ReturnType<typeof createRateLimitSchema>>
+@@ -144,6 +169,86 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
+             )}
+           />
+ 
++          <FormField
++            control={form.control}
++            name='UserConcurrencyLimitEnabled'
++            render={({ field }) => (
++              <SettingsSwitchItem>
++                <SettingsSwitchContent>
++                  <FormLabel>{t('Enable user concurrency limit')}</FormLabel>
++                  <FormDescription>
++                    {t(
++                      'Caps in-flight model requests per authenticated user. Use this to prevent one user from occupying all upstream capacity.'
++                    )}
++                  </FormDescription>
++                </SettingsSwitchContent>
++                <FormControl>
++                  <Switch
++                    checked={field.value}
++                    onCheckedChange={field.onChange}
++                  />
++                </FormControl>
++              </SettingsSwitchItem>
++            )}
++          />
++
++          <div className='grid gap-4 md:grid-cols-2'>
++            <FormField
++              control={form.control}
++              name='UserConcurrencyLimit'
++              render={({ field }) => (
++                <FormItem>
++                  <FormLabel>{t('Default user concurrency')}</FormLabel>
++                  <FormControl>
++                    <div className='flex items-center gap-2'>
++                      <Input
++                        type='number'
++                        min={0}
++                        max={2147483647}
++                        step={1}
++                        {...field}
++                        onChange={(e) =>
++                          field.onChange(parseInt(e.target.value) || 0)
++                        }
++                      />
++                      <span className='text-muted-foreground text-sm'>
++                        {t('in-flight')}
++                      </span>
++                    </div>
++                  </FormControl>
++                  <FormDescription>
++                    {t('Initial public-user default is 5, 0 = unlimited')}
++                  </FormDescription>
++                  <FormMessage />
++                </FormItem>
++              )}
++            />
++
++            <FormField
++              control={form.control}
++              name='UserConcurrencyLimitGroup'
++              render={({ field }) => (
++                <FormItem>
++                  <FormLabel>{t('Group-based concurrency limits')}</FormLabel>
++                  <FormControl>
++                    <Textarea
++                      rows={4}
++                      placeholder={`{\n  "gpt-team": 5,\n  "gpt-plus": 8,\n  "gpt-pro": 12\n}`}
++                      className='font-mono text-sm'
++                      {...field}
++                    />
++                  </FormControl>
++                  <FormDescription>
++                    {t(
++                      'JSON object: {"groupName": maxInFlight}. Group config overrides the default, 0 = unlimited.'
++                    )}
++                  </FormDescription>
++                  <FormMessage />
++                </FormItem>
++              )}
++            />
++          </div>
++
+           <div className='grid gap-4 md:grid-cols-3'>
+             <FormField
+               control={form.control}
+diff --git a/web/default/src/features/system-settings/security/index.tsx b/web/default/src/features/system-settings/security/index.tsx
+index 7e07834b..23420e3e 100644
+--- a/web/default/src/features/system-settings/security/index.tsx
++++ b/web/default/src/features/system-settings/security/index.tsx
+@@ -30,6 +30,9 @@ const defaultSecuritySettings: SecuritySettings = {
+   ModelRequestRateLimitSuccessCount: 1000,
+   ModelRequestRateLimitDurationMinutes: 1,
+   ModelRequestRateLimitGroup: '',
++  UserConcurrencyLimitEnabled: true,
++  UserConcurrencyLimit: 5,
++  UserConcurrencyLimitGroup: '',
+   CheckSensitiveEnabled: false,
+   CheckSensitiveOnPromptEnabled: false,
+   SensitiveWords: '',
+diff --git a/web/default/src/features/system-settings/security/section-registry.tsx b/web/default/src/features/system-settings/security/section-registry.tsx
+index e63f8831..0f59e3b2 100644
+--- a/web/default/src/features/system-settings/security/section-registry.tsx
++++ b/web/default/src/features/system-settings/security/section-registry.tsx
+@@ -36,6 +36,9 @@ const SECURITY_SECTIONS = [
+           ModelRequestRateLimitDurationMinutes:
+             settings.ModelRequestRateLimitDurationMinutes,
+           ModelRequestRateLimitGroup: settings.ModelRequestRateLimitGroup,
++          UserConcurrencyLimitEnabled: settings.UserConcurrencyLimitEnabled,
++          UserConcurrencyLimit: settings.UserConcurrencyLimit,
++          UserConcurrencyLimitGroup: settings.UserConcurrencyLimitGroup,
+         }}
+       />
+     ),
+diff --git a/web/default/src/features/system-settings/types.ts b/web/default/src/features/system-settings/types.ts
+index 21222680..c4b2b5ee 100644
+--- a/web/default/src/features/system-settings/types.ts
++++ b/web/default/src/features/system-settings/types.ts
+@@ -313,6 +313,9 @@ export type SecuritySettings = {
+   ModelRequestRateLimitSuccessCount: number
+   ModelRequestRateLimitDurationMinutes: number
+   ModelRequestRateLimitGroup: string
++  UserConcurrencyLimitEnabled: boolean
++  UserConcurrencyLimit: number
++  UserConcurrencyLimitGroup: string
+   CheckSensitiveEnabled: boolean
+   CheckSensitiveOnPromptEnabled: boolean
+   SensitiveWords: string

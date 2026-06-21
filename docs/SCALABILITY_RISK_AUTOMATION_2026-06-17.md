@@ -74,6 +74,12 @@ This document records what is already true, what is still incomplete, and how th
   - NewAPI status reported `server_address=https://dtrljm.com`;
   - server-side SMTP TLS connectivity to `smtp.qq.com:465` succeeded.
   - after Cloudflare DNS propagation, only the Caddy container was restarted to clear ACME backoff; `www/api/admin/newapi.dtrljm.com` then obtained production Let's Encrypt certificates and returned HTTP 200 from `/api/status`.
+- NewAPI user concurrency overlay prepared on 2026-06-21:
+  - reproducible patch stored at `patches/newapi/user-concurrency-limit-20260621.patch`;
+  - default per-user in-flight model request limit is `5`;
+  - global and per-group settings are exposed in NewAPI system settings;
+  - local backend verification passed for the concurrency middleware, settings, and router compile path;
+  - not deployed yet because the production server control plane and HTTPS health checks timed out while the host was under very high load.
 
 ## What Is Still Not Finished
 
@@ -96,6 +102,9 @@ Needed next:
 
 - Document and enforce one-customer-per-key operating practice.
 - Prefer per-key quotas, RPM limits, IP ACLs, and group binding.
+- Keep NewAPI's per-user in-flight concurrency guard enabled for public users.
+  Start ordinary users at `5`, then raise only for vetted groups when Sub2API
+  upstream capacity is ready.
 - Add aggregate admin reporting that ranks risky keys by hit count, IP, group, model, and endpoint.
 - Consider key quarantine state separate from ordinary disabled state, so admin can distinguish risk-control action from manual disabling.
 

@@ -138,6 +138,7 @@ docs/*
 !docs/UPSTREAM_MERGE_2026-06-10.md
 !docs/UPSTREAM_PROTOCOL_CHECK_2026-06-15.md
 !docs/PROJECT_MAINTENANCE_MAP_2026-06-15.md
+!docs/NEWAPI_USER_CONCURRENCY_LIMIT_2026-06-21.md
 !docs/legal/
 !docs/legal/*.md
 .serena/
