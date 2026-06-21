@@ -1,0 +1,11 @@
+# Production snippet for the dtrljm.com NewAPI rollout.
+# Keep api.dtrljm.com out of this matcher so mainland API clients can keep
+# calling https://api.dtrljm.com/v1.
+
+@mainlandWeb {
+    host dtrljm.com www.dtrljm.com admin.dtrljm.com newapi.dtrljm.com
+    header CF-IPCountry CN
+}
+handle @mainlandWeb {
+    respond "Web access is restricted in this region. API clients should use https://api.dtrljm.com/v1." 403
+}

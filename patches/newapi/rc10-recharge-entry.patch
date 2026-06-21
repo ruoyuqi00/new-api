@@ -1,0 +1,91 @@
+diff --git a/web/default/src/features/wallet/components/recharge-form-card.tsx b/web/default/src/features/wallet/components/recharge-form-card.tsx
+index ad147dd4..756b14cb 100644
+--- a/web/default/src/features/wallet/components/recharge-form-card.tsx
++++ b/web/default/src/features/wallet/components/recharge-form-card.tsx
+@@ -206,6 +206,30 @@ export function RechargeFormCard({
+       }
+       contentClassName='space-y-4 sm:space-y-6'
+     >
++      {topupLink && (
++        <div className='bg-primary/5 border-primary/20 flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4'>
++          <div className='min-w-0 space-y-1'>
++            <div className='text-sm font-semibold'>
++              {t('Recharge Portal')}
++            </div>
++            <div className='text-muted-foreground text-xs leading-5'>
++              {t(
++                'Buy balance or redemption codes through the configured top-up store.'
++              )}
++            </div>
++          </div>
++          <Button
++            render={
++              <a href={topupLink} target='_blank' rel='noopener noreferrer' />
++            }
++            className='w-full gap-2 sm:w-auto'
++          >
++            {t('Open Recharge Store')}
++            <ExternalLink className='h-4 w-4' />
++          </Button>
++        </div>
++      )}
++
+       {/* Online Topup Section */}
+       {hasAnyTopup ? (
+         <div className='space-y-4 sm:space-y-6'>
+diff --git a/web/default/src/i18n/locales/en.json b/web/default/src/i18n/locales/en.json
+index 5e652b55..1ec0a138 100644
+--- a/web/default/src/i18n/locales/en.json
++++ b/web/default/src/i18n/locales/en.json
+@@ -693,6 +693,7 @@
+     "Chinese": "Chinese",
+     "Choose a username": "Choose a username",
+     "Choose an amount and payment method": "Choose an amount and payment method",
++    "Buy balance or redemption codes through the configured top-up store.": "Buy balance or redemption codes through the configured top-up store.",
+     "Choose between default expanded, compact icon-only, or full layout mode": "Choose between default expanded, compact icon-only, or full layout mode",
+     "Choose between inset, floating, or standard sidebar layout": "Choose between inset, floating, or standard sidebar layout",
+     "Choose between left-to-right or right-to-left site direction": "Choose between left-to-right or right-to-left site direction",
+@@ -2717,6 +2718,7 @@
+     "Open in New Tab": "Open in New Tab",
+     "Open menu": "Open menu",
+     "Open release": "Open release",
++    "Open Recharge Store": "Open Recharge Store",
+     "Open source": "Open source",
+     "Open Source": "Open Source",
+     "Open the io.net console API Keys page": "Open the io.net console API Keys page",
+@@ -3182,6 +3184,7 @@
+     "Recently launched models": "Recently launched models",
+     "Recently launched models gaining traction": "Recently launched models gaining traction",
+     "Recharge": "Recharge",
++    "Recharge Portal": "Recharge Portal",
+     "Recharge Amount": "Recharge Amount",
+     "Recharge Amount (USD)": "Recharge Amount (USD)",
+     "Recommended": "Recommended",
+diff --git a/web/default/src/i18n/locales/zh.json b/web/default/src/i18n/locales/zh.json
+index c6ea6ac0..a996f7cb 100644
+--- a/web/default/src/i18n/locales/zh.json
++++ b/web/default/src/i18n/locales/zh.json
+@@ -693,6 +693,7 @@
+     "Chinese": "中文",
+     "Choose a username": "选择一个用户名",
+     "Choose an amount and payment method": "选择金额和支付方式",
++    "Buy balance or redemption codes through the configured top-up store.": "通过已配置的卡网购买余额或兑换码。",
+     "Choose between default expanded, compact icon-only, or full layout mode": "选择默认展开、紧凑图标模式或完整布局模式",
+     "Choose between inset, floating, or standard sidebar layout": "选择嵌入式、浮动式或标准侧边栏布局",
+     "Choose between left-to-right or right-to-left site direction": "选择从左到右或从右到左的站点方向",
+@@ -2717,6 +2718,7 @@
+     "Open in New Tab": "在新标签页中打开",
+     "Open menu": "打开菜单",
+     "Open release": "打开版本",
++    "Open Recharge Store": "打开充值卡网",
+     "Open source": "开源",
+     "Open Source": "开源项目",
+     "Open the io.net console API Keys page": "打开 io.net 控制台 API 密钥页面",
+@@ -3182,6 +3184,7 @@
+     "Recently launched models": "近期发布的模型",
+     "Recently launched models gaining traction": "近期发布并快速增长的模型",
+     "Recharge": "充值",
++    "Recharge Portal": "充值入口",
+     "Recharge Amount": "充值金额",
+     "Recharge Amount (USD)": "充值金额 (USD)",
+     "Recommended": "推荐",

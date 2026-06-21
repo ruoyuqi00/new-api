@@ -66,6 +66,18 @@ The old NewAPI route remains available on:
 
 This preserves existing clients while the new domain is rolled out.
 
+For the public rollout, use this split:
+
+- user API Base URL: `https://api.dtrljm.com/v1`;
+- web/admin hostnames that can be restricted by Cloudflare country rules:
+  `dtrljm.com`, `www.dtrljm.com`, `admin.dtrljm.com`, and
+  `newapi.dtrljm.com`.
+
+Do not apply a broad mainland China block to the whole `dtrljm.com` zone,
+because `api.dtrljm.com` must remain open for normal API clients. The detailed
+access and recharge runbook is
+`docs/PUBLIC_ACCESS_AND_RECHARGE_RUNBOOK_2026-06-21.md`.
+
 ## Cloudflare DNS And Certificate Status
 
 The Cloudflare DNS records are now active for the root domain and the intended subdomains.

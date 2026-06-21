@@ -40,6 +40,7 @@ The current docs that matter most for maintenance are:
 - `docs/CHANNEL_GROUP_USER_MAPPING_RUNBOOK_2026-06-17.md` - how Sub2API channels map to groups, API keys, and NewAPI-fronted upstream channels.
 - `docs/GPT_ONLY_NEWAPI_BRIDGE_2026-06-17.md` - current GPT-only NewAPI bridge layout and naming plan.
 - `docs/IMAGE_SITE_NEWAPI_SUB2API_ORCHESTRATION_2026-06-20.md` - current ownership, bridge agreement, and production GPT Image2 placeholder setup for the UAG image site, NewAPI, and Sub2API.
+- `docs/PUBLIC_ACCESS_AND_RECHARGE_RUNBOOK_2026-06-21.md` - public API hostname, web/admin mainland access split, NewAPI recharge entry, and custom NewAPI patch notes.
 - `docs/RISK_CONTROL_DOWNSTREAM_GUARD_2026-06-17.md` - downstream request guard and key-level auto-disable behavior for large-scale expansion.
 - `docs/SCALABILITY_RISK_AUTOMATION_2026-06-17.md` - current gap list and automation rules for scaling users safely.
 - `docs/SUB2API_AND_COCKPIT_TOOLS_AUDIT_2026-05-27.md`
