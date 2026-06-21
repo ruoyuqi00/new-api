@@ -41,6 +41,29 @@ NewAPI public status verification:
 - NewAPI status now reports `server_address=https://dtrljm.com`.
 - NewAPI status now reports `logo=https://dtrljm.com/logo.png`.
 
+### 2026-06-21 Logo And Intermittent 500 Check
+
+- Replaced the public NewAPI logo/favicon served by `https://dtrljm.com/logo.png` and `https://dtrljm.com/favicon.ico`.
+- Source assets were updated in the NewAPI working tree:
+  - `web/default/public/logo.png`
+  - `web/default/public/favicon.ico`
+  - `web/classic/public/logo.png`
+- Production hot patch:
+  - uploaded the generated assets to `/opt/sub2api/caddy_config/static-brand/`;
+  - added a Caddy static handler for `/logo.png` and `/favicon.ico` on NewAPI hosts;
+  - reloaded only `sub2api-caddy`;
+  - did not restart the NewAPI container.
+- Verification:
+  - `https://dtrljm.com/logo.png` SHA256: `51851A923E68F0109A99927F70D90812976C0FEEBA29B064F224675B91AF5888`;
+  - `https://dtrljm.com/favicon.ico` SHA256: `345194F179F32F3C2CA895334C7F41541197CE8BC0609C3E7F2C415C3EBA9243`;
+  - `https://dtrljm.com/api/status` returned HTTP 200 and still reports `logo=https://dtrljm.com/logo.png`;
+  - `newapi`, `newapi-mysql`, and `newapi-redis` remained healthy.
+- Intermittent 500 investigation:
+  - Current public checks for `https://dtrljm.com/` and `https://dtrljm.com/api/status` returned HTTP 200.
+  - NewAPI container logs after the latest restart did not show panic or 500 stack traces.
+  - Caddy access logs around the observed admin/system-settings navigation showed HTTP 200 for the checked routes.
+  - If 500 appears again, capture the exact URL/path and the visible time; use the `X-Oneapi-Request-Id` from the browser network panel when available.
+
 Production Caddy config lives on the server at:
 
 - `/opt/sub2api/Caddyfile`
