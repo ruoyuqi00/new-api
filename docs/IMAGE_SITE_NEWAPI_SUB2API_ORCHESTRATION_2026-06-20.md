@@ -981,3 +981,52 @@ UAG image/video site status:
   tasks showed image-token counting errors. Video is not usable until a real
   Flow/Veo/Grok video provider account and create/poll/fetch protocol are
   configured and smoke tested.
+
+### 2026-06-21 UAG Public Model Visibility Fix
+
+User requirement:
+
+- The image site must not show models that the current API/account pool cannot
+  actually serve.
+- The visible model list should be determined from live backend capability, not
+  from stale product placeholders.
+
+Production change:
+
+- Disabled UAG image/video model rows that had no active provider accounts.
+- Kept only `gpt-image-2` visible because it is the only currently active
+  image model backed by the `gpt-image2-newapi` account group.
+- Patched UAG backend model-list logic so both the user API and OpenAI-compatible
+  `/v1/models` path return only models that satisfy all of these conditions:
+  model enabled, account group enabled, and at least one enabled account exists
+  in that group.
+
+Backups and reproducibility:
+
+- Database backup before model visibility cleanup:
+  `/opt/unified-ai-gateway/backups/uag-model-visibility-20260621-225235.sql`.
+- Server code backup before backend patch:
+  `/opt/unified-ai-gateway/backups/code-model-filter-20260621-230911`.
+- Reproducible code patch stored in this maintenance repo:
+  `patches/uag/model-list-live-account-filter-20260621.patch`.
+
+Verification after deploy:
+
+| Endpoint | Result |
+| --- | --- |
+| `https://image.vyywcw.cn/api/v1/models` | HTTP 200; returns only `gpt-image-2`. |
+| `https://image-api.vyywcw.cn/v1/health` | HTTP 200; returns `{"ok":true}`. |
+| `https://image-api.vyywcw.cn/v1/models` without key | HTTP 401; protected as expected. |
+
+Operational note:
+
+- UAG deploy must be restarted from `/opt/unified-ai-gateway/deploy` with
+  `docker compose --env-file ./env/.env.local up -d --no-deps api admin openai worker`.
+- Do not use plain `docker compose up` in that directory because it misses the
+  local env file and can briefly break the API containers.
+
+Current model exposure:
+
+- Public image site: `gpt-image-2` only.
+- Flow, Gemini image, Veo, Grok Imagine, and other video/image placeholders must
+  stay hidden until real provider accounts/upstreams are added and smoke-tested.
