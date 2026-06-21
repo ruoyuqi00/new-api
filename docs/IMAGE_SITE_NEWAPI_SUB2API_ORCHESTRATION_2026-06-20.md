@@ -871,3 +871,113 @@ Minimum upstream questions:
 6. What error format and rate-limit headers are returned?
 
 Do not enable a public NewAPI channel for an upstream until the cheapest text smoke test and one protocol-specific smoke test have passed. For image/video, "models list succeeds" is not enough; a real task must complete and produce a usable result.
+
+### 2026-06-21 Filled Upstream Smoke Result
+
+The user filled both NewAPI placeholders with the same upstream host and enabled them. Secrets were not printed or recorded.
+
+Observed NewAPI channel state:
+
+| Channel | Status | Has key | Upstream model list |
+| --- | --- | --- | --- |
+| `xai-grok-upstream-placeholder` | enabled | yes | `grok-3`, `grok-420-fast`, `grok-420-fast-deepsearch` |
+| `google-gemini-upstream-placeholder` | enabled | yes | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.5-flash-lite`, `gemini-3-flash`, `gemini-3-flash-agent`, `gemini-3.1-flash-image`, `gemini-3.1-pro`, `gemini-3.1-pro-high`, `gemini-3.1-pro-low`, `gemini-3.5-flash` |
+
+Actual upstream checks:
+
+- xAI/OpenAI-compatible chat:
+  - `POST /v1/chat/completions` with `model=grok-3` returned HTTP 200 and the expected text reply.
+  - Therefore this upstream is usable for Grok text through NewAPI.
+- xAI image:
+  - skipped because upstream `/v1/models` did not expose any `grok-imagine-*` or image model.
+  - Therefore this Grok channel should currently be treated as text-only.
+- Gemini model list:
+  - `/v1/models` returned HTTP 200 through the OpenAI-compatible model-list shape.
+  - This is not enough to prove Gemini-native generation works.
+- Gemini native text/image:
+  - `POST /v1beta/models/gemini-2.5-flash:generateContent` returned Cloudflare 1010.
+  - `POST /v1beta/models/gemini-3.1-flash-image:generateContent` also returned Cloudflare 1010.
+  - Therefore the current Gemini channel cannot be considered usable yet in NewAPI's Gemini-native adapter path.
+
+Current capability conclusion:
+
+- Public NewAPI Grok text: works.
+- Public NewAPI Grok image/video: not available from this upstream model list.
+- Public NewAPI Gemini text/image: blocked by upstream Cloudflare 1010 on the Gemini-native path; not ready.
+- Public NewAPI video: not available; no `veo-*`, Grok video, or other video task model is exposed by the filled upstream.
+- UAG image/video site:
+  - GPT Image2 bridge account exists and is separate.
+  - No active UAG `flow` or native `grok` account was observed for Gemini/Veo/Grok video; only `gpt` provider accounts were listed.
+  - Therefore the filled NewAPI Grok/Gemini upstream does not automatically enable UAG video.
+
+Next fix direction:
+
+1. Ask the upstream whether Gemini calls should use OpenAI-compatible `/v1/chat/completions` instead of native `/v1beta/models/...:generateContent`.
+2. If the upstream is OpenAI-compatible only, create it as an OpenAI-compatible channel or use model mapping instead of NewAPI's Gemini channel type.
+3. If the upstream claims Gemini-native support, the upstream owner must relax Cloudflare/WAF rules for server-to-server API calls or provide a non-CF API origin.
+4. For video, request exact video model ids and the create/poll/fetch API contract before adding it to NewAPI or UAG.
+
+### 2026-06-21 Filled Upstream Route Fix
+
+NewAPI channel changes:
+
+- Created `openai-compatible-gemini-upstream` as channel `2300`, type `1`
+  OpenAI-compatible.
+- Copied the filled upstream base URL, key, group list, and model list from
+  `google-gemini-upstream-placeholder`.
+- Disabled `google-gemini-upstream-placeholder` because this upstream is not
+  usable through NewAPI's native Gemini adapter path.
+- Rebuilt abilities for channel `2300` across `gemini`, `gpt-team`,
+  `gpt-plus`, and `gpt-pro`.
+- Backup before the change:
+  `/opt/newapi/backups/gemini-openai-compat-20260621-223209.sql`.
+
+Smoke test result through the public NewAPI API endpoint, using a temporary
+test token that was deleted after the test:
+
+| Path | Model | Result |
+| --- | --- | --- |
+| `/v1/chat/completions` | `gemini-2.5-flash` | HTTP 200, returned text. |
+| `/v1/chat/completions` | `gemini-3.1-flash-image` | HTTP 200, returned text. |
+| `/v1/chat/completions` | `grok-3` | HTTP 500 from upstream: service temporarily unavailable. |
+| `/v1/images/generations` | `gemini-3.1-flash-image` | HTTP 500 from upstream: not supported for image generation; upstream says only Imagen models are supported. |
+
+Important testing note:
+
+- A Python `urllib` smoke client was blocked by Cloudflare with `error code:
+  1010` before the request reached NewAPI. Re-testing with `curl` reached
+  NewAPI and produced normal relay logs. Treat 1010 from ad-hoc scripts as a
+  client/WAF artifact unless NewAPI relay logs show the same request.
+
+Current capability after the fix:
+
+- NewAPI Gemini text is usable through the OpenAI-compatible route.
+- `gemini-3.1-flash-image` is only proven usable as a chat/text model through
+  this upstream. It is not proven as image generation.
+- This upstream rejected `/v1/images/generations` for
+  `gemini-3.1-flash-image`; if image generation is needed from this upstream,
+  ask the upstream for exact `imagen-*` model IDs or a task-style image API.
+- Grok channel config is present, but the filled upstream returned HTTP 500
+  during the final public smoke test. Retest later or replace the upstream.
+- No NewAPI video model/channel is currently exposed; there are no enabled
+  `veo`, `video`, `sora`, `kling`, `hailuo`, `vidu`, `jimeng`, or
+  `grok-imagine` abilities in NewAPI.
+
+UAG image/video site status:
+
+- Public image site is reachable.
+- `https://image-api.vyywcw.cn/v1/models` correctly returns HTTP 401 without a
+  key, so the image API is protected.
+- Active UAG accounts currently observed:
+  - `newapi-gpt-image-2`, provider `gpt`, group `gpt-image2-newapi`,
+    whitelist `["gpt-image-2"]`, base URL `https://newapi.vyywcw.cn`.
+  - `uag`, provider `gpt`, base URL `https://dtrljm.com`.
+- UAG has model entries for Flow/Gemini/Veo image/video and
+  `grok-imagine-video`, but no active Flow or native Grok account was observed.
+  Therefore those model entries are product placeholders until real provider
+  accounts are added.
+- Practical state: GPT Image2 text-to-image is the only proven image path in
+  UAG today. Image-to-image still needs separate validation because recent UAG
+  tasks showed image-token counting errors. Video is not usable until a real
+  Flow/Veo/Grok video provider account and create/poll/fetch protocol are
+  configured and smoke tested.
