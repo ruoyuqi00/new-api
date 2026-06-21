@@ -145,10 +145,78 @@ Preferred deployment path:
 If a production-server build is unavoidable, schedule a low-traffic maintenance
 window and confirm host load is normal before starting.
 
-## Current Deployment Status
+## Deployment Result
 
-As of this note, the overlay is prepared and locally verified, but not deployed.
-The production server was reachable at TCP level on ports `22` and `443`, but
-SSH banner exchange and public HTTPS health checks timed out while the host was
-under very high load. Deployment should resume only after the server control
-plane is responsive enough to inspect processes and container health safely.
+The overlay was deployed on 2026-06-21 with the prebuilt-image flow:
+
+1. built locally on Windows Docker Desktop:
+   `newapi:user-concurrency-20260621-81d4a3f6`;
+2. saved to a tar archive locally;
+3. uploaded the tar archive to the server;
+4. loaded it with `docker load` on the server;
+5. backed up `/opt/newapi/docker-compose.yml`;
+6. changed only the `newapi` service image to:
+   `newapi:user-concurrency-20260621-81d4a3f6`;
+7. recreated only the NewAPI application container:
+   `docker compose up -d --no-deps newapi`.
+
+Database and Redis containers were not recreated.
+
+Production status after deployment:
+
+- `newapi` container image:
+  `newapi:user-concurrency-20260621-81d4a3f6`;
+- container state: `running healthy`;
+- `newapi-mysql` and `newapi-redis`: still `healthy`;
+- `https://api.dtrljm.com/api/status`: HTTP `200`;
+- `https://dtrljm.com/api/status`: HTTP `200`;
+- `https://api.vyywcw.cn/health`: HTTP `200`;
+- host load after deployment was normal.
+
+Backup file:
+
+```text
+/opt/newapi/docker-compose.yml.bak-user-concurrency-20260621-153134
+```
+
+Rollback path:
+
+```bash
+cd /opt/newapi
+cp docker-compose.yml.bak-user-concurrency-20260621-153134 docker-compose.yml
+docker compose up -d --no-deps newapi
+```
+
+The old upstream image remained present on the server:
+
+```text
+calciumion/new-api:latest
+```
+
+Database inspection did not show persisted values for the three new option
+keys, so production is currently using the code defaults:
+
+```text
+UserConcurrencyLimitEnabled=true
+UserConcurrencyLimit=5
+UserConcurrencyLimitGroup={}
+```
+
+When the admin settings page saves these options later, they will become
+database-backed runtime values.
+
+## Production Build Policy
+
+Do not run full NewAPI Docker builds on the production server. The failed
+server-side build attempt pushed load over 100, made SSH unreliable, and caused
+public HTTPS health checks to time out. Future NewAPI and large frontend-backed
+deployments must use the prebuilt-image flow:
+
+```text
+build off-server -> docker save or push -> docker load or pull on server ->
+compose image tag switch -> recreate only the target app container
+```
+
+Sub2API builds should follow the same policy when the change requires a heavy
+image build. Lightweight config changes and `docker compose up -d --no-deps`
+against an already loaded image remain acceptable.

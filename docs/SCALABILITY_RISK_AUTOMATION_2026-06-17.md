@@ -79,7 +79,11 @@ This document records what is already true, what is still incomplete, and how th
   - default per-user in-flight model request limit is `5`;
   - global and per-group settings are exposed in NewAPI system settings;
   - local backend verification passed for the concurrency middleware, settings, and router compile path;
-  - not deployed yet because the production server control plane and HTTPS health checks timed out while the host was under very high load.
+  - deployed through a prebuilt local Docker image loaded on the server;
+  - production `newapi` now runs `newapi:user-concurrency-20260621-81d4a3f6`
+    and is healthy;
+  - `api.dtrljm.com`, `dtrljm.com`, and `api.vyywcw.cn` health/status checks
+    returned HTTP 200 after the deployment.
 
 ## What Is Still Not Finished
 
@@ -199,6 +203,22 @@ Use this before opening the service to more downstream users.
 
 Use this when the production root disk is tight and `/www` or another mounted
 disk has enough spare capacity.
+
+## Production Image Build Policy
+
+Do not run heavy NewAPI or frontend-backed Docker builds directly on the
+production server. Build off-server, then deploy by `docker save`/`docker load`
+or by pulling a prebuilt image tag. The production server should normally only:
+
+1. receive or pull the image;
+2. back up the relevant compose file;
+3. switch the service image tag;
+4. recreate only the target app container with `--no-deps`;
+5. verify health and keep the previous image tag for rollback.
+
+This policy was adopted after the 2026-06-21 NewAPI build attempt drove host
+load above 100 and made SSH/HTTPS unreliable. The successful concurrency-limit
+deployment used the prebuilt-image flow and did not restart MySQL or Redis.
 
 1. Diagnose before moving anything:
    - `df -h`
