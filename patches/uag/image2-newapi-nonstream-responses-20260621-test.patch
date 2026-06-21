@@ -1,0 +1,44 @@
+﻿diff --git a/backend/internal/provider/gpt/image2_model_test.go b/backend/internal/provider/gpt/image2_model_test.go
+index 85fe61b..14ed52a 100644
+--- a/backend/internal/provider/gpt/image2_model_test.go
++++ b/backend/internal/provider/gpt/image2_model_test.go
+@@ -1,6 +1,9 @@
+ package gpt
+ 
+-import "testing"
++import (
++	"strings"
++	"testing"
++)
+ 
+ func TestMainModelForImage2UsesImageModel(t *testing.T) {
+ 	if got := mainModelForImage2("gpt-image-2"); got != "gpt-image-2" {
+@@ -10,3 +13,27 @@ func TestMainModelForImage2UsesImageModel(t *testing.T) {
+ 		t.Fatalf("mainModelForImage2(vendor) = %q, want vendor/gpt-image-2", got)
+ 	}
+ }
++
++func TestImage2ResponsesEndpointStreamingPolicy(t *testing.T) {
++	if isStreamingResponseEndpoint("https://newapi.example.com/v1/responses") {
++		t.Fatal("NewAPI/OpenAI-compatible responses endpoint should use non-stream JSON")
++	}
++	if !isStreamingResponseEndpoint("https://chatgpt.com/backend-api/codex/responses") {
++		t.Fatal("Codex backend responses endpoint should keep streaming compatibility")
++	}
++}
++
++func TestParseCompletedJSONResponse(t *testing.T) {
++	raw := `{"output":[{"type":"image_generation_call","result":"ZmFrZS1iNjQ=","output_format":"png","size":"1024x1024","quality":"high"}]}`
++	completed, err := parseCompletedJSONResponse(strings.NewReader(raw))
++	if err != nil {
++		t.Fatalf("parseCompletedJSONResponse error: %v", err)
++	}
++	if completed == nil || len(completed.Response.Output) != 1 {
++		t.Fatalf("expected one output item, got %#v", completed)
++	}
++	data, imageURL := outputImagePayload(completed.Response.Output[0])
++	if data != "ZmFrZS1iNjQ=" || imageURL != "" {
++		t.Fatalf("unexpected image payload data=%q url=%q", data, imageURL)
++	}
++}
+

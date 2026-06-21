@@ -612,3 +612,69 @@ Verification:
 Operational note:
 
 - Do not add `gpt-5.5` to the NewAPI `image` group just to satisfy UAG image2. The image route is image-only by design; UAG should send top-level `gpt-image-2` for this bridge.
+
+### 2026-06-21 Image2 Non-Stream And Per-Image Billing Fix
+
+User-visible symptom:
+
+- GPT image2 could generate through the image site, but NewAPI usage logs still showed the upstream bridge as a `/v1/responses` stream-like request.
+- This made the image route look like text/Responses billing and could confuse upstream or user-side accounting. Image generation should be billed per image call, not as a streamed text request.
+
+UAG code fix:
+
+- Patch files:
+  - `patches/uag/image2-newapi-nonstream-responses-20260621-gpt.patch`
+  - `patches/uag/image2-newapi-nonstream-responses-20260621-test.patch`
+- `backend/internal/provider/gpt/gpt.go` now treats NewAPI/OpenAI-compatible `/v1/responses` as non-stream JSON for GPT image2:
+  - no `stream: true` in the request body;
+  - `Accept: application/json`;
+  - JSON Responses output is parsed directly.
+- ChatGPT Codex backend remains stream-compatible, because that route still requires SSE behavior.
+
+NewAPI code fix:
+
+- Patch file: `patches/newapi/image2-responses-image-only-billing-20260621.patch`.
+- `service/text_quota.go` now detects `gpt-image-2` Responses results that include `image_generation_call` and bills them as image-only:
+  - `is_stream=false`;
+  - `billing_mode=image`;
+  - `image_generation_only=true`;
+  - `model_price=0`;
+  - quota is only the image generation call fee, without the extra text/Responses base model fee.
+
+Tests:
+
+- UAG: `go test ./internal/provider/gpt` passed locally in `golang:1.26.4` and on the production server in `golang:1.24-alpine`.
+- NewAPI: `go test ./service` passed locally in `golang:1.26.4`.
+
+Production deployment:
+
+- UAG:
+  - Backups:
+    - `/opt/unified-ai-gateway/backups/image2-nonstream-20260621-182333/`
+  - Rebuilt `unified-ai-gateway/backend:latest`.
+  - Recreated only UAG `api`, `openai`, `worker`, and `admin`.
+  - NewAPI and Sub2API were not restarted during the UAG patch.
+- NewAPI:
+  - Built preloaded image `newapi:image2-per-call-20260621-55a25843`.
+  - Loaded it on the server with `docker load`.
+  - Backed up compose file:
+    - `/opt/newapi/docker-compose.yml.bak-image2-per-call-20260621-55a25843`
+  - Recreated only the `newapi` container. NewAPI MySQL/Redis, Sub2API, and UAG were left running.
+
+Verification:
+
+- `https://image.vyywcw.cn/api/v1/models` returned HTTP 200.
+- `https://image-api.vyywcw.cn/v1/images/generations` with a temporary image-only UAG key returned HTTP 200 and a non-empty image payload.
+- Temporary UAG smoke keys were soft-deleted immediately after verification.
+- NewAPI log for the final smoke request showed:
+  - `request_path=/v1/responses`
+  - `is_stream=false`
+  - `billing_mode=image`
+  - `image_generation_only=true`
+  - `model_price=0`
+  - `quota=41750`
+  - `content="Image Generation Call ..."`
+
+Operational note:
+
+- It is acceptable that the hidden bridge still uses `/v1/responses` internally because the GPT image2 tool currently returns image outputs there. The important production invariants are: no SSE stream for this NewAPI bridge, and NewAPI accounting is image-only/per-call.

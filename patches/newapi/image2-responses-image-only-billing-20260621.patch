@@ -1,0 +1,172 @@
+﻿diff --git a/service/text_quota.go b/service/text_quota.go
+index 3f344dc3..1c0793bd 100644
+--- a/service/text_quota.go
++++ b/service/text_quota.go
+@@ -22,39 +22,40 @@ import (
+ )
+ 
+ type textQuotaSummary struct {
+-	PromptTokens             int
+-	CompletionTokens         int
+-	TotalTokens              int
+-	CacheTokens              int
+-	CacheCreationTokens      int
+-	CacheCreationTokens5m    int
+-	CacheCreationTokens1h    int
+-	ImageTokens              int
+-	AudioTokens              int
+-	ModelName                string
+-	TokenName                string
+-	UseTimeSeconds           int64
+-	CompletionRatio          float64
+-	CacheRatio               float64
+-	ImageRatio               float64
+-	ModelRatio               float64
+-	GroupRatio               float64
+-	ModelPrice               float64
+-	CacheCreationRatio       float64
+-	CacheCreationRatio5m     float64
+-	CacheCreationRatio1h     float64
+-	Quota                    int
+-	IsClaudeUsageSemantic    bool
+-	UsageSemantic            string
+-	WebSearchPrice           float64
+-	WebSearchCallCount       int
+-	ClaudeWebSearchPrice     float64
+-	ClaudeWebSearchCallCount int
+-	FileSearchPrice          float64
+-	FileSearchCallCount      int
+-	AudioInputPrice          float64
+-	ImageGenerationCallPrice float64
+-	ToolCallSurchargeQuota   decimal.Decimal
++	PromptTokens               int
++	CompletionTokens           int
++	TotalTokens                int
++	CacheTokens                int
++	CacheCreationTokens        int
++	CacheCreationTokens5m      int
++	CacheCreationTokens1h      int
++	ImageTokens                int
++	AudioTokens                int
++	ModelName                  string
++	TokenName                  string
++	UseTimeSeconds             int64
++	CompletionRatio            float64
++	CacheRatio                 float64
++	ImageRatio                 float64
++	ModelRatio                 float64
++	GroupRatio                 float64
++	ModelPrice                 float64
++	CacheCreationRatio         float64
++	CacheCreationRatio5m       float64
++	CacheCreationRatio1h       float64
++	Quota                      int
++	IsClaudeUsageSemantic      bool
++	UsageSemantic              string
++	WebSearchPrice             float64
++	WebSearchCallCount         int
++	ClaudeWebSearchPrice       float64
++	ClaudeWebSearchCallCount   int
++	FileSearchPrice            float64
++	FileSearchCallCount        int
++	AudioInputPrice            float64
++	ImageGenerationCallPrice   float64
++	ImageGenerationOnlyBilling bool
++	ToolCallSurchargeQuota     decimal.Decimal
+ }
+ 
+ func cacheWriteTokensTotal(summary textQuotaSummary) int {
+@@ -156,6 +157,14 @@ func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaS
+ 	return tieredQuota + int(summary.ToolCallSurchargeQuota.Round(0).IntPart())
+ }
+ 
++func isImageGenerationOnlyBillingModel(modelName string) bool {
++	modelName = strings.ToLower(strings.TrimSpace(modelName))
++	if idx := strings.LastIndex(modelName, "/"); idx >= 0 {
++		modelName = modelName[idx+1:]
++	}
++	return modelName == "gpt-image-2"
++}
++
+ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) textQuotaSummary {
+ 	summary := textQuotaSummary{
+ 		ModelName:            relayInfo.OriginModelName,
+@@ -227,6 +236,14 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
+ 
+ 	ratio := dModelRatio.Mul(dGroupRatio)
+ 	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
++	if ctx.GetBool("image_generation_call") && isImageGenerationOnlyBillingModel(summary.ModelName) {
++		summary.ImageGenerationOnlyBilling = true
++		summary.ModelPrice = 0
++		summary.ModelRatio = 0
++		summary.CompletionRatio = 0
++		summary.Quota = int(summary.ToolCallSurchargeQuota.Round(0).IntPart())
++		return summary
++	}
+ 
+ 	var audioInputQuota decimal.Decimal
+ 	if !relayInfo.PriceData.UsePrice {
+@@ -362,7 +379,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
+ 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
+ 	}
+ 
+-	if summary.TotalTokens == 0 {
++	if summary.TotalTokens == 0 && !summary.ImageGenerationOnlyBilling {
+ 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
+ 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
+ 	} else {
+@@ -429,6 +446,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
+ 		other["image_generation_call"] = true
+ 		other["image_generation_call_price"] = summary.ImageGenerationCallPrice
+ 	}
++	if summary.ImageGenerationOnlyBilling {
++		other["billing_mode"] = "image"
++		other["image_generation_only"] = true
++	}
+ 	if summary.CacheCreationTokens > 0 {
+ 		other["cache_creation_tokens"] = summary.CacheCreationTokens
+ 		other["cache_creation_ratio"] = summary.CacheCreationRatio
+diff --git a/service/text_quota_test.go b/service/text_quota_test.go
+index 37ce1877..1ffb6b5c 100644
+--- a/service/text_quota_test.go
++++ b/service/text_quota_test.go
+@@ -367,6 +367,39 @@ func TestComposeTieredTextQuotaKeepsToolCallSurcharges(t *testing.T) {
+ 	require.Equal(t, 14000, quota)
+ }
+ 
++func TestCalculateTextQuotaSummaryImageGenerationOnlyBillingForGPTImage2(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	w := httptest.NewRecorder()
++	ctx, _ := gin.CreateTestContext(w)
++	ctx.Set("image_generation_call", true)
++	ctx.Set("image_generation_call_quality", "high")
++	ctx.Set("image_generation_call_size", "1024x1024")
++
++	relayInfo := &relaycommon.RelayInfo{
++		OriginModelName: "gpt-image-2",
++		PriceData: types.PriceData{
++			ModelPrice:      0.1,
++			UsePrice:        true,
++			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 0.5},
++			CompletionRatio: 1,
++		},
++		StartTime: time.Now(),
++	}
++
++	usage := &dto.Usage{
++		PromptTokens:     2309,
++		CompletionTokens: 48,
++		TotalTokens:      2357,
++	}
++
++	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
++
++	require.True(t, summary.ImageGenerationOnlyBilling)
++	require.Equal(t, 0.0, summary.ModelPrice)
++	require.Equal(t, 0.0, summary.CompletionRatio)
++	require.Equal(t, 41750, summary.Quota)
++}
++
+ func TestComposeTieredTextQuotaFallbackKeepsToolCallSurcharges(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 	w := httptest.NewRecorder()
