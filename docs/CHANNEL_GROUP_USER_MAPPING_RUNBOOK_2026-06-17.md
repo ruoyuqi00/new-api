@@ -243,3 +243,102 @@ For the current GPT-first rollout, keep these practical rules:
 - use group-level RPM / concurrency controls before expanding the pool size;
 - treat rate-limit text as a cooldown signal, not a dead-account signal;
 - treat terminal lock/suspension/verification text as a dead-account signal.
+
+## External Proxy Upstream Migration - 2026-06-21
+
+User question:
+
+- If an upstream already exposes an OpenAI-compatible URL and API key, should
+  the old Sub2API configuration be converted into NewAPI?
+- Why did a direct upstream proxy cause wrong billing when a request should have
+  been charged as one fixed-price image/video call?
+
+Short answer:
+
+- Do not bulk-convert all Sub2API configuration into NewAPI.
+- Convert only plain OpenAI-compatible text/chat proxy upstreams into direct
+  NewAPI channels.
+- Keep real account pools, special protocol adapters, Kiro/Windsurf/Codex-like
+  account scheduling, and fallback logic in Sub2API.
+- Keep image and video on a separate per-call/task billing path. Do not expose
+  image/video models through an ordinary text/chat passthrough channel unless a
+  real image/video smoke test proves both output and billing behavior.
+
+Current production observation:
+
+| Area | Current state | Decision |
+| --- | --- | --- |
+| GPT tier pools | NewAPI groups `gpt-team`, `gpt-plus`, `gpt-pro` bridge to Sub2API keys/groups. | Keep this structure. Sub2API owns GPT supply and scheduler behavior. |
+| Direct Gemini upstream | NewAPI has an OpenAI-compatible Gemini channel. Native Gemini placeholder is disabled. | Treat as text/chat only until image/video endpoints are proven. |
+| Direct Grok upstream | NewAPI has a Grok/xAI channel. | Treat as text/chat only; retest before public expansion because the last smoke test returned upstream 500. |
+| Sub2API Grok/Gemini groups | Sub2API has `grok` and `gemini` channels/groups, but they do not currently provide useful healthy account-pool capacity. | Do not route public NewAPI traffic through these just to wrap an external proxy. Direct NewAPI is shorter and easier to price. |
+| Image site / UAG | Public image site currently exposes only `gpt-image-2`. | Keep only proven image models visible. Hide placeholders until real upstream accounts exist. |
+
+Why direct proxy billing can go wrong:
+
+- `/v1/chat/completions` and ordinary `/v1/responses` text calls are token
+  billed. NewAPI reads upstream `usage` or estimates text tokens.
+- `/v1/images/generations` in the OpenAI channel still expects image-compatible
+  response/usage behavior. Some upstream proxy sites return non-standard usage
+  or text-like output, so NewAPI may bill by token or parse usage incorrectly.
+- Video is usually task based (`create -> poll -> fetch`) and should use
+  NewAPI's task/per-call billing path, not a text/chat passthrough.
+- `gpt-image-2` through Responses image generation was patched separately so
+  image generation is billed as image-only/per-call instead of double-counting
+  text usage. Do not assume other models have that guarantee.
+
+Migration rule:
+
+1. Classify the upstream by capability, not by provider name.
+   - Text/chat: `/v1/chat/completions` returns OpenAI-compatible choices and
+     sane usage.
+   - Image: `/v1/images/generations` or a documented image task endpoint returns
+     a real image URL/base64 and predictable per-call cost.
+   - Image edit: `/v1/images/edits` or a documented edit endpoint accepts image
+     input and returns a real result.
+   - Video: documented create/poll/fetch contract and pricing unit are known.
+
+2. For text/chat proxy upstreams:
+   - Create or keep a direct NewAPI OpenAI-compatible channel.
+   - Put only proven chat model IDs in `models`.
+   - Configure NewAPI `ModelRatio`/`CompletionRatio` or `ModelPrice` according
+     to the intended user-facing text pricing.
+   - Run a non-stream and stream smoke test before adding the model to a public
+     group.
+
+3. For image/video:
+   - Do not add the model to a public NewAPI text channel just because the
+     upstream model name contains `image`, `grok-imagine`, `imagen`, `veo`, or
+     similar words.
+   - First run the exact endpoint that users or the image site will call.
+   - Confirm the returned artifact is usable.
+   - Confirm NewAPI usage logs show fixed image/task billing, not unexpected
+     text token billing.
+   - Only then expose it in NewAPI and/or UAG.
+
+4. For Sub2API:
+   - Keep it for internal supply pools, group-bound bridge keys, scheduler,
+     cooldown/failover, and special protocol adapters.
+   - Do not create a Sub2API layer for an external proxy if NewAPI can call the
+     proxy directly and no extra scheduler behavior is needed.
+
+Safe testing order for each new upstream:
+
+1. Read `/v1/models` if supported and record only model IDs, not keys.
+2. Test `/v1/chat/completions` non-stream with one cheap prompt.
+3. Test `/v1/chat/completions` stream if the model will be offered to stream
+   clients.
+4. If it claims image support, test `/v1/images/generations` with the exact
+   model ID.
+5. If it claims video support, test the documented task endpoint and polling.
+6. Inspect NewAPI usage logs for billing mode and quota delta.
+7. Only then add the model to public user groups.
+
+Operational decision:
+
+- NewAPI is still the public URL/key/user/quota/pricing layer.
+- Sub2API is still the internal account-pool/scheduler/protocol layer.
+- External OpenAI-compatible proxy upstreams can be direct NewAPI channels when
+  they are text/chat only.
+- Image/video should be treated as a separate product capability, with its own
+  per-call/task billing validation before exposure.
