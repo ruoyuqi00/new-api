@@ -1,0 +1,81 @@
+diff --git a/deploy/nginx/user.conf b/deploy/nginx/user.conf
+--- a/deploy/nginx/user.conf
++++ b/deploy/nginx/user.conf
+@@
+-upstream klein_api {
+-    server api:17180;
+-    keepalive 32;
+-}
+-
+-upstream klein_user_web {
+-    server user-web:80;
+-    keepalive 16;
+-}
+-
+ server {
+     listen 17080;
+     listen [::]:17080;
+     server_name klein.example;
++    resolver 127.0.0.11 valid=10s ipv6=off;
++    set $klein_api http://api:17180;
++    set $klein_user_web http://user-web:80;
+@@
+-        proxy_pass http://klein_api;
++        proxy_pass $klein_api;
+@@
+-        proxy_pass http://klein_api;
++        proxy_pass $klein_api;
+@@
+-        proxy_pass http://klein_user_web;
++        proxy_pass $klein_user_web;
+diff --git a/deploy/nginx/admin.conf b/deploy/nginx/admin.conf
+--- a/deploy/nginx/admin.conf
++++ b/deploy/nginx/admin.conf
+@@
+-upstream klein_admin_api {
+-    server admin:17188;
+-    keepalive 16;
+-}
+-
+-upstream klein_admin_web {
+-    server admin-web:80;
+-    keepalive 16;
+-}
+-
+ server {
+     listen 17088;
+     listen [::]:17088;
+     server_name admin.klein.example;
++    resolver 127.0.0.11 valid=10s ipv6=off;
++    set $klein_admin_api http://admin:17188;
++    set $klein_admin_web http://admin-web:80;
+@@
+-        proxy_pass http://klein_admin_api;
++        proxy_pass $klein_admin_api;
+@@
+-        proxy_pass http://klein_admin_web;
++        proxy_pass $klein_admin_web;
+diff --git a/deploy/nginx/openai.conf b/deploy/nginx/openai.conf
+--- a/deploy/nginx/openai.conf
++++ b/deploy/nginx/openai.conf
+@@
+-upstream klein_openai {
+-    server openai:17200;
+-    keepalive 32;
+-}
+-
+ server {
+     listen 17200;
+     listen [::]:17200;
+     server_name api.klein.example;
++    resolver 127.0.0.11 valid=10s ipv6=off;
++    set $klein_openai http://openai:17200;
+@@
+-        proxy_pass http://klein_openai;
++        proxy_pass $klein_openai;
+@@
+-        proxy_pass http://klein_openai;
++        proxy_pass $klein_openai;
+@@
+-        proxy_pass http://klein_openai/healthz;
++        proxy_pass $klein_openai/healthz;

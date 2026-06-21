@@ -28,6 +28,8 @@ These are kept because they support the current stack or act as operational refe
 - `patches/newapi/` - reproducible NewAPI overlay patches kept here for
   code-level continuity; NewAPI remains a sidecar/user control plane, not the
   authoritative Sub2API repo.
+- `patches/uag/` - reproducible UAG image-site overlay patches kept here so the
+  image site can be rebuilt or migrated without losing local production fixes.
 - `tools/`
 - `assets/`
 - `skills/`

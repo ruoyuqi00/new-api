@@ -267,6 +267,50 @@ NewAPI options after the original placeholder change:
 - `TopupGroupRatio` includes internal `image`.
 - `AutoGroups` remains empty.
 
+## 14. UAG 502 Busy Message Fix - 2026-06-21
+
+User-visible symptom:
+
+- UAG user site showed `服务正在更新或繁忙，请稍后重试`.
+- `https://image.vyywcw.cn/api/v1/models` returned HTTP 502.
+- `https://image-api.vyywcw.cn/v1/models` returned HTTP 502.
+- The frontend maps HTTP 502/503/504 to that generic busy/update message.
+
+Root cause:
+
+- `uag-api`, `uag-admin`, and `uag-openai` had restarted after MySQL was not
+  ready during server boot.
+- `uag-nginx` had resolved Docker service names to old container IPs and kept
+  proxying to those stale IPs.
+- Nginx logs showed `connect() failed (111: Connection refused)` to the old
+  upstream IPs, while the backend containers were already running on new IPs.
+
+Production fix applied:
+
+- Updated UAG nginx configs to use Docker DNS resolver `127.0.0.11` with
+  variable-based `proxy_pass`, so service names are re-resolved instead of
+  pinned to stale container IPs.
+- Backed up old server configs under `/opt/unified-ai-gateway/backups/`.
+- Ran `docker exec uag-nginx nginx -t`.
+- Reloaded only `uag-nginx`; NewAPI and Sub2API were not restarted.
+
+Reproducible patch:
+
+```text
+patches/uag/nginx-docker-dns-resolver-20260621.patch
+```
+
+Verification:
+
+- `https://image.vyywcw.cn/api/v1/models` returned HTTP 200.
+- `https://image-admin.vyywcw.cn/` returned HTTP 200.
+- `https://image-api.vyywcw.cn/v1/models` returned HTTP 401, which is expected
+  without an API key.
+- Restarted only `uag-api`; after health became healthy,
+  `https://image.vyywcw.cn/api/v1/models` still returned HTTP 200 without
+  reloading nginx. This confirms the stale-IP failure mode is fixed for the
+  user API path.
+
 Current status check on 2026-06-20:
 
 - `UserUsableGroups` now includes `image` as `GPT-image`.
