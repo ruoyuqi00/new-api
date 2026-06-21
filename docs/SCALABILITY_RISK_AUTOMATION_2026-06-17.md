@@ -84,6 +84,14 @@ This document records what is already true, what is still incomplete, and how th
     and is healthy;
   - `api.dtrljm.com`, `dtrljm.com`, and `api.vyywcw.cn` health/status checks
     returned HTTP 200 after the deployment.
+- Disaster recovery and migration runbook prepared on 2026-06-21:
+  - `deploy/production-backup.sh` captures NewAPI MySQL, Sub2API Postgres,
+    optional UAG MySQL, compose/env files, and app data without printing
+    secrets;
+  - `docs/DISASTER_RECOVERY_AND_MIGRATION_2026-06-21.md` records same-server
+    restore, overload recovery, and new-server migration steps;
+  - local daily backups should live under `/www/backups/ai-stack` with mode
+    `700`; off-server object storage is still required before large expansion.
 
 ## What Is Still Not Finished
 

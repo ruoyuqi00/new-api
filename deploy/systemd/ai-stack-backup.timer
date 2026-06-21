@@ -1,0 +1,11 @@
+[Unit]
+Description=Run AI stack backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=ai-stack-backup.service
+
+[Install]
+WantedBy=timers.target

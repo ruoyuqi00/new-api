@@ -1,0 +1,13 @@
+[Unit]
+Description=AI stack daily backup
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=BACKUP_ROOT=/www/backups/ai-stack
+Environment=RETENTION_DAYS=14
+ExecStart=/usr/local/sbin/production-backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

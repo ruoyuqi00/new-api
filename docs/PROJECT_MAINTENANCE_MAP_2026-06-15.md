@@ -7,6 +7,10 @@ These are the files and directories that should be treated as actively maintaine
 - `backend/`
 - `frontend/`
 - `deploy/`
+- `deploy/production-backup.sh` - production backup script for NewAPI MySQL,
+  Sub2API Postgres, optional UAG MySQL, and config/appdata archives.
+- `deploy/systemd/ai-stack-backup.*` - systemd service/timer templates for the
+  production backup job.
 - `Dockerfile`
 - `.dockerignore`
 - `.gitignore`
@@ -45,6 +49,7 @@ The current docs that matter most for maintenance are:
 - `docs/IMAGE_SITE_NEWAPI_SUB2API_ORCHESTRATION_2026-06-20.md` - current ownership, bridge agreement, and production GPT Image2 placeholder setup for the UAG image site, NewAPI, and Sub2API.
 - `docs/PUBLIC_ACCESS_AND_RECHARGE_RUNBOOK_2026-06-21.md` - public API hostname, web/admin mainland access split, NewAPI recharge entry, and custom NewAPI patch notes.
 - `docs/NEWAPI_USER_CONCURRENCY_LIMIT_2026-06-21.md` - NewAPI overlay for default per-user in-flight model request concurrency of 5, with backend/frontend patch and deployment notes.
+- `docs/DISASTER_RECOVERY_AND_MIGRATION_2026-06-21.md` - production backup, restore, overload recovery, and new-server migration runbook for NewAPI, Sub2API, and the image/UAG sidecar.
 - `docs/RISK_CONTROL_DOWNSTREAM_GUARD_2026-06-17.md` - downstream request guard and key-level auto-disable behavior for large-scale expansion.
 - `docs/SCALABILITY_RISK_AUTOMATION_2026-06-17.md` - current gap list and automation rules for scaling users safely.
 - `docs/SUB2API_AND_COCKPIT_TOOLS_AUDIT_2026-05-27.md`
