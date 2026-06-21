@@ -1,0 +1,128 @@
+diff --git a/backend/internal/service/generation_service.go b/backend/internal/service/generation_service.go
+--- a/backend/internal/service/generation_service.go
++++ b/backend/internal/service/generation_service.go
+@@
+ func (s *GenerationService) pickAccountForTask(ctx context.Context, t *model.GenerationTask, params map[string]any) (*model.Account, error) {
+ 	if t == nil {
+ 		return nil, errcode.NoAvailableAcc
+ 	}
++	modelOK := accountAllowsModelPredicate(t.ModelCode)
+ 	if t.Provider != model.ProviderGPT || t.Kind != string(provider.KindImage) || !strings.EqualFold(t.ModelCode, "gpt-image-2") {
+-		return s.pool.Reserve(ctx, t.Provider, "round_robin")
++		return s.pool.ReserveWhere(ctx, t.Provider, "round_robin", modelOK)
+ 	}
+ 	if wantsGPTAPIRoute(params) || hasGPTImage2APIKeyRoute(ctx, s.pool) {
+ 		return s.pool.ReserveWhere(ctx, t.Provider, "round_robin", func(acc *model.Account) bool {
+-			return acc.AuthType == model.AuthTypeAPIKey
++			return modelOK(acc) && acc.AuthType == model.AuthTypeAPIKey
+ 		})
+ 	}
+ 	if accountRequiresCodexRoute(t, params) {
+ 		return s.pool.ReserveWhere(ctx, t.Provider, "round_robin", func(acc *model.Account) bool {
+-			return isCodexOAuthAccount(acc)
++			return modelOK(acc) && isCodexOAuthAccount(acc)
+ 		})
+ 	}
+ 	return s.pool.ReserveWhere(ctx, t.Provider, "round_robin", func(acc *model.Account) bool {
+-		return acc.AuthType == model.AuthTypeOAuth
++		return modelOK(acc) && acc.AuthType == model.AuthTypeOAuth
+ 	})
+ }
+ 
+ func hasGPTImage2APIKeyRoute(ctx context.Context, pool *AccountPool) bool {
+@@
+ 	}
+ 	acc, err := pool.PickWhere(ctx, model.ProviderGPT, "round_robin", func(acc *model.Account) bool {
+-		return acc.AuthType == model.AuthTypeAPIKey
++		return accountAllowsModel(acc, "gpt-image-2") && acc.AuthType == model.AuthTypeAPIKey
+ 	})
+ 	return err == nil && acc != nil
+ }
++
++func accountAllowsModelPredicate(modelCode string) func(*model.Account) bool {
++	return func(acc *model.Account) bool {
++		return accountAllowsModel(acc, modelCode)
++	}
++}
++
++func accountAllowsModel(acc *model.Account, modelCode string) bool {
++	if acc == nil {
++		return false
++	}
++	if acc.ModelWhitelist == nil || strings.TrimSpace(*acc.ModelWhitelist) == "" {
++		return true
++	}
++	var raw []string
++	if err := json.Unmarshal([]byte(*acc.ModelWhitelist), &raw); err != nil {
++		return true
++	}
++	modelCode = strings.TrimSpace(modelCode)
++	if modelCode == "" {
++		return true
++	}
++	for _, item := range raw {
++		pattern := strings.TrimSpace(item)
++		if pattern == "" {
++			continue
++		}
++		if pattern == "*" || strings.EqualFold(pattern, modelCode) {
++			return true
++		}
++		if strings.HasSuffix(pattern, "*") {
++			prefix := strings.TrimSuffix(pattern, "*")
++			if prefix != "" && strings.HasPrefix(strings.ToLower(modelCode), strings.ToLower(prefix)) {
++				return true
++			}
++		}
++	}
++	return false
++}
+diff --git a/backend/internal/service/generation_service_test.go b/backend/internal/service/generation_service_test.go
+--- a/backend/internal/service/generation_service_test.go
++++ b/backend/internal/service/generation_service_test.go
+@@
+ import (
+ 	"errors"
+ 	"testing"
+ 	"time"
+ 
+ 	"github.com/unified-ai-gateway/backend/internal/model"
+ )
+@@
+ func TestProviderCooldownRetryable429StillCooldowns(t *testing.T) {
+ 	err := errors.New(`provider call: grok video HTTP 429: {"error":{"code":8,"message":"Too many requests"}}`)
+ 	got := providerCooldown(err)
+ 	if got < 30*time.Minute {
+ 		t.Fatalf("expected 429 cooldown >= 30m, got %s", got)
+ 	}
+ }
++
++func TestAccountAllowsModelWhitelist(t *testing.T) {
++	empty := &model.Account{}
++	if !accountAllowsModel(empty, "gpt-image-2") {
++		t.Fatal("expected empty whitelist to allow the model")
++	}
++
++	exact := `["gpt-image-2"]`
++	if !accountAllowsModel(&model.Account{ModelWhitelist: &exact}, "gpt-image-2") {
++		t.Fatal("expected exact whitelist match")
++	}
++	if accountAllowsModel(&model.Account{ModelWhitelist: &exact}, "grok-imagine-video") {
++		t.Fatal("expected non-matching model to be rejected")
++	}
++
++	prefix := `["veo_3_1_*"]`
++	if !accountAllowsModel(&model.Account{ModelWhitelist: &prefix}, "veo_3_1_t2v_fast_landscape") {
++		t.Fatal("expected prefix wildcard whitelist match")
++	}
++	if accountAllowsModel(&model.Account{ModelWhitelist: &prefix}, "gemini-3.1-flash-image-square") {
++		t.Fatal("expected unrelated model to be rejected")
++	}
++}
++
++func TestAccountAllowsModelInvalidWhitelistFailsOpen(t *testing.T) {
++	raw := `not-json`
++	if !accountAllowsModel(&model.Account{ModelWhitelist: &raw}, "gpt-image-2") {
++		t.Fatal("expected malformed legacy whitelist to fail open")
++	}
++}

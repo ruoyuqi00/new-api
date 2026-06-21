@@ -678,3 +678,196 @@ Verification:
 Operational note:
 
 - It is acceptable that the hidden bridge still uses `/v1/responses` internally because the GPT image2 tool currently returns image outputs there. The important production invariants are: no SSE stream for this NewAPI bridge, and NewAPI accounting is image-only/per-call.
+
+### 2026-06-21 Grok / Gemini / Image-Video Channel Setup
+
+Goal:
+
+- NewAPI users should be able to call the public API after the admin fills real upstream URL/key.
+- The image/video site should keep its own UAG task, wallet, model, account-pool, and work-history layer.
+- Sub2API remains the private supply/scheduler layer; do not expose Sub2API keys to ordinary users.
+- Do not store real upstream keys, passwords, access tokens, refresh tokens, or full account payloads in this repo.
+
+NewAPI production placeholders:
+
+| Channel id | Name | Type | Status | Base URL | Groups |
+| --- | --- | --- | --- | --- | --- |
+| `2297` | `xai-grok-upstream-placeholder` | `48` xAI | disabled until key is filled | `https://api.x.ai` | `grok,gpt-team,gpt-plus,gpt-pro` |
+| `2298` | `google-gemini-upstream-placeholder` | `24` Gemini | disabled until key is filled | `https://generativelanguage.googleapis.com` | `gemini,gpt-team,gpt-plus,gpt-pro` |
+
+NewAPI xAI placeholder model list:
+
+- `grok-4.3`
+- `grok-build-0.1`
+- `grok-4-1-fast-reasoning`
+- `grok-4-1-fast-non-reasoning`
+- `grok-code-fast-1`
+- `grok-4-fast-reasoning`
+- `grok-4-fast-non-reasoning`
+- `grok-4-0709`
+- `grok-3-mini`
+- `grok-3`
+- `grok-2-vision-1212`
+- `grok-imagine-image-quality`
+- `grok-imagine-image`
+- `grok-imagine-image-pro`
+- `grok-2-image-1212`
+- `grok-imagine-video`
+- `grok-imagine-video-1.5`
+- `grok-imagine-video-1.5-preview`
+
+NewAPI Gemini placeholder model list:
+
+- `gemini-3.1-flash-image`
+- `gemini-3-pro-image`
+- `gemini-3.1-flash-image-preview`
+- `gemini-3-pro-image-preview`
+- `nano-banana-pro-preview`
+- `gemini-2.5-pro`
+- `gemini-2.5-flash`
+- `gemini-2.5-flash-lite`
+- `imagen-4.0-generate-001`
+- `imagen-4.0-ultra-generate-001`
+- `imagen-4.0-fast-generate-001`
+- `veo-3.1-generate-preview`
+- `veo-3.1-fast-generate-preview`
+- `veo-3.1-lite-generate-preview`
+
+Initial NewAPI model-ratio placeholders were inserted for:
+
+- `grok-4.3`
+- `grok-build-0.1`
+- `grok-imagine-image-quality`
+- `grok-imagine-image`
+- `grok-imagine-image-pro`
+- `grok-imagine-video`
+- `grok-imagine-video-1.5`
+- `grok-imagine-video-1.5-preview`
+- `gemini-3.1-flash-image`
+- `gemini-3.1-flash-image-preview`
+- `gemini-3-pro-image`
+- `gemini-3-pro-image-preview`
+- `nano-banana-pro-preview`
+- `veo-3.1-lite-generate-preview`
+
+These values are only runnable defaults so requests do not fail with "model price not configured". The production selling price should still be adjusted in the NewAPI admin pricing/model settings UI before public rollout.
+
+Where to fill credentials:
+
+1. NewAPI admin, for public API users:
+   - Open the channel list.
+   - Edit `xai-grok-upstream-placeholder`, fill the real xAI-compatible URL/key, then enable the channel.
+   - Edit `google-gemini-upstream-placeholder`, fill the real Gemini API key, then enable the channel.
+   - Keep these channels bound to `gpt-team`, `gpt-plus`, and `gpt-pro` only if these GPT groups are meant to include Grok/Gemini fallback/capacity. Otherwise remove the group binding before enabling.
+2. UAG admin, for the image/video product site:
+   - GPT Image2: use provider `gpt`, account group `gpt-image2-newapi`, model whitelist `["gpt-image-2"]`, and point the account at the NewAPI internal image bridge.
+   - Grok Imagine video: use provider `grok`, account group `grok-imagine-native`, model whitelist `["grok-imagine-video"]` or the exact video model supported by the current provider.
+   - Gemini/Imagen/Veo product models: use provider `flow`, account group `flow-gemini-image-video`, and model whitelist such as `["gemini-3.1-flash-image-*","imagen-4.0-*","veo_3_1_*"]`.
+3. Sub2API admin:
+   - Use Sub2API for private supply, scheduler, account pools, and bridge keys.
+   - Do not give Sub2API bridge keys directly to users.
+   - If NewAPI should consume Sub2API capacity, create a dedicated Sub2API API key per supply group and put that key into a hidden NewAPI channel.
+
+UAG product model codes:
+
+| Product surface | UAG provider | UAG model codes |
+| --- | --- | --- |
+| GPT image | `gpt` | `gpt-image-2` |
+| Grok video | `grok` | `grok-imagine-video` |
+| Gemini/Imagen image | `flow` | `gemini-3.1-flash-image-square`, `gemini-3.1-flash-image-landscape`, `gemini-3.1-flash-image-portrait`, `imagen-4.0-generate-preview-landscape`, `imagen-4.0-generate-preview-portrait` |
+| Veo video | `flow` | `veo_3_1_t2v_fast_landscape`, `veo_3_1_t2v_fast_portrait`, `veo_3_1_t2v_landscape_6s`, `veo_3_1_t2v_portrait_6s`, `veo_3_1_i2v_s_fast_fl_landscape`, `veo_3_1_i2v_s_fast_fl_portrait` |
+
+Important distinction:
+
+- NewAPI model names are public API/upstream model ids, for example `gemini-3-pro-image` or the legacy-compatible `gemini-3-pro-image-preview`.
+- UAG model codes are product-side task codes, for example `gemini-3.1-flash-image-square` or `veo_3_1_t2v_fast_landscape`.
+- Do not force these two lists to be identical. UAG maps product codes to its provider protocol internally.
+
+UAG provider mode and deployment status:
+
+- Production UAG env has real provider modes enabled:
+  - `KLEIN_PROVIDER_GPT=real`
+  - `KLEIN_PROVIDER_GROK=real`
+  - `KLEIN_PROVIDER_FLOW=real`
+- Current deployed UAG backend image:
+  - `unified-ai-gateway/backend:model-whitelist-20260621`
+- Recreated UAG services only:
+  - `uag-api`
+  - `uag-admin`
+  - `uag-openai`
+  - `uag-worker`
+- NewAPI was not restarted for the Grok/Gemini placeholder setup. NewAPI channel/options cache syncs from DB periodically, and saving/enabling channels in the admin UI also refreshes the practical runtime state.
+
+UAG scheduling fix:
+
+- Patch stored at `patches/uag/model-whitelist-scheduler-20260621.patch`.
+- `GenerationService.pickAccountForTask` now respects account `model_whitelist` for all provider/model selections.
+- GPT Image2 API-key and OAuth/Codex route predicates also include the whitelist check.
+- Whitelist supports exact match and prefix wildcard, for example:
+  - `["gpt-image-2"]`
+  - `["veo_3_1_*"]`
+  - `["gemini-3.1-flash-image-*"]`
+- Malformed legacy whitelist JSON fails open to avoid unexpectedly breaking old accounts.
+
+Verification:
+
+- UAG focused test passed locally:
+  - `docker run --rm -v "D:\wflogin\unified-ai-gateway\backend:/app" -w /app golang:1.24-alpine go test ./internal/service`
+- Production container state after deploy:
+  - `uag-api` healthy on `unified-ai-gateway/backend:model-whitelist-20260621`.
+  - `newapi` healthy and was not restarted during this placeholder setup.
+
+Backups:
+
+- NewAPI DB snapshot:
+  - `/opt/newapi/backups/grok-gemini-config-20260621-210240.sql`
+- UAG DB snapshot:
+  - `/opt/unified-ai-gateway/backups/grok-gemini-config-20260621-210240.sql`
+- UAG backend source backup before whitelist deploy:
+  - `/opt/unified-ai-gateway/backups/backend-before-whitelist-20260621-212419.tar.gz`
+
+Current caveat:
+
+- Live Grok/Gemini generation was not smoke-tested in this pass because no real upstream Grok/Gemini URL/key was configured in the placeholders.
+- After filling keys, first smoke test with a cheap text model:
+  - xAI: `grok-3` or the cheapest configured text model.
+  - Gemini: `gemini-2.5-flash`.
+- Then test image/video:
+  - NewAPI image: `grok-imagine-image-quality` and `gemini-3.1-flash-image`.
+  - UAG site: `gpt-image-2`, one Flow image model, and one Flow/Grok video model.
+
+Gemini image model note:
+
+- Prefer GA ids `gemini-3.1-flash-image` and `gemini-3-pro-image` when the upstream accepts them.
+- Keep preview ids `gemini-3.1-flash-image-preview`, `gemini-3-pro-image-preview`, and `nano-banana-pro-preview` only for compatibility with older upstream gateways.
+- If an upstream gateway reports a model mismatch, use that upstream's exact `/models` response as the source of truth before exposing the model publicly.
+
+xAI model note:
+
+- Prefer the current GA ids when accepted by the upstream, such as `grok-4.3`, `grok-build-0.1`, `grok-imagine-image-quality`, and `grok-imagine-video-1.5`.
+- Keep legacy or preview ids such as `grok-imagine-image`, `grok-imagine-image-pro`, and `grok-imagine-video-1.5-preview` only for compatibility with older upstream gateways.
+- UAG native Grok video currently uses the existing `grok-imagine-video` product/provider path. Do not expose `grok-imagine-video-1.5` through UAG until the upstream video create/poll protocol is verified.
+
+Before wiring any new upstream:
+
+Ask what protocol the upstream actually exposes before deciding where to configure it.
+
+| Upstream interface | Preferred place | Why |
+| --- | --- | --- |
+| OpenAI-compatible `/v1/chat/completions` or `/v1/responses` | NewAPI channel | Best fit for public API users, keys, groups, quotas, and logs. |
+| OpenAI-compatible `/v1/images/generations` returning URL or `b64_json` | NewAPI for public API; UAG `gpt` provider for image site if product tasks/history are needed | NewAPI can expose the API; UAG should own the image product workflow. |
+| Gemini native API / Google Generative Language API | NewAPI Gemini channel for public API; UAG Flow provider only when using Flow/Labs-style image/video task adapters | Gemini text/image API and Flow/Labs product tasks are not the same integration. |
+| xAI-compatible text/image API | NewAPI xAI channel for public API | xAI is close to OpenAI-compatible for chat/image paths. |
+| Async video/image task API with create/poll/fetch | UAG provider or NewAPI task channel only after a real task smoke test | Video often needs task IDs, polling, callback, duration billing, and result normalization. |
+| Account-pool/OAuth/CPA supply requiring custom refresh and scheduler | Sub2API or UAG native account pool | This is supply management, not a direct public user API channel. |
+
+Minimum upstream questions:
+
+1. What base URL and path are used for chat, image, and video?
+2. Is the request OpenAI-compatible, Gemini-native, xAI-native, or a custom task API?
+3. Does image return immediately as `url`/`b64_json`, or does it return a task id that must be polled?
+4. Does video bill by task, second, duration, resolution, or token-like usage?
+5. What model ids are accepted exactly, and are image/video model ids separate from chat model ids?
+6. What error format and rate-limit headers are returned?
+
+Do not enable a public NewAPI channel for an upstream until the cheapest text smoke test and one protocol-specific smoke test have passed. For image/video, "models list succeeds" is not enough; a real task must complete and produce a usable result.
