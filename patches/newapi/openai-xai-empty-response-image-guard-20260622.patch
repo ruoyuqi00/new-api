@@ -1,0 +1,414 @@
+diff --git a/relay/channel/openai/relay-openai.go b/relay/channel/openai/relay-openai.go
+index d6a354f7..2bcf7339 100644
+--- a/relay/channel/openai/relay-openai.go
++++ b/relay/channel/openai/relay-openai.go
+@@ -12,6 +12,7 @@ import (
+ 	"github.com/QuantumNous/new-api/logger"
+ 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
+ 	relaycommon "github.com/QuantumNous/new-api/relay/common"
++	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+ 	"github.com/QuantumNous/new-api/relay/helper"
+ 	"github.com/QuantumNous/new-api/service"
+ 
+@@ -103,6 +104,48 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
+ 	return helper.ObjectData(c, lastStreamResponse)
+ }
+ 
++func oaiStreamChunkHasSignal(resp *dto.ChatCompletionsStreamResponse) bool {
++	if resp == nil {
++		return false
++	}
++	if service.ValidUsage(resp.Usage) {
++		return true
++	}
++	for _, choice := range resp.Choices {
++		if choice.Delta.GetContentString() != "" || choice.Delta.GetReasoningContent() != "" || len(choice.Delta.ToolCalls) > 0 {
++			return true
++		}
++		if choice.FinishReason != nil && *choice.FinishReason != "" {
++			return true
++		}
++	}
++	return false
++}
++
++func oaiTextResponseHasSignal(resp dto.OpenAITextResponse) bool {
++	if service.ValidUsage(&resp.Usage) {
++		return true
++	}
++	for _, choice := range resp.Choices {
++		if choice.Message.StringContent() != "" || choice.Message.GetReasoningContent() != "" || len(choice.Message.ParseToolCalls()) > 0 {
++			return true
++		}
++		if choice.FinishReason != "" {
++			return true
++		}
++	}
++	return false
++}
++
++func oaiImageResponseHasSignal(resp dto.ImageResponse) bool {
++	for _, image := range resp.Data {
++		if strings.TrimSpace(image.Url) != "" || strings.TrimSpace(image.B64Json) != "" {
++			return true
++		}
++	}
++	return false
++}
++
+ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+ 	if resp == nil || resp.Body == nil {
+ 		logger.LogError(c, "invalid response or response body")
+@@ -120,6 +163,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
+ 	var toolCount int
+ 	var usage = &dto.Usage{}
+ 	var lastStreamData string
++	var hasStreamSignal bool
+ 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+ 
+ 	// 检查是否为音频模型
+@@ -143,9 +187,21 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
+ 				logger.LogError(c, "error processing stream token data: "+err.Error())
+ 				sr.Error(err)
+ 			}
++			if info.RelayMode == relayconstant.RelayModeChatCompletions {
++				var streamResponse dto.ChatCompletionsStreamResponse
++				if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil && oaiStreamChunkHasSignal(&streamResponse) {
++					hasStreamSignal = true
++				}
++			} else if responseTextBuilder.Len() > 0 {
++				hasStreamSignal = true
++			}
+ 		}
+ 	})
+ 
++	if !hasStreamSignal && !containStreamUsage {
++		return nil, types.NewOpenAIError(fmt.Errorf("empty OpenAI-compatible stream response"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
++	}
++
+ 	// 对音频模型，从倒数第二个stream data中提取usage信息
+ 	if isAudioModel && secondLastStreamData != "" {
+ 		var streamResp struct {
+@@ -223,6 +279,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
+ 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+ 	}
+ 
++	if !oaiTextResponseHasSignal(simpleResponse) {
++		return nil, types.NewOpenAIError(fmt.Errorf("empty OpenAI-compatible response"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
++	}
++
+ 	for _, choice := range simpleResponse.Choices {
+ 		if choice.FinishReason == constant.FinishReasonContentFilter {
+ 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "openai_finish_reason=content_filter")
+@@ -565,6 +625,18 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
+ 	if err != nil {
+ 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+ 	}
++	if oaiError := usageResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
++		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
++	}
++
++	var imageResp dto.ImageResponse
++	err = common.Unmarshal(responseBody, &imageResp)
++	if err != nil {
++		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
++	}
++	if !oaiImageResponseHasSignal(imageResp) {
++		return nil, types.NewOpenAIError(fmt.Errorf("empty OpenAI-compatible image response"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
++	}
+ 
+ 	// 写入新的 response body
+ 	service.IOCopyBytesGracefully(c, resp, responseBody)
+diff --git a/relay/channel/xai/text.go b/relay/channel/xai/text.go
+index f9a8ee2e..3087f9a5 100644
+--- a/relay/channel/xai/text.go
++++ b/relay/channel/xai/text.go
+@@ -1,6 +1,7 @@
+ package xai
+ 
+ import (
++	"fmt"
+ 	"io"
+ 	"net/http"
+ 	"strings"
+@@ -16,6 +17,48 @@ import (
+ 	"github.com/gin-gonic/gin"
+ )
+ 
++func xAIStreamChunkHasSignal(resp *dto.ChatCompletionsStreamResponse) bool {
++	if resp == nil {
++		return false
++	}
++	if resp.Usage != nil && resp.Usage.TotalTokens > 0 {
++		return true
++	}
++	for _, choice := range resp.Choices {
++		if choice.Delta.GetContentString() != "" || choice.Delta.GetReasoningContent() != "" || len(choice.Delta.ToolCalls) > 0 {
++			return true
++		}
++		if choice.FinishReason != nil && *choice.FinishReason != "" {
++			return true
++		}
++	}
++	return false
++}
++
++func xAITextResponseHasSignal(resp ChatCompletionResponse) bool {
++	if resp.Usage != nil && resp.Usage.TotalTokens > 0 {
++		return true
++	}
++	for _, choice := range resp.Choices {
++		if choice.Message.StringContent() != "" || choice.Message.GetReasoningContent() != "" || len(choice.Message.ParseToolCalls()) > 0 {
++			return true
++		}
++		if choice.FinishReason != "" {
++			return true
++		}
++	}
++	return false
++}
++
++func xAIResponseText(resp ChatCompletionResponse) string {
++	var builder strings.Builder
++	for _, choice := range resp.Choices {
++		builder.WriteString(choice.Message.StringContent())
++		builder.WriteString(choice.Message.GetReasoningContent())
++	}
++	return builder.String()
++}
++
+ func streamResponseXAI2OpenAI(xAIResp *dto.ChatCompletionsStreamResponse, usage *dto.Usage) *dto.ChatCompletionsStreamResponse {
+ 	if xAIResp == nil {
+ 		return nil
+@@ -40,6 +83,7 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
+ 	var responseTextBuilder strings.Builder
+ 	var toolCount int
+ 	var containStreamUsage bool
++	var hasStreamSignal bool
+ 
+ 	helper.SetEventStreamHeaders(c)
+ 
+@@ -52,6 +96,11 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
+ 		}
+ 
+ 		// 把 xAI 的usage转换为 OpenAI 的usage
++		if !xAIStreamChunkHasSignal(xAIResp) {
++			return
++		}
++		hasStreamSignal = true
++
+ 		if xAIResp.Usage != nil {
+ 			containStreamUsage = true
+ 			usage.PromptTokens = xAIResp.Usage.PromptTokens
+@@ -67,6 +116,11 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
+ 		}
+ 	})
+ 
++	if !hasStreamSignal {
++		service.CloseResponseBodyGracefully(resp)
++		return nil, types.NewOpenAIError(fmt.Errorf("empty xAI stream response"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
++	}
++
+ 	if !containStreamUsage {
+ 		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+ 		usage.CompletionTokens += toolCount * 7
+@@ -89,9 +143,14 @@ func xAIHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response
+ 	if err != nil {
+ 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+ 	}
++	if !xAITextResponseHasSignal(xaiResponse) {
++		return nil, types.NewOpenAIError(fmt.Errorf("empty xAI response"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
++	}
+ 	if xaiResponse.Usage != nil {
+ 		xaiResponse.Usage.CompletionTokens = xaiResponse.Usage.TotalTokens - xaiResponse.Usage.PromptTokens
+ 		xaiResponse.Usage.CompletionTokenDetails.TextTokens = xaiResponse.Usage.CompletionTokens - xaiResponse.Usage.CompletionTokenDetails.ReasoningTokens
++	} else {
++		xaiResponse.Usage = service.ResponseText2Usage(c, xAIResponseText(xaiResponse), info.UpstreamModelName, info.GetEstimatePromptTokens())
+ 	}
+ 
+ 	// new body
+diff --git a/relay/channel/openai/relay_openai_empty_response_test.go b/relay/channel/openai/relay_openai_empty_response_test.go
+new file mode 100755
+index 00000000..62a19fb7
+--- /dev/null
++++ b/relay/channel/openai/relay_openai_empty_response_test.go
+@@ -0,0 +1,135 @@
++package openai
++
++import (
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++
++	"github.com/QuantumNous/new-api/constant"
++	"github.com/QuantumNous/new-api/dto"
++	relaycommon "github.com/QuantumNous/new-api/relay/common"
++	"github.com/QuantumNous/new-api/types"
++	"github.com/gin-gonic/gin"
++	"github.com/stretchr/testify/require"
++)
++
++func TestOAITextResponseHasSignalRejectsEmptyResponse(t *testing.T) {
++	require.False(t, oaiTextResponseHasSignal(dto.OpenAITextResponse{}))
++	require.False(t, oaiTextResponseHasSignal(dto.OpenAITextResponse{
++		Choices: []dto.OpenAITextResponseChoice{{}},
++	}))
++}
++
++func TestOAITextResponseHasSignalAcceptsContentFinishReasonAndUsage(t *testing.T) {
++	require.True(t, oaiTextResponseHasSignal(dto.OpenAITextResponse{
++		Choices: []dto.OpenAITextResponseChoice{{
++			Message: dto.Message{Content: "ok"},
++		}},
++	}))
++	require.True(t, oaiTextResponseHasSignal(dto.OpenAITextResponse{
++		Choices: []dto.OpenAITextResponseChoice{{FinishReason: "stop"}},
++	}))
++	require.True(t, oaiTextResponseHasSignal(dto.OpenAITextResponse{
++		Usage: dto.Usage{PromptTokens: 1},
++	}))
++}
++
++func TestOAIStreamChunkHasSignalRejectsEmptyChunk(t *testing.T) {
++	require.False(t, oaiStreamChunkHasSignal(nil))
++	require.False(t, oaiStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{}))
++	require.False(t, oaiStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{
++		Choices: []dto.ChatCompletionsStreamResponseChoice{{}},
++	}))
++}
++
++func TestOAIStreamChunkHasSignalAcceptsContentFinishReasonToolAndUsage(t *testing.T) {
++	content := "ok"
++	finishReason := "stop"
++	require.True(t, oaiStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{
++		Choices: []dto.ChatCompletionsStreamResponseChoice{{
++			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Content: &content},
++		}},
++	}))
++	require.True(t, oaiStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{
++		Choices: []dto.ChatCompletionsStreamResponseChoice{{
++			FinishReason: &finishReason,
++		}},
++	}))
++	require.True(t, oaiStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{
++		Choices: []dto.ChatCompletionsStreamResponseChoice{{
++			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
++				ToolCalls: []dto.ToolCallResponse{{Function: dto.FunctionResponse{Name: "lookup"}}},
++			},
++		}},
++	}))
++	require.True(t, oaiStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{
++		Usage: &dto.Usage{PromptTokens: 1},
++	}))
++}
++
++func TestOAIImageResponseHasSignal(t *testing.T) {
++	require.False(t, oaiImageResponseHasSignal(dto.ImageResponse{}))
++	require.False(t, oaiImageResponseHasSignal(dto.ImageResponse{
++		Data: []dto.ImageData{{}},
++	}))
++	require.True(t, oaiImageResponseHasSignal(dto.ImageResponse{
++		Data: []dto.ImageData{{Url: "https://example.com/image.png"}},
++	}))
++	require.True(t, oaiImageResponseHasSignal(dto.ImageResponse{
++		Data: []dto.ImageData{{B64Json: "iVBORw0KGgo="}},
++	}))
++}
++
++func TestOpenaiHandlerWithUsageRejectsEmptyImageResponseBeforeWrite(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++
++	testCases := []string{
++		`{}`,
++		`{"created":1780000000,"data":[]}`,
++		`{"created":1780000000,"data":[{}]}`,
++	}
++
++	for _, body := range testCases {
++		t.Run(body, func(t *testing.T) {
++			recorder := httptest.NewRecorder()
++			ctx, _ := gin.CreateTestContext(recorder)
++			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
++			resp := &http.Response{
++				StatusCode: http.StatusOK,
++				Body:       io.NopCloser(strings.NewReader(body)),
++			}
++
++			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI}}
++			usage, err := OpenaiHandlerWithUsage(ctx, info, resp)
++
++			require.Nil(t, usage)
++			require.NotNil(t, err)
++			require.Equal(t, types.ErrorCodeEmptyResponse, err.GetErrorCode())
++			require.Equal(t, http.StatusBadGateway, err.StatusCode)
++			require.Equal(t, 200, recorder.Code)
++			require.Empty(t, recorder.Body.String())
++		})
++	}
++}
++
++func TestOpenaiHandlerWithUsageAcceptsImagePayload(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++
++	recorder := httptest.NewRecorder()
++	ctx, _ := gin.CreateTestContext(recorder)
++	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
++	resp := &http.Response{
++		StatusCode: http.StatusOK,
++		Body:       io.NopCloser(strings.NewReader(`{"created":1780000000,"data":[{"url":"https://example.com/image.png"}],"usage":{"total_tokens":3,"prompt_tokens":3}}`)),
++	}
++
++	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI}}
++	usage, err := OpenaiHandlerWithUsage(ctx, info, resp)
++
++	require.Nil(t, err)
++	require.NotNil(t, usage)
++	require.Equal(t, 3, usage.TotalTokens)
++	require.Contains(t, recorder.Body.String(), "https://example.com/image.png")
++}
+diff --git a/relay/channel/xai/text_test.go b/relay/channel/xai/text_test.go
+new file mode 100755
+index 00000000..d7277989
+--- /dev/null
++++ b/relay/channel/xai/text_test.go
+@@ -0,0 +1,38 @@
++package xai
++
++import (
++	"testing"
++
++	"github.com/QuantumNous/new-api/dto"
++	"github.com/stretchr/testify/require"
++)
++
++func TestXAIStreamChunkHasSignalRejectsEmptyChunk(t *testing.T) {
++	require.False(t, xAIStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{}))
++}
++
++func TestXAIStreamChunkHasSignalAcceptsContent(t *testing.T) {
++	content := "ok"
++	require.True(t, xAIStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{
++		Choices: []dto.ChatCompletionsStreamResponseChoice{
++			{Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Content: &content}},
++		},
++	}))
++}
++
++func TestXAITextResponseHasSignalRejectsEmptyResponse(t *testing.T) {
++	require.False(t, xAITextResponseHasSignal(ChatCompletionResponse{}))
++}
++
++func TestXAITextResponseHasSignalAcceptsContentWithoutUsage(t *testing.T) {
++	resp := ChatCompletionResponse{
++		Choices: []dto.OpenAITextResponseChoice{
++			{
++				Message: dto.Message{Role: "assistant", Content: "ok"},
++			},
++		},
++	}
++
++	require.True(t, xAITextResponseHasSignal(resp))
++	require.Equal(t, "ok", xAIResponseText(resp))
++}

@@ -1030,3 +1030,42 @@ Current model exposure:
 - Public image site: `gpt-image-2` only.
 - Flow, Gemini image, Veo, Grok Imagine, and other video/image placeholders must
   stay hidden until real provider accounts/upstreams are added and smoke-tested.
+
+### 2026-06-22 NewAPI Image False-Success Guard
+
+Reason:
+
+- When the image site or a public user calls NewAPI's OpenAI-compatible image
+  endpoint, the upstream must return a real OpenAI image payload.
+- A proxy upstream that returns HTTP 200 but no usable `data[].url` or
+  `data[].b64_json` is a failed image request, not a billable success.
+- This matters because image generation is local per-call/task billing, not
+  text-stream billing. Wrapping a text proxy as an image model can make output
+  and billing look wrong even if the upstream text chat API itself is healthy.
+
+Code record:
+
+- NewAPI patch:
+  `patches/newapi/openai-xai-empty-response-image-guard-20260622.patch`.
+- Local verification:
+  `go test ./relay/channel/openai ./relay/channel/xai`.
+- Deployed NewAPI image:
+  `newapi:image-empty-response-guard-20260622`.
+- Production verification:
+  - fake OpenAI-compatible image upstream returning `{"data":[]}` was rejected
+    as HTTP 502 `empty_response` with no consume log;
+  - `gemini-2.5-flash` text through NewAPI still returned HTTP 200 with a
+    non-empty response.
+
+Operational rules:
+
+- GPT Image2 remains the only proven UAG image path today.
+- For Gemini/Grok image or video, first ask the upstream for exact endpoint
+  support:
+  - image: `/v1/images/generations`, `/v1/images/edits`, or a documented image
+    task endpoint;
+  - video: create/poll/fetch task endpoints and the pricing unit.
+- Do not expose chat-only Gemini/Grok model names as image/video products just
+  because they are available through `/v1/chat/completions`.
+- Keep UAG model visibility tied to active provider accounts and smoke-tested
+  output payloads.

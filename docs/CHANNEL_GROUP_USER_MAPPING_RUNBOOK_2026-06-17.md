@@ -454,3 +454,67 @@ Operational conclusion:
   `choices/content/usage` in both non-stream and stream probes.
 - Gemini text through channel `2300` remains usable. Image/video exposure still
   requires endpoint-specific model IDs and per-call/task billing validation.
+
+### Follow-up: Image Empty Response Guard - 2026-06-22
+
+Additional finding:
+
+- The generic OpenAI-compatible image path (`/v1/images/generations` and
+  `/v1/images/edits`) used `OpenaiHandlerWithUsage`, forwarded the upstream
+  JSON response, and then billed using the local image usage path.
+- That is correct when the upstream returns a real OpenAI image payload, but it
+  was too trusting for proxy upstreams that return HTTP 200 with `{}`,
+  `{"data":[]}`, or `{"data":[{}]}`.
+- In that false-success case NewAPI could write a useless response and still
+  continue into local quota settlement.
+
+Fix prepared:
+
+- Patch stored at
+  `patches/newapi/openai-xai-empty-response-image-guard-20260622.patch`.
+- It extends the deployed OpenAI/xAI empty-response guard with an image payload
+  check:
+  - OpenAI-compatible text: still requires content, tool calls, finish reason,
+    or usage.
+  - OpenAI-compatible stream: still requires real SSE signal or usage.
+  - xAI text/stream: still rejects empty upstream success.
+  - OpenAI-compatible image: now requires at least one `data[].url` or
+    `data[].b64_json` before NewAPI writes the response or settles quota.
+- Upstream `error` objects are now preserved for image responses instead of
+  being treated as successful image payloads.
+
+Local tests:
+
+- `go test ./relay/channel/openai ./relay/channel/xai`
+
+Deployment:
+
+- Built NewAPI image locally:
+  `newapi:image-empty-response-guard-20260622`.
+- Loaded it on the production server and updated only the NewAPI service.
+- Compose backup:
+  `/opt/newapi/docker-compose.yml.bak-image-empty-response-guard-20260622`.
+- Running production NewAPI image after deployment:
+  `newapi:image-empty-response-guard-20260622`.
+- NewAPI MySQL, NewAPI Redis, Sub2API, and UAG were not recreated.
+
+Verification after deployment:
+
+- NewAPI container became healthy.
+- A temporary fake OpenAI-compatible image upstream returned HTTP 200 with
+  `{"data":[]}`. NewAPI returned HTTP 502 with `error.code=empty_response`,
+  and the temporary user's consume-log count stayed `0 -> 0`.
+- A temporary `gemini-2.5-flash` chat smoke test returned HTTP 200 with a
+  non-empty assistant message, and its temporary user's consume-log count
+  changed `0 -> 1`.
+
+Operational conclusion:
+
+- Pricing remains local/site-owned. This fix does not read or copy upstream
+  prices.
+- The correct way to add image/video upstreams is still endpoint-specific:
+  first prove the exact image/video endpoint returns real image/video output,
+  then expose it with local per-call/task pricing.
+- Text-only upstream proxy models such as the current Gemini OpenAI-compatible
+  route should not be renamed into public image/video models unless the image
+  endpoint itself passes this smoke test.
