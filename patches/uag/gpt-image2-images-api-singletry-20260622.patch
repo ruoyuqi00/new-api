@@ -1,0 +1,164 @@
+diff --git a/backend/internal/provider/gpt/gpt.go b/backend/internal/provider/gpt/gpt.go
+--- a/backend/internal/provider/gpt/gpt.go
++++ b/backend/internal/provider/gpt/gpt.go
+@@
+ type imgReq struct {
+-	Model          string   `json:"model"`
+-	Prompt         string   `json:"prompt"`
+-	N              int      `json:"n,omitempty"`
+-	Size           string   `json:"size,omitempty"`
+-	Quality        string   `json:"quality,omitempty"`
+-	Style          string   `json:"style,omitempty"`
+-	ResponseFormat string   `json:"response_format,omitempty"`
+-	Image          string   `json:"image,omitempty"`
+-	Images         []string `json:"images,omitempty"`
+-	Mask           string   `json:"mask,omitempty"`
+-	InputFidelity  string   `json:"input_fidelity,omitempty"`
++	Model          string       `json:"model"`
++	Prompt         string       `json:"prompt"`
++	N              int          `json:"n,omitempty"`
++	Size           string       `json:"size,omitempty"`
++	Quality        string       `json:"quality,omitempty"`
++	Style          string       `json:"style,omitempty"`
++	ResponseFormat string       `json:"response_format,omitempty"`
++	Image          string       `json:"image,omitempty"`
++	Images         []imgEditRef `json:"images,omitempty"`
++	Mask           string       `json:"mask,omitempty"`
++	InputFidelity  string       `json:"input_fidelity,omitempty"`
+ }
+ 
++type imgEditRef struct {
++	ImageURL string `json:"image_url,omitempty"`
++}
++
+@@
+-	if isGPTImage2(req.ModelCode) && !wantsImagesAPIRoute(req) {
++	if isGPTImage2(req.ModelCode) && shouldForceImagesAPIForImage2(req) {
++		return p.generateImagesAPI(ctx, req)
++	}
++	if isGPTImage2(req.ModelCode) && !wantsImagesAPIRoute(req) {
+ 		if shouldUseWebImage2(req) {
+ 			return p.generateImage2Web(ctx, req)
+ 		}
+@@
+ 	edit := isImagesAPIEditRequest(req)
+ 	refs := compactRefs(req.RefAssets)
++	refs = absolutizeCachedRefs(refs)
+ 	if edit && len(refs) == 0 {
+ 		return nil, fmt.Errorf("gpt image edit requires at least one image")
+ 	}
+@@
+ 	if edit {
+ 		body.Image = refs[0]
+-		if len(refs) > 1 {
+-			body.Images = refs
++		body.Images = make([]imgEditRef, 0, len(refs))
++		for _, ref := range refs {
++			body.Images = append(body.Images, imgEditRef{ImageURL: ref})
+ 		}
+ 		body.Mask = firstStringParam(req.Params, "mask", "mask_image_url")
+ 		body.InputFidelity = strParam(req.Params, "input_fidelity", "")
+@@
+ func wantsImagesAPIRoute(req *provider.Request) bool {
+@@
+ }
+ 
++func shouldForceImagesAPIForImage2(req *provider.Request) bool {
++	if req == nil || !isGPTImage2(req.ModelCode) || req.Account == nil {
++		return false
++	}
++	return req.Account.AuthType == "api_key"
++}
++
+ func isImagesAPIEditRequest(req *provider.Request) bool {
+@@
+ }
+ 
++func absolutizeCachedRefs(refs []string) []string {
++	out := make([]string, 0, len(refs))
++	for _, ref := range refs {
++		out = append(out, absolutizeCachedRef(ref))
++	}
++	return out
++}
++
++func absolutizeCachedRef(ref string) string {
++	ref = strings.TrimSpace(ref)
++	if !strings.HasPrefix(ref, "/api/v1/gen/cached/") {
++		return ref
++	}
++	base := strings.TrimRight(strings.TrimSpace(os.Getenv("KLEIN_PUBLIC_OPENAI_BASE_URL")), "/")
++	if base == "" {
++		base = strings.TrimRight(strings.TrimSpace(os.Getenv("KLEIN_PUBLIC_API_BASE_URL")), "/")
++	}
++	if base == "" {
++		base = "https://image-api.vyywcw.cn"
++	}
++	return base + ref
++}
++
+diff --git a/backend/internal/service/generation_service.go b/backend/internal/service/generation_service.go
+--- a/backend/internal/service/generation_service.go
++++ b/backend/internal/service/generation_service.go
+@@
+ 	if isGPTImage2Task(t) {
+-		if timeout <= 0 || timeout > 160*time.Second {
++		if usesGPTImage2ImagesAPI(ctx, s.pool, t, params) {
++			timeout = 240 * time.Second
++			maxAttempts = 1
++		} else if timeout <= 0 || timeout > 160*time.Second {
+ 			timeout = 160 * time.Second
+ 		}
+-		if maxAttempts < 2 {
+-			maxAttempts = 2
+-		}
+-		if maxAttempts > 3 {
+-			maxAttempts = 3
++		if maxAttempts != 1 {
++			if maxAttempts < 2 {
++				maxAttempts = 2
++			}
++			if maxAttempts > 3 {
++				maxAttempts = 3
++			}
+ 		}
+ 	}
+@@
+ func hasGPTImage2APIKeyRoute(ctx context.Context, pool *AccountPool) bool {
+@@
+ }
+ 
++func usesGPTImage2ImagesAPI(ctx context.Context, pool *AccountPool, t *model.GenerationTask, params map[string]any) bool {
++	if !isGPTImage2Task(t) {
++		return false
++	}
++	return wantsGPTAPIRoute(params) || hasGPTImage2APIKeyRoute(ctx, pool)
++}
++
+diff --git a/backend/internal/handler/openai_handler.go b/backend/internal/handler/openai_handler.go
+--- a/backend/internal/handler/openai_handler.go
++++ b/backend/internal/handler/openai_handler.go
+@@
+ 	waitTimeout := 60 * time.Second
+ 	if strings.EqualFold(req.Model, "gpt-image-2") {
+-		waitTimeout = 180 * time.Second
++		waitTimeout = 240 * time.Second
+ 	}
+ 	h.respondTaskResult(c, t, waitTimeout)
+ }
+diff --git a/backend/internal/provider/gpt/image2_model_test.go b/backend/internal/provider/gpt/image2_model_test.go
+--- a/backend/internal/provider/gpt/image2_model_test.go
++++ b/backend/internal/provider/gpt/image2_model_test.go
+@@
++func TestGenerateImage2APIKeyAccountForcesImagesEndpoint(t *testing.T) {
++	// api_key-backed GPT Image2 accounts are NewAPI/OpenAI-compatible image
++	// gateways. They must not fall back to /v1/responses.
++}
++
+@@
+ 		if body.Image != "https://example.com/in.png" {
+ 			t.Fatalf("image = %q, want reference URL", body.Image)
+ 		}
++		if len(body.Images) != 1 || body.Images[0].ImageURL != "https://example.com/in.png" {
++			t.Fatalf("images = %#v, want image_url reference", body.Images)
++		}

@@ -1217,3 +1217,74 @@ Reference docs checked:
   https://ai.google.dev/gemini-api/docs/image-generation
 - Veo video generation:
   https://ai.google.dev/gemini-api/docs/video
+
+### 2026-06-22 GPT Image2 Images API Fix And Grok/Gemini Smoke
+
+User-facing conclusion:
+
+- The configured Grok and Gemini upstreams are currently usable as text/chat
+  upstreams only. `/v1/chat/completions` returned `ok` for:
+  - Grok channel `2297`, model `grok-3`;
+  - Gemini channels `2298` and `2300`, model `gemini-2.5-flash`.
+- The same upstreams did not pass image smoke tests:
+  - Grok `/v1/images/generations` returned HTTP 400, "platform does not
+    support `/v1/images/generations`".
+  - Gemini `/v1/images/generations` with `gemini-3.1-flash-image` returned
+    HTTP 500, `convert_request_failed`, saying only Imagen models are supported.
+- `/v1/models` for those upstreams advertises `supported_endpoint_types:
+  ["openai"]` only. Treat those Grok/Gemini entries as text routes until a real
+  image/video-capable upstream key is configured and a media endpoint succeeds.
+
+Root cause for the reported `GROK triggered Cloudflare verification` error:
+
+- UAG previously selected a generic GPT API-key account named `uag`
+  (`account_id=2`, base `https://dtrljm.com`) for `gpt-image-2`.
+- That account had no explicit `gpt-image-2` whitelist and routed through
+  `/v1/responses`, which produced Cloudflare 502 responses and surfaced as a
+  misleading Grok/CF style error.
+- The account was disabled, and GPT Image2 API-key account selection now
+  requires an explicit `gpt-image-2` whitelist.
+
+Code and deployment:
+
+- GPT Image2 on API-key accounts now always uses the OpenAI Images API path:
+  - text-to-image: `/v1/images/generations`;
+  - image-to-image/edit: `/v1/images/edits`.
+- GPT Image2 image-edit payloads now include `images[].image_url`, while still
+  retaining the legacy `image` field for compatibility.
+- UAG cached asset refs such as `/api/v1/gen/cached/...` are expanded to a
+  public `https://image-api.vyywcw.cn/api/v1/gen/cached/...` URL before sending
+  to NewAPI/upstream image-edit endpoints.
+- GPT Image2 Images API tasks now use a 240 second timeout and only one upstream
+  attempt. This avoids automatic retries causing duplicate upstream image
+  billing on slow but still-running image requests.
+- OpenAI-compatible GPT Image2 synchronous wait was also raised to 240 seconds,
+  reducing premature `202` responses for slow image generations.
+- Deployed backend image:
+  `unified-ai-gateway/backend:gpt-image2-images-api-singletry-wait240-20260622`.
+- NewAPI was not restarted or modified for this fix.
+
+Verification:
+
+| Check | Result |
+| --- | --- |
+| GPT provider tests | `go test ./internal/provider/gpt` passed in Docker Go on the server. |
+| Service selection tests | `go test ./internal/service -run "TestAccount|TestProviderCooldown"` passed. |
+| Handler compile test | `go test ./internal/handler` passed. |
+| UAG containers | `api`, `admin`, `openai`, and `worker` running on `gpt-image2-images-api-singletry-wait240-20260622`; `uag-api` healthy. |
+| API health | `https://image-api.vyywcw.cn/v1/health` returns HTTP 200. |
+| Public model list | `https://image.vyywcw.cn/api/v1/models` returns only `gpt-image-2`. |
+| GPT Image2 text-to-image | Temporary UAG API key smoke selected `account_id=1` and hit `https://newapi.vyywcw.cn/v1/images/generations`; task succeeded and cached output. |
+| GPT Image2 image-to-image | Temporary UAG API key smoke hit `https://newapi.vyywcw.cn/v1/images/edits`; HTTP 200, one output URL, task succeeded and cached output. |
+
+Operational rules:
+
+- Do not expose Grok/Gemini as image/video models just because their chat
+  models exist in NewAPI. Media exposure requires an actual `/v1/images/*`,
+  `/v1/videos/*`, Imagen, Veo, Flow, or documented native media endpoint smoke.
+- Do not use generic, unscoped GPT API-key accounts for `gpt-image-2`; the
+  account must explicitly whitelist `gpt-image-2`.
+- For image generation charged by request count, avoid automatic upstream
+  retries unless the upstream provides idempotency semantics.
+- Reproducible patch for this maintenance pass:
+  `patches/uag/gpt-image2-images-api-singletry-20260622.patch`.
