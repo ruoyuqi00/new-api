@@ -1,0 +1,73 @@
+diff --git a/backend/internal/handler/generation_handler.go b/backend/internal/handler/generation_handler.go
+index 53caab7..a0210aa 100644
+--- a/backend/internal/handler/generation_handler.go
++++ b/backend/internal/handler/generation_handler.go
+@@ -584,29 +584,6 @@ func (h *GenerationHandler) publicModels(ctx context.Context) []publicModelResp {
+ 	return rows
+ }
+ 
+-func defaultPublicModels() []publicModelResp {
+-	return []publicModelResp{
+-		{ModelCode: "grok-4.20-fast", Name: "Grok Fast", Kind: "text", Provider: "grok", UpstreamModel: "grok-4.20-fast", InputUnitPoints: 100, OutputUnitPoints: 300, Enabled: true},
+-		{ModelCode: "grok-4.20-auto", Name: "Grok Auto", Kind: "text", Provider: "grok", UpstreamModel: "grok-4.20-auto", InputUnitPoints: 150, OutputUnitPoints: 450, Enabled: true},
+-		{ModelCode: "grok-4.20-expert", Name: "Grok Expert", Kind: "text", Provider: "grok", UpstreamModel: "grok-4.20-expert", InputUnitPoints: 200, OutputUnitPoints: 600, Enabled: true},
+-		{ModelCode: "grok-4.20-heavy", Name: "Grok Heavy", Kind: "text", Provider: "grok", UpstreamModel: "grok-4.20-heavy", InputUnitPoints: 400, OutputUnitPoints: 1200, Enabled: true},
+-		{ModelCode: "gpt-image-2", Name: "GPT Image 2", Kind: "image", Provider: "gpt", UpstreamModel: "gpt-image-2", UnitPoints: 0, Enabled: true},
+-		{ModelCode: "grok-imagine-video", Name: "Grok Imagine Video", Kind: "video", Provider: "grok", UpstreamModel: "grok-imagine-video", UnitPoints: 2000, Enabled: true},
+-		{ModelCode: "gemini-3.0-pro-image-square", Name: "Gemini 3.0 Square", Kind: "image", Provider: "flow", UnitPoints: 500, Enabled: true},
+-		{ModelCode: "gemini-3.0-pro-image-landscape", Name: "Gemini 3.0 Landscape", Kind: "image", Provider: "flow", UnitPoints: 500, Enabled: true},
+-		{ModelCode: "gemini-3.0-pro-image-portrait", Name: "Gemini 3.0 Portrait", Kind: "image", Provider: "flow", UnitPoints: 500, Enabled: true},
+-		{ModelCode: "gemini-3.0-pro-image-landscape-4k", Name: "Gemini 3.0 4K Landscape", Kind: "image", Provider: "flow", UnitPoints: 1200, Enabled: true},
+-		{ModelCode: "gemini-3.1-flash-image-square", Name: "Gemini 3.1 Flash Square", Kind: "image", Provider: "flow", UnitPoints: 400, Enabled: true},
+-		{ModelCode: "imagen-4.0-generate-preview-landscape", Name: "Imagen 4.0 Landscape", Kind: "image", Provider: "flow", UnitPoints: 600, Enabled: true},
+-		{ModelCode: "veo_3_1_t2v_fast_landscape", Name: "Veo 3.1 Fast Landscape", Kind: "video", Provider: "flow", UnitPoints: 3000, Enabled: true},
+-		{ModelCode: "veo_3_1_t2v_landscape_6s", Name: "Veo 3.1 Landscape 6s", Kind: "video", Provider: "flow", UnitPoints: 4000, Enabled: true},
+-		{ModelCode: "veo_3_1_i2v_s_fast_fl_landscape", Name: "Veo 3.1 I2V Fast Landscape", Kind: "video", Provider: "flow", UnitPoints: 3500, Enabled: true},
+-	}
+-}
+-
+ func fallbackString(v, fallback string) string {
+ 	if strings.TrimSpace(v) != "" {
+ 		return v
+diff --git a/backend/internal/handler/openai_handler.go b/backend/internal/handler/openai_handler.go
+index c689272..3f83ddd 100644
+--- a/backend/internal/handler/openai_handler.go
++++ b/backend/internal/handler/openai_handler.go
+@@ -72,7 +72,7 @@ func endpointForKind(kind string) string {
+ 	case "image":
+ 		return "/v1/images/generations"
+ 	case "video":
+-		return "/v1/video/generations"
++		return "/v1/videos/generations"
+ 	default:
+ 		return "/v1/chat/completions"
+ 	}
+diff --git a/backend/internal/repo/generation_repo.go b/backend/internal/repo/generation_repo.go
+index 9d06615..700b001 100644
+--- a/backend/internal/repo/generation_repo.go
++++ b/backend/internal/repo/generation_repo.go
+@@ -31,6 +31,7 @@ type PublicModelRow struct {
+ 	UnitPoints       int64
+ 	InputUnitPoints  int64
+ 	OutputUnitPoints int64
++	LiveAccounts     int64
+ }
+ 
+ type AdminGenerationLogFilter struct {
+@@ -86,13 +87,15 @@ func (r *GenerationRepo) ListPublicModels(ctx context.Context) ([]PublicModelRow
+ 			m.code AS upstream_model,
+ 			m.point_per_unit AS unit_points,
+ 			CASE WHEN m.kind = 'text' THEN m.point_per_unit ELSE 0 END AS input_unit_points,
+-			CASE WHEN m.kind = 'text' THEN m.point_per_unit ELSE 0 END AS output_unit_points
++			CASE WHEN m.kind = 'text' THEN m.point_per_unit ELSE 0 END AS output_unit_points,
++			COUNT(DISTINCT a.id) AS live_accounts
+ 		`).
+ 		Joins("JOIN account_group AS g ON g.code = m.group_code AND g.status = 1 AND g.deleted_at IS NULL").
+ 		Joins("JOIN account_group_member AS gm ON gm.group_id = g.id").
+ 		Joins("JOIN account AS a ON a.id = gm.account_id AND a.status = ? AND a.deleted_at IS NULL", model.AccountStatusEnabled).
+ 		Where("m.deleted_at IS NULL AND m.status = 1").
+ 		Group("m.id, m.code, m.name, m.kind, m.provider, m.point_per_unit, m.sort").
++		Having("live_accounts > 0").
+ 		Order("m.sort DESC, m.id ASC").
+ 		Scan(&rows).Error
+ 	return rows, err

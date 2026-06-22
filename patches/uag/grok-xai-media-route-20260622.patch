@@ -1,0 +1,544 @@
+﻿diff --git a/backend/internal/provider/grok/grok.go b/backend/internal/provider/grok/grok.go
+index 9f7fef02..392eb432 100644
+--- a/backend/internal/provider/grok/grok.go
++++ b/backend/internal/provider/grok/grok.go
+@@ -27,7 +27,7 @@ import (
+ 	"strings"
+ 	"time"
+ 
+-	"github.com/kleinai/backend/internal/provider"
++	"github.com/unified-ai-gateway/backend/internal/provider"
+ )
+ 
+ const (
+@@ -70,8 +70,10 @@ type vidCreateReq struct {
+ 	NegPrompt   string   `json:"negative_prompt,omitempty"`
+ 	Duration    int      `json:"duration,omitempty"`
+ 	AspectRatio string   `json:"aspect_ratio,omitempty"`
++	Resolution  string   `json:"resolution,omitempty"`
+ 	N           int      `json:"n,omitempty"`
+ 	RefImages   []string `json:"ref_images,omitempty"`
++	Image       *mediaRef `json:"image,omitempty"`
+ }
+ 
+ type vidAsset struct {
+@@ -79,30 +81,164 @@ type vidAsset struct {
+ 	ThumbURL   string `json:"thumb_url,omitempty"`
+ 	Width      int    `json:"width,omitempty"`
+ 	Height     int    `json:"height,omitempty"`
++	Duration   int    `json:"duration,omitempty"`
+ 	DurationMs int    `json:"duration_ms,omitempty"`
+ 	Mime       string `json:"mime,omitempty"`
+ }
+ 
+ type vidResp struct {
+-	TaskID string     `json:"task_id,omitempty"`
+-	Status string     `json:"status,omitempty"`
+-	Data   []vidAsset `json:"data,omitempty"`
+-	Error  string     `json:"error,omitempty"`
++	TaskID    string     `json:"task_id,omitempty"`
++	RequestID string     `json:"request_id,omitempty"`
++	Status    string     `json:"status,omitempty"`
++	Data      []vidAsset `json:"data,omitempty"`
++	Video     *vidAsset  `json:"video,omitempty"`
++	Error     string     `json:"error,omitempty"`
++	Progress  int        `json:"progress,omitempty"`
++}
++
++type imgCreateReq struct {
++	Model          string    `json:"model"`
++	Prompt         string    `json:"prompt"`
++	N              int       `json:"n,omitempty"`
++	Size           string    `json:"size,omitempty"`
++	Quality        string    `json:"quality,omitempty"`
++	ResponseFormat string    `json:"response_format,omitempty"`
++	Image          *mediaRef `json:"image,omitempty"`
++}
++
++type mediaRef struct {
++	URL    string `json:"url,omitempty"`
++	Type   string `json:"type,omitempty"`
++	FileID string `json:"file_id,omitempty"`
++}
++
++type imgAsset struct {
++	URL      string `json:"url,omitempty"`
++	B64JSON  string `json:"b64_json,omitempty"`
++	MimeType string `json:"mime_type,omitempty"`
++}
++
++type apiError struct {
++	Message string `json:"message"`
++	Type    string `json:"type,omitempty"`
++	Code    string `json:"code,omitempty"`
++}
++
++type imgResp struct {
++	Data  []imgAsset `json:"data,omitempty"`
++	Error *apiError  `json:"error,omitempty"`
+ }
+ 
+ // Generate 视频生成；自动识别同步 / 异步响应。
+ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provider.Result, error) {
+-	if req.Kind != provider.KindVideo {
+-		return nil, fmt.Errorf("grok provider only supports video kind, got %s", req.Kind)
+-	}
+ 	if req.Credential == "" {
+ 		return nil, fmt.Errorf("grok provider missing credential")
+ 	}
++	switch req.Kind {
++	case provider.KindImage:
++		return p.generateImageAPI(ctx, req)
++	case provider.KindVideo:
++		return p.generateVideo(ctx, req)
++	default:
++		return nil, fmt.Errorf("grok provider only supports image/video kind, got %s", req.Kind)
++	}
++}
++
++func (p *Provider) generateImageAPI(ctx context.Context, req *provider.Request) (*provider.Result, error) {
++	base := apiBaseURL(req.BaseURL)
++	count := req.Count
++	if count <= 0 {
++		count = 1
++	}
++	if count > 4 {
++		count = 4
++	}
++	refs := compactRefs(req.RefAssets)
++	edit := len(refs) > 0 || strings.EqualFold(strParam(req.Params, "operation", ""), "edit")
++	if edit && len(refs) == 0 {
++		return nil, fmt.Errorf("grok image edit requires at least one image")
++	}
++	url := base + "/v1/images/generations"
++	if edit {
++		url = base + "/v1/images/edits"
++	}
++	body := imgCreateReq{
++		Model:          normalizeImageModel(req.ModelCode),
++		Prompt:         req.Prompt,
++		N:              count,
++		Size:           strParam(req.Params, "size", ""),
++		Quality:        strParam(req.Params, "quality", ""),
++		ResponseFormat: strParam(req.Params, "response_format", "url"),
++	}
++	if edit {
++		body.Image = imageMediaRef(refs[0])
++	}
++	payload, _ := json.Marshal(body)
++
++	logUpstream(ctx, req, provider.UpstreamLogEntry{
++		Provider: "grok",
++		Stage:    "images.start",
++		Method:   http.MethodPost,
++		URL:      url,
++		Meta: map[string]any{
++			"model":     body.Model,
++			"count":     count,
++			"edit":      edit,
++			"ref_count": len(refs),
++		},
++	})
++	start := time.Now()
++	raw, status, err := p.doRaw(ctx, http.MethodPost, url, payload, req.Credential)
++	if err != nil {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "grok", Stage: "images.request", Method: http.MethodPost, URL: url, Error: err.Error()})
++		return nil, err
++	}
++	if status >= 400 {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "grok", Stage: "images.error", Method: http.MethodPost, URL: url, StatusCode: status, ResponseExcerpt: snippet(raw, 240)})
++		return nil, fmt.Errorf("grok image %d: %s", status, snippet(raw, 240))
++	}
++	var out imgResp
++	if err := json.Unmarshal(raw, &out); err != nil {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "grok", Stage: "images.decode", Method: http.MethodPost, URL: url, StatusCode: status, ResponseExcerpt: snippet(raw, 240), Error: err.Error()})
++		return nil, fmt.Errorf("grok image decode: %w (raw=%s)", err, snippet(raw, 240))
++	}
++	if out.Error != nil && out.Error.Message != "" {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "grok", Stage: "images.error", Method: http.MethodPost, URL: url, StatusCode: status, ResponseExcerpt: snippet(raw, 240), Error: out.Error.Message})
++		return nil, fmt.Errorf("grok image: %s", out.Error.Message)
++	}
++	assets := make([]provider.Asset, 0, len(out.Data))
++	for _, item := range out.Data {
++		if strings.TrimSpace(item.URL) != "" {
++			assets = append(assets, provider.Asset{URL: item.URL, Mime: defaultImageMime(item.MimeType)})
++			continue
++		}
++		if strings.TrimSpace(item.B64JSON) != "" {
++			mimeType := defaultImageMime(item.MimeType)
++			assets = append(assets, provider.Asset{URL: "data:" + mimeType + ";base64," + item.B64JSON, Mime: mimeType})
++		}
++	}
++	if len(assets) == 0 {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "grok", Stage: "images.empty", Method: http.MethodPost, URL: url, StatusCode: status, ResponseExcerpt: snippet(raw, 240)})
++		return nil, fmt.Errorf("grok image returned 0 image")
++	}
++	logUpstream(ctx, req, provider.UpstreamLogEntry{
++		Provider:   "grok",
++		Stage:      "images.success",
++		Method:     http.MethodPost,
++		URL:        url,
++		StatusCode: status,
++		DurationMs: time.Since(start).Milliseconds(),
++		Meta:       map[string]any{"assets": len(assets)},
++	})
++	return &provider.Result{TaskID: req.TaskID, Assets: assets, Latency: time.Since(start)}, nil
++}
++
++func (p *Provider) generateVideo(ctx context.Context, req *provider.Request) (*provider.Result, error) {
+ 	base := req.BaseURL
+ 	if base == "" {
+ 		base = p.defaultURL
+ 	}
+-	if base == "" || strings.Contains(base, "grok.com") || strings.Contains(base, "api.x.ai") {
++	if shouldUseGrokWebRoute(base) {
+ 		web := p.web
+ 		if req.ProxyURL != "" || req.BaseURL != "" {
+ 			web = NewWebClientWithProxy(req.BaseURL, req.ProxyURL)
+@@ -150,6 +286,7 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 	dur := normalizeVideoDuration(intParam(req.Params, "duration", 6))
+ 	aspect := strParam(req.Params, "aspect_ratio", "16:9")
+ 	quality := strParam(req.Params, "quality", "hd")
++	resolution := strParam(req.Params, "resolution", qualityToResolution(quality))
+ 
+ 	body := vidCreateReq{
+ 		Model:       req.ModelCode,
+@@ -157,9 +294,20 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 		NegPrompt:   req.NegPrompt,
+ 		Duration:    dur,
+ 		AspectRatio: aspect,
++		Resolution:  resolution,
+ 		N:           count,
+ 		RefImages:   req.RefAssets,
+ 	}
++	xaiVideoRoute := wantsXAIVideoRoute(req, base)
++	if xaiVideoRoute {
++		body.Model = NormalizeVideoModel(req.ModelCode)
++		body.N = 0
++		body.RefImages = nil
++		if refs := compactRefs(req.RefAssets); len(refs) > 0 {
++			body.Image = imageMediaRef(refs[0])
++		}
++		base = apiBaseURL(base)
++	}
+ 	payload, _ := json.Marshal(body)
+ 
+ 	start := time.Now()
+@@ -176,7 +324,8 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 			Latency: time.Since(start),
+ 		}, nil
+ 	}
+-	if createResp.TaskID == "" {
++	taskID := firstNonEmptyString(createResp.TaskID, createResp.RequestID)
++	if taskID == "" {
+ 		return nil, fmt.Errorf("grok empty task_id and empty data")
+ 	}
+ 
+@@ -190,20 +339,28 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 		case <-time.After(period):
+ 		}
+ 		if time.Now().After(deadline) {
+-			return nil, fmt.Errorf("grok task %s timeout", createResp.TaskID)
++			return nil, fmt.Errorf("grok task %s timeout", taskID)
+ 		}
+-		st, err := p.do(ctx, http.MethodGet, base+"/v1/videos/tasks/"+createResp.TaskID, nil, req.Credential)
++		pollURL := base + "/v1/videos/tasks/" + taskID
++		if xaiVideoRoute {
++			pollURL = base + "/v1/videos/" + taskID
++		}
++		st, err := p.do(ctx, http.MethodGet, pollURL, nil, req.Credential)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+ 		switch strings.ToLower(st.Status) {
+ 		case "succeeded", "success", "completed", "done":
+-			if len(st.Data) == 0 {
+-				return nil, fmt.Errorf("grok task %s succeeded but empty data", createResp.TaskID)
++			data := st.Data
++			if st.Video != nil {
++				data = append(data, *st.Video)
++			}
++			if len(data) == 0 {
++				return nil, fmt.Errorf("grok task %s succeeded but empty data", taskID)
+ 			}
+ 			return &provider.Result{
+ 				TaskID:  req.TaskID,
+-				Assets:  toAssets(st.Data, dur, aspect, quality),
++				Assets:  toAssets(data, dur, aspect, quality),
+ 				Latency: time.Since(start),
+ 			}, nil
+ 		case "failed", "error", "cancelled":
+@@ -211,7 +368,7 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 			if msg == "" {
+ 				msg = "grok task failed"
+ 			}
+-			return nil, fmt.Errorf("grok task %s: %s", createResp.TaskID, msg)
++			return nil, fmt.Errorf("grok task %s: %s", taskID, msg)
+ 		}
+ 		// queued / running / processing → 继续轮询
+ 		period *= 2
+@@ -222,13 +379,28 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ }
+ 
+ func (p *Provider) do(ctx context.Context, method, url string, payload []byte, key string) (*vidResp, error) {
++	raw, status, err := p.doRaw(ctx, method, url, payload, key)
++	if err != nil {
++		return nil, err
++	}
++	if status >= 400 {
++		return nil, fmt.Errorf("grok %d: %s", status, snippet(raw, 240))
++	}
++	var out vidResp
++	if err := json.Unmarshal(raw, &out); err != nil {
++		return nil, fmt.Errorf("grok decode: %w (raw=%s)", err, snippet(raw, 240))
++	}
++	return &out, nil
++}
++
++func (p *Provider) doRaw(ctx context.Context, method, url string, payload []byte, key string) ([]byte, int, error) {
+ 	var rdr io.Reader
+ 	if payload != nil {
+ 		rdr = bytes.NewReader(payload)
+ 	}
+ 	httpReq, err := http.NewRequestWithContext(ctx, method, url, rdr)
+ 	if err != nil {
+-		return nil, err
++		return nil, 0, err
+ 	}
+ 	httpReq.Header.Set("Authorization", "Bearer "+key)
+ 	if payload != nil {
+@@ -238,19 +410,12 @@ func (p *Provider) do(ctx context.Context, method, url string, payload []byte, k
+ 
+ 	resp, err := p.client.Do(httpReq)
+ 	if err != nil {
+-		return nil, fmt.Errorf("grok http: %w", err)
++		return nil, 0, fmt.Errorf("grok http: %w", err)
+ 	}
+ 	defer resp.Body.Close()
+ 
+ 	raw, _ := io.ReadAll(resp.Body)
+-	if resp.StatusCode >= 400 {
+-		return nil, fmt.Errorf("grok %d: %s", resp.StatusCode, snippet(raw, 240))
+-	}
+-	var out vidResp
+-	if err := json.Unmarshal(raw, &out); err != nil {
+-		return nil, fmt.Errorf("grok decode: %w (raw=%s)", err, snippet(raw, 240))
+-	}
+-	return &out, nil
++	return raw, resp.StatusCode, nil
+ }
+ 
+ func toAssets(items []vidAsset, durSec int, aspect, quality string) []provider.Asset {
+@@ -268,6 +433,9 @@ func toAssets(items []vidAsset, durSec int, aspect, quality string) []provider.A
+ 		if a.DurationMs == 0 && durSec > 0 {
+ 			a.DurationMs = durSec * 1000
+ 		}
++		if a.DurationMs == 0 && it.Duration > 0 {
++			a.DurationMs = it.Duration * 1000
++		}
+ 		if a.Mime == "" {
+ 			a.Mime = "video/mp4"
+ 		}
+@@ -281,6 +449,106 @@ func toAssets(items []vidAsset, durSec int, aspect, quality string) []provider.A
+ 
+ // === helpers ===
+ 
++func logUpstream(ctx context.Context, req *provider.Request, entry provider.UpstreamLogEntry) {
++	if req == nil || req.UpstreamLog == nil {
++		return
++	}
++	req.UpstreamLog(ctx, entry)
++}
++
++func apiBaseURL(base string) string {
++	base = strings.TrimRight(strings.TrimSpace(base), "/")
++	if base == "" {
++		return "https://api.x.ai"
++	}
++	if strings.HasSuffix(base, "/v1") {
++		return strings.TrimSuffix(base, "/v1")
++	}
++	return base
++}
++
++func isXAIAPIBase(base string) bool {
++	lower := strings.ToLower(strings.TrimSpace(base))
++	return strings.Contains(lower, "api.x.ai")
++}
++
++func wantsXAIVideoRoute(req *provider.Request, base string) bool {
++	if isXAIAPIBase(base) {
++		return true
++	}
++	if req == nil {
++		return false
++	}
++	route := strings.ToLower(strings.TrimSpace(strParam(req.Params, "route", strParam(req.Params, "provider_route", ""))))
++	switch route {
++	case "xai", "x-ai", "xai_api", "grok_api", "official":
++		return true
++	default:
++		return false
++	}
++}
++
++func shouldUseGrokWebRoute(base string) bool {
++	base = strings.ToLower(strings.TrimSpace(base))
++	return base == "" || strings.Contains(base, "grok.com")
++}
++
++func compactRefs(refs []string) []string {
++	out := make([]string, 0, len(refs))
++	for _, ref := range refs {
++		ref = strings.TrimSpace(ref)
++		if ref != "" {
++			out = append(out, ref)
++		}
++	}
++	return out
++}
++
++func imageMediaRef(ref string) *mediaRef {
++	ref = strings.TrimSpace(ref)
++	if ref == "" {
++		return nil
++	}
++	if strings.HasPrefix(ref, "file-") {
++		return &mediaRef{FileID: ref}
++	}
++	return &mediaRef{URL: ref, Type: "image_url"}
++}
++
++func normalizeImageModel(modelCode string) string {
++	modelCode = strings.TrimSpace(modelCode)
++	if modelCode == "" || strings.EqualFold(modelCode, "grok-image") {
++		return "grok-imagine-image"
++	}
++	return modelCode
++}
++
++func qualityToResolution(quality string) string {
++	switch strings.ToLower(strings.TrimSpace(quality)) {
++	case "low", "standard", "sd", "720p":
++		return "720p"
++	default:
++		return "1080p"
++	}
++}
++
++func defaultImageMime(mimeType string) string {
++	mimeType = strings.TrimSpace(mimeType)
++	if mimeType == "" {
++		return "image/png"
++	}
++	return mimeType
++}
++
++func firstNonEmptyString(values ...string) string {
++	for _, value := range values {
++		if strings.TrimSpace(value) != "" {
++			return strings.TrimSpace(value)
++		}
++	}
++	return ""
++}
++
+ func strParam(p map[string]any, key, def string) string {
+ 	if p == nil {
+ 		return def
+diff --git a/backend/internal/provider/grok/grok_api_test.go b/backend/internal/provider/grok/grok_api_test.go
+index e02abfc9..6dbc14e5 100644
+--- /dev/null
++++ b/backend/internal/provider/grok/grok_api_test.go
+@@ -1 +1,88 @@
+-﻿
++package grok
++
++import (
++	"context"
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/unified-ai-gateway/backend/internal/provider"
++)
++
++func TestGrokImagesAPIRoute(t *testing.T) {
++	var gotPath string
++	var gotBody map[string]any
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		gotPath = r.URL.Path
++		if r.Header.Get("Authorization") != "Bearer test-key" {
++			t.Fatalf("Authorization = %q", r.Header.Get("Authorization"))
++		}
++		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
++			t.Fatalf("decode request: %v", err)
++		}
++		w.Header().Set("Content-Type", "application/json")
++		_, _ = w.Write([]byte(`{"data":[{"url":"https://cdn.example/image.png"}]}`))
++	}))
++	defer server.Close()
++
++	p := New(server.URL)
++	out, err := p.Generate(context.Background(), &provider.Request{
++		TaskID:     "task-image",
++		Kind:       provider.KindImage,
++		ModelCode:  "grok-imagine-image",
++		Prompt:     "draw a quiet lake",
++		Count:      1,
++		Credential: "test-key",
++		BaseURL:    server.URL,
++	})
++	if err != nil {
++		t.Fatalf("Generate() error = %v", err)
++	}
++	if gotPath != "/v1/images/generations" {
++		t.Fatalf("path = %q, want /v1/images/generations", gotPath)
++	}
++	if gotBody["model"] != "grok-imagine-image" || gotBody["prompt"] != "draw a quiet lake" {
++		t.Fatalf("body = %#v", gotBody)
++	}
++	if len(out.Assets) != 1 || out.Assets[0].URL != "https://cdn.example/image.png" {
++		t.Fatalf("assets = %#v", out.Assets)
++	}
++}
++
++func TestGrokXAIAPIVideoPollingRoute(t *testing.T) {
++	var paths []string
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		paths = append(paths, r.URL.Path)
++		w.Header().Set("Content-Type", "application/json")
++		switch r.URL.Path {
++		case "/v1/videos/generations":
++			_, _ = w.Write([]byte(`{"request_id":"req_123","status":"queued"}`))
++		case "/v1/videos/req_123":
++			_, _ = w.Write([]byte(`{"request_id":"req_123","status":"succeeded","video":{"url":"https://cdn.example/video.mp4","duration":6}}`))
++		default:
++			t.Fatalf("unexpected path %q", r.URL.Path)
++		}
++	}))
++	defer server.Close()
++
++	p := New(server.URL)
++	out, err := p.Generate(context.Background(), &provider.Request{
++		TaskID:     "task-video",
++		Kind:       provider.KindVideo,
++		ModelCode:  "grok-imagine-video",
++		Prompt:     "make waves move",
++		Params:     map[string]any{"duration": 6, "aspect_ratio": "16:9", "route": "xai"},
++		Credential: "test-key",
++		BaseURL:    server.URL,
++	})
++	if err != nil {
++		t.Fatalf("Generate() error = %v", err)
++	}
++	if len(paths) != 2 || paths[0] != "/v1/videos/generations" || paths[1] != "/v1/videos/req_123" {
++		t.Fatalf("paths = %#v", paths)
++	}
++	if len(out.Assets) != 1 || out.Assets[0].URL != "https://cdn.example/video.mp4" || out.Assets[0].DurationMs != 6000 {
++		t.Fatalf("assets = %#v", out.Assets)
++	}
++}
+
+

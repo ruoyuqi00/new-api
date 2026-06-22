@@ -1143,3 +1143,77 @@ Operational rule going forward:
   upstream/channel aggregation.
 - Only modify NewAPI when the public API gateway itself returns malformed
   results, bills incorrectly, or lacks an intentionally supported relay feature.
+
+### 2026-06-22 UAG Grok/xAI Media Route And Public Model Guard
+
+Decision:
+
+- Grok and Gemini must both be treated as protocol-specific media integrations,
+  not as ordinary text-chat proxy models.
+- xAI/Grok can be adapted through OpenAI-like media endpoints when the upstream
+  is xAI-compatible:
+  - image text-to-image: `/v1/images/generations`;
+  - image edit/image-to-image: `/v1/images/edits`;
+  - video create: `/v1/videos/generations`;
+  - video poll: `/v1/videos/{request_id}` for the official xAI async route.
+- Gemini/Imagen/Veo must stay on a real Gemini API / Flow / Vertex-style media
+  route, or on an upstream that explicitly documents compatible media endpoints.
+  Do not expose Gemini/Veo image or video models merely because a
+  `/v1/chat/completions` upstream accepts Gemini text model names.
+
+Code and deployment:
+
+- UAG Grok provider now supports OpenAI-like image generation/edit requests and
+  official xAI video create/poll routing.
+- UAG image/video handler routes `grok-*` and `xai-*` image models to the Grok
+  provider instead of GPT.
+- UAG OpenAI-compatible model metadata now advertises video models with
+  `/v1/videos/generations`; the older `/v1/video/generations` route remains as
+  a backward-compatible alias.
+- UAG public model list was hardened so it is derived only from enabled `model`
+  rows whose account group has at least one enabled live account.
+- The static `defaultPublicModels()` fallback was removed, and the repository
+  query now includes `HAVING live_accounts > 0` as a second guard.
+- Deployed backend image:
+  `unified-ai-gateway/backend:public-model-guard-20260622`.
+- NewAPI was not modified or restarted for this Grok/Gemini media routing pass.
+
+Production verification:
+
+| Check | Result |
+| --- | --- |
+| UAG containers | `api`, `admin`, `openai`, and `worker` running on `public-model-guard-20260622`; `uag-api` healthy. |
+| Public model list | `https://image.vyywcw.cn/api/v1/models` returns only `gpt-image-2` while Grok/Gemini/Veo accounts are not active. |
+| Internal model list | `uag-api` internal `/api/v1/models` also returns only `gpt-image-2`. |
+| OpenAI API health | `https://image-api.vyywcw.cn/v1/health` returns HTTP 200. |
+| Build verification | `docker build --no-cache -t unified-ai-gateway/backend:public-model-guard-20260622 .` completed successfully on the server. |
+
+Reproducible maintenance patches:
+
+- `patches/uag/grok-xai-media-route-20260622.patch`
+- `patches/uag/public-model-live-account-guard-20260622.patch`
+
+Operational rules:
+
+- Do not show a model in UAG just because its code exists in a pricing config.
+  The model must have a live enabled account/group behind it.
+- Do not expose Gemini/Imagen/Veo until the exact media endpoint is known and a
+  real UAG task succeeds.
+- For Grok official xAI upstreams, prefer `https://api.x.ai/v1` and the official
+  media endpoints above.
+- For OpenAI-compatible proxy upstreams, first test `/v1/models`, then the exact
+  `/v1/images/*` or `/v1/videos/*` endpoint. Text success does not prove image
+  or video success.
+
+Reference docs checked:
+
+- xAI Imagine overview:
+  https://docs.x.ai/developers/model-capabilities/imagine
+- xAI image API:
+  https://docs.x.ai/developers/rest-api-reference/inference/images
+- xAI video API:
+  https://docs.x.ai/developers/rest-api-reference/inference/videos
+- Gemini image generation:
+  https://ai.google.dev/gemini-api/docs/image-generation
+- Veo video generation:
+  https://ai.google.dev/gemini-api/docs/video
