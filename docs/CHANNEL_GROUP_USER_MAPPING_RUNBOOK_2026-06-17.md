@@ -342,3 +342,115 @@ Operational decision:
   they are text/chat only.
 - Image/video should be treated as a separate product capability, with its own
   per-call/task billing validation before exposure.
+
+## NewAPI Upstream Routing/Billing Probe - 2026-06-21
+
+User requirement:
+
+- Treat the upstream as already configured correctly unless evidence shows
+  otherwise.
+- Diagnose our local channel/protocol/pricing configuration carefully.
+- Do not copy upstream pricing; NewAPI must keep site-owned prices.
+
+What was verified:
+
+| Model/path | Result | Billing/config conclusion |
+| --- | --- | --- |
+| `gemini-2.5-flash` via `/v1/chat/completions` non-stream | HTTP 200. | Routed through NewAPI channel `2300`; billed with local `ModelPrice=0.066667` and group ratio `1`. |
+| `gemini-2.5-flash` stream | HTTP 200. | Same local fixed-price billing path; no upstream price sync involved. |
+| `gemini-3.1-flash-image` via `/v1/images/generations` | HTTP 500 from upstream adapter: only Imagen models are supported. | Do not expose this as image generation. It is only proven as a chat/text model through this upstream. |
+| `grok-3` non-stream | Upstream returned service unavailable. | Not a local price issue. The upstream Grok path is currently unhealthy. |
+| `grok-3` stream | Upstream sent only ping/empty stream data and no usable choices/content/usage. | NewAPI xAI handler previously treated this as success and billed a fixed price. This needed a local guard. |
+
+Immediate production mitigation:
+
+- Disabled NewAPI channel `2297` (`xai-grok-upstream-placeholder`) so public
+  users do not hit the unhealthy Grok upstream and get charged for empty stream
+  responses.
+- Backup before disabling the channel:
+  `/opt/newapi/backups/grok-channel-disable-20260622-000919.sql`.
+- Verified after disabling:
+  - `gemini-2.5-flash` still returns HTTP 200 through channel `2300`.
+  - `grok-3` now returns HTTP 503 `model_not_found/no available channel`
+    instead of empty HTTP 200 stream billing.
+
+Code fix prepared:
+
+- Patch stored at `patches/newapi/xai-empty-stream-guard-20260621.patch`.
+- The patch makes NewAPI's xAI handler reject empty non-stream responses and
+  empty stream responses instead of treating them as successful billable output.
+- It also falls back to local usage estimation when a non-stream xAI response
+  contains valid assistant content but omits usage.
+- Local container test passed:
+  `go test ./relay/channel/xai`.
+
+Deployment note:
+
+- The code guard is not deployed yet in this entry because the local NewAPI
+  workspace contains several unrelated pending edits. Build/deploy should be
+  done from a clean NewAPI source tree or by applying only
+  `patches/newapi/xai-empty-stream-guard-20260621.patch` to the exact release
+  source, then rebuilding a NewAPI image.
+- Until that guard is deployed and the upstream Grok path returns real choices
+  or usage, keep channel `2297` disabled.
+
+### Follow-up: OpenAI-Compatible Empty Stream Guard - 2026-06-22
+
+Additional finding:
+
+- A temporary OpenAI-compatible clone of the filled Grok channel was created
+  for probing only, using the existing stored upstream URL/key without printing
+  the key.
+- Both non-stream and stream `grok-3` probes timed out or returned upstream
+  service unavailable. This means the current Grok upstream path is unhealthy
+  even when treated as an OpenAI-compatible proxy.
+- The stream probe also exposed a local NewAPI billing risk: an upstream stream
+  that emitted no usable SSE data could still fall back to local usage
+  estimation and fixed model-price billing.
+
+Fix prepared:
+
+- Patch stored at
+  `patches/newapi/openai-xai-empty-response-guard-20260622.patch`.
+- It combines the earlier xAI empty-response guard with a generic
+  OpenAI-compatible guard:
+  - empty non-stream HTTP 200 responses are rejected as `empty_response`;
+  - empty stream responses are rejected before local usage estimation;
+  - valid content, tool calls, finish reasons, or usage still count as real
+    upstream signal.
+- Local container tests passed:
+  `go test ./relay/channel/openai ./relay/channel/xai`.
+
+Deployment:
+
+- Built NewAPI image locally:
+  `newapi:empty-response-guard-20260622`.
+- Loaded it on the production server and updated only the NewAPI service.
+- Compose backup:
+  `/opt/newapi/docker-compose.yml.bak-empty-response-guard-20260622`.
+- Running production NewAPI image after deployment:
+  `newapi:empty-response-guard-20260622`.
+- NewAPI MySQL, NewAPI Redis, Sub2API, and UAG were not recreated.
+
+Verification after deployment:
+
+- NewAPI health returned healthy.
+- `gemini-2.5-flash` through channel `2300` returned HTTP 200 with a normal
+  assistant reply and local fixed-price billing.
+- `grok-3` remained blocked because channel `2297` is disabled, returning
+  HTTP 503 `model_not_found` for both non-stream and stream. No Grok consume
+  log was created.
+- A temporary local fake upstream was used to return:
+  - non-stream HTTP 200 `{}`;
+  - stream HTTP 200 `data: [DONE]` without content or usage.
+- Both fake upstream calls returned HTTP 502 `empty_response` through NewAPI,
+  and the consume-log count for the temporary token was `0`.
+
+Operational conclusion:
+
+- NewAPI pricing remains site-owned. The fix does not import or mirror upstream
+  prices; it only prevents false-success responses from being settled.
+- Keep Grok channel `2297` disabled until the upstream returns real
+  `choices/content/usage` in both non-stream and stream probes.
+- Gemini text through channel `2300` remains usable. Image/video exposure still
+  requires endpoint-specific model IDs and per-call/task billing validation.
