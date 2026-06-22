@@ -1,0 +1,417 @@
+diff --git a/backend/internal/provider/gpt/gpt.go b/backend/internal/provider/gpt/gpt.go
+index 62ae8fd..dbe40dc 100644
+--- a/backend/internal/provider/gpt/gpt.go
++++ b/backend/internal/provider/gpt/gpt.go
+@@ -71,13 +71,17 @@ func New(defaultBase string) *Provider {
+ func (p *Provider) Name() string { return p.name }
+ 
+ type imgReq struct {
+-	Model          string `json:"model"`
+-	Prompt         string `json:"prompt"`
+-	N              int    `json:"n,omitempty"`
+-	Size           string `json:"size,omitempty"`
+-	Quality        string `json:"quality,omitempty"`
+-	Style          string `json:"style,omitempty"`
+-	ResponseFormat string `json:"response_format,omitempty"`
++	Model          string   `json:"model"`
++	Prompt         string   `json:"prompt"`
++	N              int      `json:"n,omitempty"`
++	Size           string   `json:"size,omitempty"`
++	Quality        string   `json:"quality,omitempty"`
++	Style          string   `json:"style,omitempty"`
++	ResponseFormat string   `json:"response_format,omitempty"`
++	Image          string   `json:"image,omitempty"`
++	Images         []string `json:"images,omitempty"`
++	Mask           string   `json:"mask,omitempty"`
++	InputFidelity  string   `json:"input_fidelity,omitempty"`
+ }
+ 
+ type imgRespItem struct {
+@@ -152,24 +156,36 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 	if req.Credential == "" {
+ 		return nil, fmt.Errorf("gpt provider missing credential")
+ 	}
+-	if isGPTImage2(req.ModelCode) {
++	if isGPTImage2(req.ModelCode) && !wantsImagesAPIRoute(req) {
+ 		if shouldUseWebImage2(req) {
+ 			return p.generateImage2Web(ctx, req)
+ 		}
+ 		return p.generateImage2(ctx, req)
+ 	}
+ 
++	return p.generateImagesAPI(ctx, req)
++}
++
++func (p *Provider) generateImagesAPI(ctx context.Context, req *provider.Request) (*provider.Result, error) {
+ 	base := req.BaseURL
+ 	if base == "" {
+ 		base = p.defaultURL
+ 	}
+ 	base = strings.TrimRight(base, "/")
+-	url := base + "/v1/images/generations"
+ 
+ 	count := req.Count
+ 	if count <= 0 {
+ 		count = 1
+ 	}
++	edit := isImagesAPIEditRequest(req)
++	refs := compactRefs(req.RefAssets)
++	if edit && len(refs) == 0 {
++		return nil, fmt.Errorf("gpt image edit requires at least one image")
++	}
++	url := base + "/v1/images/generations"
++	if edit {
++		url = base + "/v1/images/edits"
++	}
+ 
+ 	body := imgReq{
+ 		Model:          req.ModelCode,
+@@ -180,6 +196,14 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 		Style:          strParam(req.Params, "style", ""),
+ 		ResponseFormat: "url",
+ 	}
++	if edit {
++		body.Image = refs[0]
++		if len(refs) > 1 {
++			body.Images = refs
++		}
++		body.Mask = firstStringParam(req.Params, "mask", "mask_image_url")
++		body.InputFidelity = strParam(req.Params, "input_fidelity", "")
++	}
+ 	payload, _ := json.Marshal(body)
+ 
+ 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+@@ -191,29 +215,94 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 	httpReq.Header.Set("User-Agent", "kleinai/1.0")
+ 
+ 	start := time.Now()
++	logUpstream(ctx, req, provider.UpstreamLogEntry{
++		Provider: "gpt",
++		Stage:    "images.start",
++		Method:   "POST",
++		URL:      url,
++		Meta: map[string]any{
++			"model":     req.ModelCode,
++			"count":     count,
++			"edit":      edit,
++			"ref_count": len(refs),
++			"size":      body.Size,
++		},
++	})
+ 	client, err := p.httpClient(req.ProxyURL)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 	resp, err := client.Do(httpReq)
+ 	if err != nil {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{
++			Provider: "gpt",
++			Stage:    "images.request",
++			Method:   "POST",
++			URL:      url,
++			Error:    err.Error(),
++		})
+ 		return nil, fmt.Errorf("gpt http: %w", err)
+ 	}
+ 	defer resp.Body.Close()
+ 
+ 	raw, _ := io.ReadAll(resp.Body)
+ 	if resp.StatusCode >= 400 {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{
++			Provider:        "gpt",
++			Stage:           "images.failed",
++			Method:          "POST",
++			URL:             url,
++			StatusCode:      resp.StatusCode,
++			ResponseExcerpt: snippet(raw, 600),
++			Meta: map[string]any{
++				"model": req.ModelCode,
++				"edit":  edit,
++			},
++		})
+ 		return nil, fmt.Errorf("gpt %d: %s", resp.StatusCode, snippet(raw, 240))
+ 	}
+ 
+ 	var out imgResp
+ 	if err := json.Unmarshal(raw, &out); err != nil {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{
++			Provider:        "gpt",
++			Stage:           "images.decode",
++			Method:          "POST",
++			URL:             url,
++			StatusCode:      resp.StatusCode,
++			ResponseExcerpt: snippet(raw, 600),
++			Error:           err.Error(),
++		})
+ 		return nil, fmt.Errorf("gpt decode: %w (raw=%s)", err, snippet(raw, 240))
+ 	}
+ 	if out.Error != nil && out.Error.Message != "" {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{
++			Provider:        "gpt",
++			Stage:           "images.failed",
++			Method:          "POST",
++			URL:             url,
++			StatusCode:      resp.StatusCode,
++			ResponseExcerpt: out.Error.Message,
++			Meta: map[string]any{
++				"model": req.ModelCode,
++				"edit":  edit,
++			},
++		})
+ 		return nil, fmt.Errorf("gpt: %s", out.Error.Message)
+ 	}
+ 	if len(out.Data) == 0 {
++		logUpstream(ctx, req, provider.UpstreamLogEntry{
++			Provider:        "gpt",
++			Stage:           "images.failed",
++			Method:          "POST",
++			URL:             url,
++			StatusCode:      resp.StatusCode,
++			ResponseExcerpt: "gpt returned 0 image",
++			Meta: map[string]any{
++				"model": req.ModelCode,
++				"edit":  edit,
++			},
++		})
+ 		return nil, fmt.Errorf("gpt returned 0 image")
+ 	}
+ 
+@@ -233,6 +322,17 @@ func (p *Provider) Generate(ctx context.Context, req *provider.Request) (*provid
+ 		assets = append(assets, a)
+ 	}
+ 
++	logUpstream(ctx, req, provider.UpstreamLogEntry{
++		Provider: "gpt",
++		Stage:    "images.success",
++		Method:   "POST",
++		URL:      url,
++		Meta: map[string]any{
++			"model":  req.ModelCode,
++			"edit":   edit,
++			"assets": len(assets),
++		},
++	})
+ 	return &provider.Result{
+ 		TaskID:  req.TaskID,
+ 		Assets:  assets,
+@@ -1472,6 +1572,34 @@ func wantsAPIImage2Route(req *provider.Request) bool {
+ 	return route == "api" || route == "openai" || route == "newapi"
+ }
+ 
++func wantsImagesAPIRoute(req *provider.Request) bool {
++	if req == nil {
++		return false
++	}
++	route := strings.ToLower(strings.TrimSpace(strParam(req.Params, "route", strParam(req.Params, "provider_route", ""))))
++	return route == "images" || route == "image" || route == "images_api" || route == "openai_images" || route == "newapi_images"
++}
++
++func isImagesAPIEditRequest(req *provider.Request) bool {
++	if req == nil {
++		return false
++	}
++	return req.Mode == provider.ModeI2I ||
++		len(compactRefs(req.RefAssets)) > 0 ||
++		strings.EqualFold(strParam(req.Params, "operation", ""), "edit")
++}
++
++func compactRefs(refs []string) []string {
++	out := make([]string, 0, len(refs))
++	for _, ref := range refs {
++		ref = strings.TrimSpace(ref)
++		if ref != "" {
++			out = append(out, ref)
++		}
++	}
++	return out
++}
++
+ func isGPTImage2(model string) bool {
+ 	return imageToolModel(model) == "gpt-image-2"
+ }
+diff --git a/backend/internal/provider/gpt/image2_model_test.go b/backend/internal/provider/gpt/image2_model_test.go
+index 14ed52a..452525b 100644
+--- a/backend/internal/provider/gpt/image2_model_test.go
++++ b/backend/internal/provider/gpt/image2_model_test.go
+@@ -1,8 +1,14 @@
+ package gpt
+ 
+ import (
++	"context"
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
+ 	"strings"
+ 	"testing"
++
++	"github.com/unified-ai-gateway/backend/internal/provider"
+ )
+ 
+ func TestMainModelForImage2UsesImageModel(t *testing.T) {
+@@ -37,3 +43,100 @@ func TestParseCompletedJSONResponse(t *testing.T) {
+ 		t.Fatalf("unexpected image payload data=%q url=%q", data, imageURL)
+ 	}
+ }
++
++func TestGenerateImage2ImagesAPIRouteUsesGenerationsEndpoint(t *testing.T) {
++	var gotPath string
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		gotPath = r.URL.Path
++		var body imgReq
++		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
++			t.Fatalf("decode request: %v", err)
++		}
++		if body.Model != "gpt-image-2" || body.Prompt != "draw a cat" || body.N != 1 {
++			t.Fatalf("unexpected request body: %#v", body)
++		}
++		if body.Image != "" || len(body.Images) != 0 {
++			t.Fatalf("generation request should not include edit images: %#v", body)
++		}
++		_, _ = w.Write([]byte(`{"created":1,"data":[{"url":"https://example.com/out.png"}]}`))
++	}))
++	defer srv.Close()
++
++	out, err := New("").Generate(context.Background(), &provider.Request{
++		Kind:       provider.KindImage,
++		Mode:       provider.ModeT2I,
++		ModelCode:  "gpt-image-2",
++		Prompt:     "draw a cat",
++		Count:      1,
++		BaseURL:    srv.URL,
++		Credential: "test-key",
++		Params:     map[string]any{"route": "images"},
++	})
++	if err != nil {
++		t.Fatalf("Generate error: %v", err)
++	}
++	if gotPath != "/v1/images/generations" {
++		t.Fatalf("path = %q, want /v1/images/generations", gotPath)
++	}
++	if out == nil || len(out.Assets) != 1 || out.Assets[0].URL == "" {
++		t.Fatalf("unexpected result: %#v", out)
++	}
++}
++
++func TestGenerateImage2ImagesAPIRouteUsesEditsEndpointForReferences(t *testing.T) {
++	var gotPath string
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		gotPath = r.URL.Path
++		var body imgReq
++		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
++			t.Fatalf("decode request: %v", err)
++		}
++		if body.Image != "https://example.com/in.png" {
++			t.Fatalf("image = %q, want reference URL", body.Image)
++		}
++		_, _ = w.Write([]byte(`{"created":1,"data":[{"b64_json":"ZmFrZS1pbWFnZQ=="}]}`))
++	}))
++	defer srv.Close()
++
++	out, err := New("").Generate(context.Background(), &provider.Request{
++		Kind:       provider.KindImage,
++		Mode:       provider.ModeI2I,
++		ModelCode:  "gpt-image-2",
++		Prompt:     "change background",
++		Count:      1,
++		BaseURL:    srv.URL,
++		Credential: "test-key",
++		RefAssets:  []string{"https://example.com/in.png"},
++		Params:     map[string]any{"route": "images"},
++	})
++	if err != nil {
++		t.Fatalf("Generate error: %v", err)
++	}
++	if gotPath != "/v1/images/edits" {
++		t.Fatalf("path = %q, want /v1/images/edits", gotPath)
++	}
++	if out == nil || len(out.Assets) != 1 || !strings.HasPrefix(out.Assets[0].URL, "data:image/png;base64,") {
++		t.Fatalf("unexpected result: %#v", out)
++	}
++}
++
++func TestGenerateImage2ImagesAPIRouteRejectsEmptyImagePayload(t *testing.T) {
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		_, _ = w.Write([]byte(`{"created":1,"data":[]}`))
++	}))
++	defer srv.Close()
++
++	_, err := New("").Generate(context.Background(), &provider.Request{
++		Kind:       provider.KindImage,
++		Mode:       provider.ModeT2I,
++		ModelCode:  "gpt-image-2",
++		Prompt:     "draw a cat",
++		Count:      1,
++		BaseURL:    srv.URL,
++		Credential: "test-key",
++		Params:     map[string]any{"route": "images"},
++	})
++	if err == nil || !strings.Contains(err.Error(), "0 image") {
++		t.Fatalf("expected empty image error, got %v", err)
++	}
++}
+diff --git a/backend/internal/service/generation_service.go b/backend/internal/service/generation_service.go
+index afc1135..21add82 100644
+--- a/backend/internal/service/generation_service.go
++++ b/backend/internal/service/generation_service.go
+@@ -641,7 +641,7 @@ func shouldUseGPTWebRoute(params map[string]any) bool {
+ 
+ func wantsGPTAPIRoute(params map[string]any) bool {
+ 	route := strings.ToLower(strings.TrimSpace(strParamAny(params, "route", strParamAny(params, "provider_route", ""))))
+-	return route == "api" || route == "openai" || route == "newapi"
++	return route == "api" || route == "openai" || route == "newapi" || route == "images" || route == "image" || route == "images_api" || route == "openai_images" || route == "newapi_images"
+ }
+ 
+ func isCodexOAuthAccount(acc *model.Account) bool {
+diff --git a/backend/internal/handler/openai_handler.go b/backend/internal/handler/openai_handler.go
+index ff9f6a0..2c24a4f 100644
+--- a/backend/internal/handler/openai_handler.go
++++ b/backend/internal/handler/openai_handler.go
+@@ -216,7 +216,7 @@ func (h *OpenAIHandler) createImage(c *gin.Context, edit bool) {
+ 		"callback_url":    req.CallbackURL,
+ 	})
+ 	if strings.EqualFold(req.Model, "gpt-image-2") && strings.TrimSpace(fmt.Sprint(params["route"])) == "" && strings.TrimSpace(fmt.Sprint(params["provider_route"])) == "" {
+-		params["route"] = "newapi"
++		params["route"] = "images"
+ 	}
+ 	if edit {
+ 		params["operation"] = "edit"
+diff --git a/backend/internal/handler/generation_handler.go b/backend/internal/handler/generation_handler.go
+index d30d366..779929d 100644
+--- a/backend/internal/handler/generation_handler.go
++++ b/backend/internal/handler/generation_handler.go
+@@ -94,6 +94,9 @@ func (h *GenerationHandler) CreateImage(c *gin.Context) {
+ 	if req.Quality != "" {
+ 		params["quality"] = req.Quality
+ 	}
++	if strings.EqualFold(req.ModelCode, "gpt-image-2") && strings.TrimSpace(fmt.Sprint(params["route"])) == "" && strings.TrimSpace(fmt.Sprint(params["provider_route"])) == "" {
++		params["route"] = "images"
++	}
+ 
+ 	mode := req.Mode
+ 	if mode == "" {
+diff --git a/frontend/apps/user/src/pages/create/CreateImagePage.tsx b/frontend/apps/user/src/pages/create/CreateImagePage.tsx
+index 1d18f37..404525a 100644
+--- a/frontend/apps/user/src/pages/create/CreateImagePage.tsx
++++ b/frontend/apps/user/src/pages/create/CreateImagePage.tsx
+@@ -79,7 +79,7 @@ export default function CreateImagePage() {
+         count,
+         ratio,
+         quality,
+-        params: model === 'gpt-image-2' ? { route: 'api', main_model: 'gpt-image-2' } : undefined,
++        params: model === 'gpt-image-2' ? { route: 'images' } : undefined,
+       }),
+     onSuccess: (t) => {
+       setTask(t);
+diff --git a/frontend/apps/user/src/pages/create/CreateStudioPage.tsx b/frontend/apps/user/src/pages/create/CreateStudioPage.tsx
+index d225b14..eef642b 100644
+--- a/frontend/apps/user/src/pages/create/CreateStudioPage.tsx
++++ b/frontend/apps/user/src/pages/create/CreateStudioPage.tsx
+@@ -261,7 +261,7 @@ export default function CreateStudioPage() {
+       params: {
+         resolution: imageResolution,
+         quality: 'high',
+-        route: imageModel === 'gpt-image-2' ? 'api' : undefined,
++        route: imageModel === 'gpt-image-2' ? 'images' : undefined,
+       },
+     }),
+     onSuccess: (t) => handleTask(t),

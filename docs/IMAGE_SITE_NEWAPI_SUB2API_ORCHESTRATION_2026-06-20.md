@@ -1069,3 +1069,77 @@ Operational rules:
   because they are available through `/v1/chat/completions`.
 - Keep UAG model visibility tied to active provider accounts and smoke-tested
   output payloads.
+
+### 2026-06-22 UAG GPT Image2 Images API Route Fix
+
+Decision:
+
+- The GPT Image2 billing/protocol mismatch belongs in the image/video site
+  layer, not in NewAPI.
+- NewAPI should remain the stable user/API gateway for user keys, billing,
+  grouping, and channel aggregation.
+- UAG must adapt image-site requests into the exact upstream image protocol:
+  text-to-image uses `/v1/images/generations`, and image-to-image/edit uses
+  `/v1/images/edits`.
+- The older `/v1/responses` plus `image_generation` tool path is retained only
+  as an explicit fallback route. It must not be the default for GPT Image2,
+  because it can make a proxy upstream treat image work like text/tool work and
+  distort per-call billing.
+
+Production change:
+
+- Updated the UAG GPT provider so `route=images` dispatches to the OpenAI Images
+  API shape.
+- Updated the UAG OpenAI-compatible image handlers and user create pages so
+  `gpt-image-2` defaults to `route=images`.
+- Updated production UAG `model.default_params` for `gpt-image-2` to:
+  `{"route":"images","quality":"high","resolution":"1K"}`.
+- Synced UAG production code to `/opt/unified-ai-gateway`.
+- Built and deployed UAG images:
+  - `unified-ai-gateway/backend:image-api-route-20260622`
+  - `unified-ai-gateway/user-web:image-api-route-20260622`
+- Restarted only UAG services: `api`, `admin`, `openai`, `worker`, and
+  `user-web`.
+- NewAPI was not modified or restarted for this fix.
+
+Backups and reproducibility:
+
+- Server code backup:
+  `/opt/unified-ai-gateway/backups/code-image-api-route-20260622/`.
+- Compose backup:
+  `/opt/unified-ai-gateway/backups/docker-compose-image-api-route-20260622.yml`.
+- DB model/group backup:
+  `/opt/unified-ai-gateway/backups/uag-image-route-model-backup-*.sql`.
+- Reproducible code patch stored in this maintenance repo:
+  `patches/uag/image2-images-api-route-20260622.patch`.
+
+Verification:
+
+| Check | Result |
+| --- | --- |
+| UAG containers | `api`, `admin`, `openai`, `worker`, and `user-web` running on `image-api-route-20260622`; `uag-api` healthy. |
+| UAG model config | `gpt-image-2` default params now include `route=images`. |
+| User model list | `https://image.vyywcw.cn/api/v1/models` returns only `gpt-image-2`, unit price `400`. |
+| OpenAI API health | `https://image-api.vyywcw.cn/v1/health` returns HTTP 200. |
+| Backend tests | `go test -count=1 ./internal/provider/gpt ./internal/service ./internal/handler` passed on the server with Docker Go. |
+
+Smoke-test note:
+
+- A live image generation request intentionally was not forced during this
+  maintenance pass because it would consume a real upstream image call.
+- The next manual GPT Image2 text-to-image request should create
+  `generation_upstream_log` rows with stage `images.start/images.success` and
+  path `/v1/images/generations`.
+- The next image-to-image/edit request should create `images.start/images.success`
+  rows with path `/v1/images/edits`.
+- If those requests fail because NewAPI-as-upstream rejects `/v1/images/*`, do
+  not patch NewAPI automatically. Either point UAG directly at an image-capable
+  upstream or explicitly approve a separate NewAPI image bridge change.
+
+Operational rule going forward:
+
+- Fix image-site protocol and task-shape problems in UAG first.
+- Use NewAPI for user-facing API keys, user groups, quotas, recharge, and
+  upstream/channel aggregation.
+- Only modify NewAPI when the public API gateway itself returns malformed
+  results, bills incorrectly, or lacks an intentionally supported relay feature.
