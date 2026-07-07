@@ -435,3 +435,53 @@ Proceed with Phase 0 inventory and Phase 1 GPT text pools first. Keep
 `provider-mixed`, Kiro, Windsurf, and other adapter-heavy pools out of the first
 cutover. Treat `gpt-image-2` as a separate media migration with stricter retry
 and billing checks.
+
+## Production Migration Record
+
+2026-07-07 18:50-19:00 Asia/Shanghai:
+
+- Server: `154.219.122.197`
+- Backup directory:
+  `/opt/migration-backups/yuapi-sub2api-20260707185017`
+- Backups:
+  - `newapi.sql.gz`
+  - `sub2api.sql.gz`
+  - `SHA256SUMS`
+- Import SQL:
+  `/opt/migration-backups/yuapi-sub2api-20260707185017/newapi_import_sub2_openai.sql`
+- Redacted preview:
+  `/opt/migration-backups/yuapi-sub2api-20260707185017/newapi_import_sub2_openai_preview.tsv`
+- Rollback SQL:
+  `/opt/migration-backups/yuapi-sub2api-20260707185017/rollback_newapi_sub2_openai_migration.sql`
+
+Applied scope:
+
+- Migrated Sub2API OpenAI `apikey` accounts for:
+  - `gpt-plus`
+  - `gpt-pro` -> existing YuAPI group `gpt-pro原价版`
+- Skipped Anthropic / CC / Kiro-style pools.
+- Skipped one duplicate key already present in YuAPI.
+- Did not migrate `gpt-team`, because the Sub2API group had no account binding
+  in the production inventory.
+- Did not migrate image routes in this pass.
+
+Result:
+
+```text
+migrated_channels status=1 count=6
+migrated_channels status=2 count=5
+migrated_abilities enabled=1 count=34
+migrated_abilities enabled=0 count=28
+bridge channel 2294 sub2api-gpt-plus status=2
+bridge channel 2295 sub2api-gpt-pro status=2
+newapi HTTP / = 200
+newapi container = healthy
+```
+
+Safety notes:
+
+- Sub2API data was not deleted or modified.
+- NewAPI bridge channels were disabled, not deleted.
+- Imported YuAPI channels are tagged `sub2-account-<id>`.
+- The rollback SQL restores the plus/pro bridge and disables imported direct
+  channels without deleting them.
