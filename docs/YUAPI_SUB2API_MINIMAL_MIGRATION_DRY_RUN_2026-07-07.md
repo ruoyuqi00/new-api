@@ -478,6 +478,22 @@ newapi HTTP / = 200
 newapi container = healthy
 ```
 
+Upstream smoke:
+
+```text
+gpt-plus / gpt-5.4-mini HTTP 200
+  log id 6499, token id 74, channel id 2323
+  channel: sub2 gpt-plus #7930 plus (0.08) https://mdkj.lol
+  tag: sub2-account-7930
+
+gpt-pro原价版 / gpt-5.4-mini HTTP 200
+  log id 6500, token id 88, channel id 2308
+  channel: https://mdkj.lol/ 0.1
+
+bridge 2294 sub2api-gpt-plus status=2
+bridge 2295 sub2api-gpt-pro status=2
+```
+
 Safety notes:
 
 - Sub2API data was not deleted or modified.
