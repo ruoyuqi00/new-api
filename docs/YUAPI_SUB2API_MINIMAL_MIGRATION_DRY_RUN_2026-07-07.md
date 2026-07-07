@@ -551,3 +551,55 @@ normal user-token smoke after disabling 2326:
 forced disabled-channel check:
   channel 2326 HTTP 403, "channel disabled"
 ```
+
+## Plus / Pro Load Smoke
+
+2026-07-07 follow-up load smoke:
+
+- The default YuAPI user concurrency limiter is active. With the default
+  `UserConcurrencyLimit=5`, single-token tests above 5 concurrent requests
+  returned expected `429 concurrent request limit reached` responses. This is
+  an ingress/user protection layer, not a channel-pool failure.
+- To test backend pool behavior, `UserConcurrencyLimit` was temporarily set to
+  `80`, YuAPI was restarted, load smoke was run, then the temporary option was
+  deleted and YuAPI was restarted again. The database has no remaining explicit
+  `UserConcurrencyLimit` override and the service is back on the default limit.
+
+Backend pool smoke with the limiter temporarily raised:
+
+```text
+plus / gpt-5.4-mini / concurrency 20:
+  19/20 HTTP 200, 1 client timeout
+  channels: 2322=5, 2323=8, 2324=6
+  note: 2324 showed long-tail latency under load.
+
+plus / gpt-5.4-mini / concurrency 50:
+  48/50 HTTP 200, 2 client timeouts
+  channels: 2322=21, 2323=20, 2324=7
+  note: timeouts correlated with slow 2324 traffic.
+
+pro / gpt-5.4-mini / concurrency 20:
+  20/20 HTTP 200
+  channels: 2306=6, 2308=7, 2311=2, 2318=5
+
+pro / gpt-5.4-mini / concurrency 50:
+  50/50 HTTP 200
+  channels: 2306=14, 2308=9, 2311=7, 2318=20
+```
+
+Action taken after the plus long-tail result:
+
+- Channel `2324` (`sub2-account-7935`, `ppsubapi.com`) stayed enabled but was
+  moved from primary priority `120` to fallback priority `80`.
+- Its key, status, concurrency setting, and Sub2API source data were not
+  modified.
+
+Retest after moving `2324` to fallback:
+
+```text
+plus / gpt-5.4-mini / concurrency 50:
+  50/50 HTTP 200
+  p50=3269ms, p95=5559ms, max=32048ms
+  channels: 2322=22, 2323=28
+  error samples: none
+```
