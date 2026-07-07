@@ -1,0 +1,437 @@
+# YuAPI / Sub2API Minimal Migration Dry Run - 2026-07-07
+
+This document is the non-invasive migration worksheet for consolidating the
+production stack so only YuAPI/NewAPI remains as the public service, database,
+and maintenance target.
+
+It intentionally does not contain real API keys, OAuth refresh tokens,
+passwords, account payloads, or production database credentials.
+
+## Scope
+
+Target shape:
+
+- One public API/admin service: YuAPI/NewAPI.
+- One YuAPI database and one YuAPI Redis.
+- No hidden runtime hop from YuAPI to Sub2API after cutover.
+- Sub2API remains only as historical reference and patch source.
+
+Out of scope for the first pass:
+
+- Importing Sub2API Ent tables into YuAPI.
+- Porting the full Sub2API account scheduler.
+- Migrating provider adapter runtimes before their route, model, and account
+  health behavior is proven in YuAPI.
+- Treating a successful single request as account-pool equivalence.
+
+## Source Material Read
+
+- `BASELINE_PROJECT_REMOTE_PRODUCTION_2026-07-07.md`
+- `sub2api-private/docs/CHANNEL_GROUP_USER_MAPPING_RUNBOOK_2026-06-17.md`
+- `sub2api-private/planning/PROVIDER_ACCOUNT_OPERATIONS_GUIDE.md`
+- `sub2api-private/deploy/docker-compose.yml`
+- `sub2api-private/deploy/config.example.yaml`
+- YuAPI channel selection, retry, affinity, Codex, and image relay code.
+- Sub2API account, gateway scheduler, failover, concurrency, group, and account
+  schema code.
+
+## Hard Guardrails
+
+1. Do not merge YuCore/new-api snapshot UI work into the production feature line
+   as part of this migration.
+2. Do not keep Sub2API as a private upstream behind YuAPI in the final design.
+3. Do not migrate secrets through Markdown, git patches, shell history, or
+   chat logs.
+4. Do not collapse stateful OAuth/account pools into one YuAPI multi-key
+   channel.
+5. Do not auto-disable accounts/channels on transient pool errors such as 429,
+   529, ordinary 5xx, temporary empty response, or provider overload.
+6. Do not expose image/video models until their exact media endpoint has passed
+   smoke. Text-model success is not media success.
+
+## Known Production Pools From Docs
+
+| Source area | Current known boundary | Target YuAPI boundary | First-pass decision | Risk |
+| --- | --- | --- | --- | --- |
+| GPT Team | `gpt-team` Sub2API group via `newapi-bridge-gpt-team` | YuAPI group `gpt-team`, direct YuAPI channels | Migrate first | Medium |
+| GPT Plus | `gpt-plus` Sub2API group via `newapi-bridge-gpt-plus` | YuAPI group `gpt-plus`, direct YuAPI channels | Migrate first | Medium |
+| GPT Pro | `gpt-pro` Sub2API group via `newapi-bridge-gpt-pro` | YuAPI group `gpt-pro`, direct YuAPI channels | Migrate first | Medium |
+| GPT Image2 | `gpt-image2-newapi`, only proven visible image model `gpt-image-2` | YuAPI image-capable channel(s), `gpt-image-2` only | Migrate separately with single-upstream-attempt policy | High |
+| Provider mixed | `provider-mixed`, exclusive, contains Windsurf/Kiro internal accounts with model routing | Do not flatten into GPT groups | Defer until adapter path is designed | High |
+| Kiro | `kiro-gateway-internal-anthropic` inside `provider-mixed` | Future YuAPI channel or dedicated adapter bridge | Defer | High |
+| Windsurf | `windsurf-internal-anthropic` inside `provider-mixed` | Future YuAPI channel or dedicated adapter bridge | Defer | High |
+
+Account counts, exact account IDs, key status, quota windows, and current
+runtime errors are not present in this workspace. They must be pulled from a
+read-only DB inventory before generating import data.
+
+## Account Classification Rules
+
+| Class | Examples | YuAPI representation | Notes |
+| --- | --- | --- | --- |
+| A. Plain API-key, homogeneous, low-risk | OpenAI-compatible API keys with same base URL, same model scope, same billing behavior | One YuAPI multi-key channel is allowed | Only use when per-key concurrency/cooldown/sticky is not important. |
+| B. Plain API-key, production-important | Tiered GPT pools, account-specific base URL/proxy/model mapping, account-specific quota | One YuAPI channel per account/key | Better logs, targeted disable, weighted routing, safer rollback. |
+| C. OpenAI/Codex OAuth/subscription | Codex/ChatGPT subscription accounts | One YuAPI Codex channel per account | Keep channel affinity and Codex credential refresh enabled. |
+| D. Image generation | `gpt-image-2` and future real image endpoints | Dedicated YuAPI image channel(s) | Avoid duplicate upstream billing; do not retry image generation blindly. |
+| E. Provider adapters | Kiro, Windsurf, Antigravity, Claude-like internal adapters | Defer or build a dedicated YuAPI adapter path | Not a phase-1 bulk migration target. |
+
+## Scheduler Equivalence Matrix
+
+| Behavior | Sub2API behavior | YuAPI current behavior | Migration action |
+| --- | --- | --- | --- |
+| Group boundary | API key group selects channel/account pool | Token group selects channels/abilities | Preserve group names where possible. |
+| Model mapping | Channel and account mapping can both affect final upstream model | Channel model mapping is available | Export both mapping layers; fold only proven mappings into YuAPI channel mapping. |
+| Priority direction | Lower number is higher priority | Higher number is higher priority | Reverse during conversion. Do not copy raw priority. |
+| Weighted routing | Priority, load, LRU, optional reset window | Priority layer plus weight random | Use one-channel-per-account for important pools; set explicit priority/weight. |
+| Per-account concurrency | Redis account slots and wait plans | No equivalent per-channel account slot | Do not assume equivalence. Optional later patch: YuAPI channel concurrency gate. |
+| Load awareness | Batch load rate, waiting count, LRU | No per-channel load score | Accept for low-risk API-key pools only. High-risk pools stay deferred. |
+| Temporary cooldown | Rate-limit reset, overload, temp unschedulable, selection cooldown | Auto-disable or retry, no time-based channel cooldown | Configure not to auto-ban transient errors. Optional later patch: channel/model cooldown cache. |
+| Sticky session | Account binding by session, with health checks and clear rules | Channel affinity rules by headers/body/context | Enable affinity for Codex/CLI style traffic. Be strict where session continuity matters. |
+| Same-account retry | Retry same account for selected transient errors before switching | Retry generally selects again by channel priority/weight | Do not rely on same-account semantics in phase 1. |
+| OAuth refresh | Account credential lifecycle and refresh paths | YuAPI has Codex refresh support | Codex can migrate earlier; other OAuth providers need case-by-case treatment. |
+| Image billing safety | Image-specific single-attempt/wait behavior documented in UAG/Sub2API docs | YuAPI has image empty-response and b64 fallback guards | Keep `gpt-image-2` isolated and disable broad retry for paid image work. |
+
+## Target YuAPI Settings To Verify
+
+Before importing channels, verify these YuAPI options in admin settings or DB:
+
+- `RetryTimes`: enough to try intended fallback priority layers, but not so high
+  that image or sticky workloads duplicate expensive upstream work.
+- `AutomaticDisableChannelEnabled`: enabled only with conservative status rules.
+- `AutomaticDisableStatusCodes`: keep to hard-auth failures such as `401` unless
+  a specific provider is known safe to ban.
+- `AutomaticRetryStatusCodes`: allow transient retry, but review `400`, `429`,
+  `5xx`, and image routes separately.
+- `channel_affinity_setting`: keep Codex/CLI sticky rules; decide per rule
+  whether `skip_retry_on_failure` should be strict.
+- Group ratios, model ratios, image ratios, and per-call image prices.
+- Error log recording and admin visibility for multi-key index/channel ID.
+
+## Dry-Run Inventory Queries
+
+Run these read-only queries against the Sub2API production database from a safe
+maintenance shell. Do not copy credential JSON or key values into the result.
+
+### Groups
+
+```sql
+select
+  id,
+  name,
+  platform,
+  status,
+  is_exclusive,
+  rate_multiplier,
+  allow_image_generation,
+  image_rate_independent,
+  image_rate_multiplier,
+  model_routing_enabled,
+  supported_model_scopes,
+  require_oauth_only,
+  require_privacy_set,
+  rpm_limit,
+  deleted_at
+from groups
+where deleted_at is null
+order by name;
+```
+
+### Account Pool Summary
+
+```sql
+select
+  a.id,
+  a.name,
+  a.platform,
+  a.type,
+  a.status,
+  a.schedulable,
+  a.concurrency,
+  a.load_factor,
+  a.priority,
+  a.rate_multiplier,
+  a.auto_pause_on_expired,
+  a.expires_at,
+  a.rate_limit_reset_at,
+  a.overload_until,
+  a.temp_unschedulable_until,
+  a.session_window_end,
+  count(ag.group_id) as group_count
+from accounts a
+left join account_groups ag on ag.account_id = a.id
+where a.deleted_at is null
+group by a.id
+order by a.platform, a.priority, a.id;
+```
+
+### Group To Account Binding
+
+```sql
+select
+  g.id as group_id,
+  g.name as group_name,
+  a.id as account_id,
+  a.name as account_name,
+  a.platform,
+  a.type,
+  a.status,
+  a.schedulable,
+  a.concurrency,
+  a.priority as account_priority,
+  ag.priority as binding_priority
+from account_groups ag
+join groups g on g.id = ag.group_id and g.deleted_at is null
+join accounts a on a.id = ag.account_id and a.deleted_at is null
+order by g.name, a.priority, a.id;
+```
+
+### Channel / Model Mapping Summary
+
+```sql
+select
+  c.id,
+  c.name,
+  c.platform,
+  c.status,
+  c.restrict_models,
+  c.billing_model_source,
+  c.model_mapping,
+  c.features_config
+from channels c
+where c.deleted_at is null
+order by c.id;
+```
+
+### Bridge Keys To Retire
+
+```sql
+select
+  id,
+  name,
+  group_id,
+  status,
+  expires_at,
+  created_at,
+  last_used_at
+from api_keys
+where deleted_at is null
+  and (
+    name like 'newapi-bridge-%'
+    or name like 'server-provider-%'
+  )
+order by name;
+```
+
+## Conversion Rules
+
+### Groups
+
+Sub2API group names should become YuAPI groups when they are user-facing product
+tiers:
+
+- `gpt-team` -> YuAPI `gpt-team`
+- `gpt-plus` -> YuAPI `gpt-plus`
+- `gpt-pro` -> YuAPI `gpt-pro`
+
+Internal bridge groups should not become public products unless they already
+represent a user-facing tier.
+
+### Accounts To Channels
+
+For each Sub2API account selected for phase 1:
+
+| Sub2API field | YuAPI target | Rule |
+| --- | --- | --- |
+| `platform/type` | channel type | Map only if YuAPI supports that provider path. |
+| credential key | `channels.key` | Store one account per channel unless Class A multi-key is approved. |
+| group binding | `channels.group` and abilities | Use comma group list only when the same account truly serves multiple YuAPI groups. |
+| model support | `channels.models` | Use explicit list; avoid catch-all for paid media. |
+| account model mapping | `channels.model_mapping` | Merge with channel mapping after smoke. |
+| `priority` | `channels.priority` | Reverse direction. Example: YuAPI priority = 100000 - Sub2API priority. |
+| load/concurrency | no native target | Document as lost behavior; do not use multi-key for these accounts. |
+| `rate_multiplier` | pricing/group ratio | Preserve only after checking billing semantics. |
+| proxy | channel setting/proxy if supported | Do not silently drop proxy-bound accounts. |
+
+### Multi-Key Policy
+
+Use multi-key only when all keys share:
+
+- Same provider type.
+- Same base URL and proxy behavior.
+- Same model whitelist.
+- Same billing multiplier.
+- No account-specific OAuth refresh.
+- No need for per-account cooldown, concurrency, or sticky routing.
+
+Otherwise create one YuAPI channel per source account.
+
+### Priority And Weight
+
+Use explicit priority tiers:
+
+| Source intent | Example Sub2API priority | Suggested YuAPI priority |
+| --- | ---: | ---: |
+| Primary | 0-20 | 1000 |
+| Secondary | 21-50 | 500 |
+| Emergency fallback | 51+ | 100 |
+
+Within the same priority tier, use `weight` only for intentional traffic share.
+If preserving Sub2API LRU/load behavior matters, prefer one channel per account
+and keep weights low/equal until production smoke confirms distribution.
+
+## Phase Plan
+
+### Phase 0 - Inventory Only
+
+- Run the read-only inventory queries.
+- Classify each account as A/B/C/D/E.
+- Mark accounts with active cooldown, overload, temp unschedulable, expired
+  credentials, missing privacy setting, or provider adapter dependency.
+- Produce a redacted CSV with only IDs, names, groups, provider type, model
+  scope, priority, status, and risk class.
+
+Exit criteria:
+
+- No secret material in the inventory artifact.
+- Every user-facing group has a target YuAPI group or an explicit defer note.
+
+### Phase 1 - GPT Text Pools
+
+- Migrate `gpt-team`, `gpt-plus`, `gpt-pro`.
+- Prefer one YuAPI channel per production-important source account.
+- Use multi-key only for homogeneous low-risk API-key sources.
+- Configure retry/disable conservatively.
+- Smoke `/v1/chat/completions` and `/v1/responses` where applicable.
+
+Exit criteria:
+
+- Each tier has at least one enabled YuAPI channel for required models.
+- Failure of one channel/key does not disable an unrelated tier.
+- Usage logs show expected group, channel ID, model, and billing.
+
+### Phase 2 - Codex / OpenAI Subscription
+
+- Migrate Codex-capable accounts one channel per account.
+- Ensure real `account_id`, refresh token, expiry, and Codex channel type.
+- Keep channel affinity enabled for Codex CLI trace/prompt-cache keys.
+- Smoke `/v1/responses` and `/v1/responses/compact`.
+
+Exit criteria:
+
+- Credential refresh succeeds.
+- Sticky behavior is visible in affinity logs.
+- `responses/compact` uses the intended upstream model.
+
+### Phase 3 - GPT Image2
+
+- Keep only `gpt-image-2` visible until other image/video routes pass real media
+  smoke.
+- Use `/v1/images/generations` and `/v1/images/edits`.
+- Avoid automatic retry that can duplicate upstream image billing.
+- Confirm empty image responses are rejected.
+
+Exit criteria:
+
+- Text-to-image and image-to-image both succeed with real output.
+- Failed image responses are not billed as success.
+- Grok/Gemini/Veo remain hidden unless their exact media endpoint passes smoke.
+
+### Phase 4 - Provider Mixed / Kiro / Windsurf
+
+- Do not flatten `provider-mixed` into GPT groups.
+- First decide whether YuAPI will receive a dedicated adapter channel type,
+  an advanced custom route, or a small provider adapter module.
+- Preserve model routing semantics so overlapping Kiro/Windsurf model names do
+  not randomly hit the wrong upstream.
+
+Exit criteria:
+
+- Route preview or equivalent dry run exists before exposure.
+- Smoke passes for each public alias.
+- Sticky/cache reuse requirements are documented per provider.
+
+## Minimal Runtime Patch Status
+
+2026-07-07 update: the lightweight YuAPI channel-pool runtime has been added
+behind per-channel settings. It is default-off and requires no schema migration.
+
+Implemented:
+
+- Redis-backed channel concurrency gate with process-local fallback.
+- `(group, model, channel_id)` transient cooldown cache.
+- Selection skip for cooled/full channels while preserving YuAPI priority and
+  weight behavior.
+- Affinity fallback that keeps sticky cache when the preferred channel is only
+  temporarily cooled/full.
+
+Configuration lives in `channels.settings` JSON:
+
+```json
+{
+  "channel_pool_concurrency_limit": 8,
+  "channel_pool_cooldown_seconds": 20
+}
+```
+
+See `docs/YUAPI_CHANNEL_POOL_RUNTIME_2026-07-07.md` for deployment details.
+
+## Optional Minimal Patches After Phase 1
+
+Only consider these if dry-run or smoke shows the behavior is required:
+
+1. Channel/model cooldown cache in YuAPI. Implemented default-off.
+   - Key: `(group, model, channel_id)` or `(model, channel_id)`.
+   - Set on configured transient status/keyword.
+   - Selection skips cooled channels without changing DB status.
+   - No schema migration required if Redis-backed.
+
+2. Channel concurrency gate in YuAPI. Implemented default-off.
+   - Redis counter by channel ID.
+   - Optional per-channel setting stored in existing channel settings JSON.
+   - Use only for accounts that previously depended on Sub2API concurrency.
+
+3. Import preview script.
+   - Reads redacted Sub2API inventory CSV.
+   - Emits YuAPI channel/group/ability import plan.
+   - Does not write DB until explicitly approved.
+
+Do not start with these patches. Start with inventory and classification.
+
+## Smoke Matrix
+
+| Area | Request | Required evidence |
+| --- | --- | --- |
+| GPT text | `/v1/chat/completions` non-stream | HTTP 200, expected channel/group log. |
+| GPT text stream | `/v1/chat/completions` stream | Complete stream, post-consume billing correct. |
+| Responses | `/v1/responses` | Model preserved/mapped as intended. |
+| Codex compact | `/v1/responses/compact` | Expected Codex/OpenAI channel, no unsupported endpoint. |
+| Affinity | Repeat same sticky key | Same channel until failure policy says otherwise. |
+| Bad key | Force one bad key/channel | Only that key/channel is disabled or skipped. |
+| 429/529 | Simulated transient upstream error | Retried or cooled, not permanently banned. |
+| Image generation | `/v1/images/generations` | Real `url` or `b64_json`, no false success. |
+| Image edit | `/v1/images/edits` | Real output and one upstream attempt unless manually retried. |
+
+## Rollback
+
+Before cutover:
+
+- Keep old Sub2API deployment stopped but not destroyed.
+- Keep PostgreSQL and Redis volumes intact until YuAPI has passed live smoke.
+- Keep DNS/proxy rollback path documented.
+- Preserve old NewAPI bridge tokens disabled, not deleted, until billing and
+  logs are verified.
+
+Rollback trigger examples:
+
+- More than one user-facing GPT tier has no usable YuAPI channel.
+- 429/529 starts causing broad permanent channel bans.
+- Codex refresh fails for migrated accounts.
+- Image route bills failed/empty outputs as success.
+- Provider-mixed traffic routes to the wrong adapter.
+
+## Current Recommendation
+
+Proceed with Phase 0 inventory and Phase 1 GPT text pools first. Keep
+`provider-mixed`, Kiro, Windsurf, and other adapter-heavy pools out of the first
+cutover. Treat `gpt-image-2` as a separate media migration with stricter retry
+and billing checks.

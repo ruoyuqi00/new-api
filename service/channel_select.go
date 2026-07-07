@@ -12,12 +12,13 @@ import (
 )
 
 type RetryParam struct {
-	Ctx          *gin.Context
-	TokenGroup   string
-	ModelName    string
-	RequestPath  string
-	Retry        *int
-	resetNextTry bool
+	Ctx               *gin.Context
+	TokenGroup        string
+	ModelName         string
+	RequestPath       string
+	Retry             *int
+	resetNextTry      bool
+	skippedChannelIDs map[int]struct{}
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -44,6 +45,22 @@ func (p *RetryParam) IncreaseRetry() {
 
 func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
+}
+
+func (p *RetryParam) SkipChannelID(channelID int) {
+	if channelID <= 0 {
+		return
+	}
+	if p.skippedChannelIDs == nil {
+		p.skippedChannelIDs = make(map[int]struct{})
+	}
+	p.skippedChannelIDs[channelID] = struct{}{}
+}
+
+func (p *RetryParam) ChannelSelectionOptions() model.ChannelSelectionOptions {
+	return model.ChannelSelectionOptions{
+		SkipChannelIDs: p.skippedChannelIDs,
+	}
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
@@ -116,7 +133,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, param.ModelName, priorityRetry, param.RequestPath)
+			channel, _ = model.GetRandomSatisfiedChannelWithOptions(autoGroup, param.ModelName, priorityRetry, param.RequestPath, param.ChannelSelectionOptions())
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -154,7 +171,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath)
+		channel, err = model.GetRandomSatisfiedChannelWithOptions(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath, param.ChannelSelectionOptions())
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}

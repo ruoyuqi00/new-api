@@ -1,0 +1,335 @@
+package model
+
+import (
+	"context"
+	"crypto/sha1"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
+)
+
+const (
+	channelPoolCooldownNamespace    = "new-api:channel_pool:cooldown:v1"
+	channelPoolConcurrencyNamespace = "new-api:channel_pool:concurrency:v1"
+	channelPoolLeaseTTL             = 6 * time.Hour
+)
+
+var (
+	channelPoolMemoryMu       sync.Mutex
+	channelPoolMemoryInflight = map[int]int{}
+	channelPoolMemoryCooldown = map[string]time.Time{}
+)
+
+type ChannelSelectionOptions struct {
+	SkipChannelIDs map[int]struct{}
+}
+
+type ChannelPoolLease struct {
+	channelID int
+	key       string
+	redis     bool
+	released  int32
+}
+
+func (l *ChannelPoolLease) ChannelID() int {
+	if l == nil {
+		return 0
+	}
+	return l.channelID
+}
+
+func (l *ChannelPoolLease) Release() {
+	if l == nil || !atomic.CompareAndSwapInt32(&l.released, 0, 1) {
+		return
+	}
+	if l.redis {
+		releaseRedisChannelPoolSlot(l.key)
+		return
+	}
+	releaseMemoryChannelPoolSlot(l.channelID)
+}
+
+func ChannelPoolConcurrencyLimit(channel *Channel) int {
+	settings := parseChannelPoolOtherSettings(channel)
+	if settings.ChannelPoolConcurrencyLimit < 0 {
+		return 0
+	}
+	return settings.ChannelPoolConcurrencyLimit
+}
+
+func ChannelPoolCooldownSeconds(channel *Channel) int {
+	settings := parseChannelPoolOtherSettings(channel)
+	if settings.ChannelPoolCooldownSeconds < 0 {
+		return 0
+	}
+	return settings.ChannelPoolCooldownSeconds
+}
+
+func ChannelPoolCandidateAvailable(channel *Channel, group string, modelName string) bool {
+	if channel == nil {
+		return false
+	}
+	if isChannelPoolCoolingDown(channel.Id, group, modelName) {
+		return false
+	}
+	limit := ChannelPoolConcurrencyLimit(channel)
+	if limit <= 0 {
+		return true
+	}
+	return getChannelPoolInflight(channel.Id) < limit
+}
+
+func AcquireChannelPoolLease(channel *Channel) (*ChannelPoolLease, bool, error) {
+	if channel == nil {
+		return nil, false, fmt.Errorf("channel is nil")
+	}
+	limit := ChannelPoolConcurrencyLimit(channel)
+	if limit <= 0 {
+		return nil, true, nil
+	}
+	if channelPoolRedisAvailable() {
+		return acquireRedisChannelPoolSlot(channel.Id, limit)
+	}
+	lease := acquireMemoryChannelPoolSlot(channel.Id, limit)
+	return lease, lease != nil, nil
+}
+
+func CooldownChannelPool(channelID int, group string, modelName string, seconds int, reason string) {
+	if channelID <= 0 || seconds <= 0 {
+		return
+	}
+	key := channelPoolCooldownKey(channelID, group, modelName)
+	expiration := time.Duration(seconds) * time.Second
+	if channelPoolRedisAvailable() {
+		if err := common.RDB.Set(context.Background(), key, reason, expiration).Err(); err != nil {
+			common.SysError(fmt.Sprintf("channel pool cooldown set failed: channel_id=%d, err=%v", channelID, err))
+		}
+		return
+	}
+	channelPoolMemoryMu.Lock()
+	channelPoolMemoryCooldown[key] = time.Now().Add(expiration)
+	channelPoolMemoryMu.Unlock()
+}
+
+func filterChannelsBySelectionOptions(channels []int, options ChannelSelectionOptions) []int {
+	if len(channels) == 0 || len(options.SkipChannelIDs) == 0 {
+		return channels
+	}
+	filtered := make([]int, 0, len(channels))
+	for _, channelID := range channels {
+		if _, skip := options.SkipChannelIDs[channelID]; skip {
+			continue
+		}
+		filtered = append(filtered, channelID)
+	}
+	return filtered
+}
+
+func filterChannelsByChannelPoolAvailability(channels []int, group string, modelName string) []int {
+	if len(channels) == 0 {
+		return channels
+	}
+	filtered := make([]int, 0, len(channels))
+	for _, channelID := range channels {
+		channel, ok := channelsIDM[channelID]
+		if !ok {
+			filtered = append(filtered, channelID)
+			continue
+		}
+		if ChannelPoolCandidateAvailable(channel, group, modelName) {
+			filtered = append(filtered, channelID)
+		}
+	}
+	return filtered
+}
+
+func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelectionOptions) []Ability {
+	if len(abilities) == 0 || len(options.SkipChannelIDs) == 0 {
+		return abilities
+	}
+	filtered := make([]Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		if _, skip := options.SkipChannelIDs[ability.ChannelId]; skip {
+			continue
+		}
+		filtered = append(filtered, ability)
+	}
+	return filtered
+}
+
+func filterAbilitiesByChannelPoolAvailability(abilities []Ability, group string, modelName string) []Ability {
+	if len(abilities) == 0 {
+		return abilities
+	}
+
+	channelIDs := make([]int, 0, len(abilities))
+	seen := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, ok := seen[ability.ChannelId]; ok {
+			continue
+		}
+		seen[ability.ChannelId] = struct{}{}
+		channelIDs = append(channelIDs, ability.ChannelId)
+	}
+
+	var channels []*Channel
+	if err := DB.Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+		common.SysError(fmt.Sprintf("channel pool availability query failed: err=%v", err))
+		return abilities
+	}
+	channelByID := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		channelByID[channel.Id] = channel
+	}
+
+	filtered := make([]Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		channel, ok := channelByID[ability.ChannelId]
+		if !ok || ChannelPoolCandidateAvailable(channel, group, modelName) {
+			filtered = append(filtered, ability)
+		}
+	}
+	return filtered
+}
+
+func parseChannelPoolOtherSettings(channel *Channel) dto.ChannelOtherSettings {
+	settings := dto.ChannelOtherSettings{}
+	if channel == nil || channel.OtherSettings == "" {
+		return settings
+	}
+	if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+		common.SysError(fmt.Sprintf("failed to unmarshal channel pool settings: channel_id=%d, err=%v", channel.Id, err))
+	}
+	return settings
+}
+
+func channelPoolRedisAvailable() bool {
+	return common.RedisEnabled && common.RDB != nil
+}
+
+func channelPoolCooldownKey(channelID int, group string, modelName string) string {
+	return fmt.Sprintf("%s:%d:%s", channelPoolCooldownNamespace, channelID, channelPoolScopeFingerprint(group, modelName))
+}
+
+func channelPoolConcurrencyKey(channelID int) string {
+	return fmt.Sprintf("%s:%d", channelPoolConcurrencyNamespace, channelID)
+}
+
+func channelPoolScopeFingerprint(group string, modelName string) string {
+	sum := sha1.Sum([]byte(group + "\x00" + modelName))
+	return hex.EncodeToString(sum[:])
+}
+
+func isChannelPoolCoolingDown(channelID int, group string, modelName string) bool {
+	key := channelPoolCooldownKey(channelID, group, modelName)
+	if channelPoolRedisAvailable() {
+		count, err := common.RDB.Exists(context.Background(), key).Result()
+		if err != nil {
+			common.SysError(fmt.Sprintf("channel pool cooldown check failed: channel_id=%d, err=%v", channelID, err))
+			return false
+		}
+		return count > 0
+	}
+
+	channelPoolMemoryMu.Lock()
+	defer channelPoolMemoryMu.Unlock()
+	until, ok := channelPoolMemoryCooldown[key]
+	if !ok {
+		return false
+	}
+	if time.Now().After(until) {
+		delete(channelPoolMemoryCooldown, key)
+		return false
+	}
+	return true
+}
+
+func getChannelPoolInflight(channelID int) int {
+	if channelID <= 0 {
+		return 0
+	}
+	if channelPoolRedisAvailable() {
+		value, err := common.RDB.Get(context.Background(), channelPoolConcurrencyKey(channelID)).Result()
+		if err != nil {
+			return 0
+		}
+		inflight, err := strconv.Atoi(value)
+		if err != nil {
+			return 0
+		}
+		return inflight
+	}
+
+	channelPoolMemoryMu.Lock()
+	defer channelPoolMemoryMu.Unlock()
+	return channelPoolMemoryInflight[channelID]
+}
+
+func acquireRedisChannelPoolSlot(channelID int, limit int) (*ChannelPoolLease, bool, error) {
+	key := channelPoolConcurrencyKey(channelID)
+	result, err := common.RDB.Eval(context.Background(), `
+local current = tonumber(redis.call("GET", KEYS[1]) or "0")
+local limit = tonumber(ARGV[1])
+if current >= limit then
+  return 0
+end
+current = redis.call("INCR", KEYS[1])
+if current == 1 then
+  redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
+end
+if current > limit then
+  redis.call("DECR", KEYS[1])
+  return 0
+end
+return current
+`, []string{key}, limit, int(channelPoolLeaseTTL.Seconds())).Int()
+	if err != nil {
+		return nil, false, err
+	}
+	if result <= 0 {
+		return nil, false, nil
+	}
+	return &ChannelPoolLease{channelID: channelID, key: key, redis: true}, true, nil
+}
+
+func releaseRedisChannelPoolSlot(key string) {
+	if key == "" || !channelPoolRedisAvailable() {
+		return
+	}
+	if err := common.RDB.Eval(context.Background(), `
+local current = tonumber(redis.call("GET", KEYS[1]) or "0")
+if current <= 1 then
+  redis.call("DEL", KEYS[1])
+  return 0
+end
+return redis.call("DECR", KEYS[1])
+`, []string{key}).Err(); err != nil {
+		common.SysError(fmt.Sprintf("channel pool slot release failed: key=%s, err=%v", key, err))
+	}
+}
+
+func acquireMemoryChannelPoolSlot(channelID int, limit int) *ChannelPoolLease {
+	channelPoolMemoryMu.Lock()
+	defer channelPoolMemoryMu.Unlock()
+	if channelPoolMemoryInflight[channelID] >= limit {
+		return nil
+	}
+	channelPoolMemoryInflight[channelID]++
+	return &ChannelPoolLease{channelID: channelID}
+}
+
+func releaseMemoryChannelPoolSlot(channelID int) {
+	channelPoolMemoryMu.Lock()
+	defer channelPoolMemoryMu.Unlock()
+	if channelPoolMemoryInflight[channelID] <= 1 {
+		delete(channelPoolMemoryInflight, channelID)
+		return
+	}
+	channelPoolMemoryInflight[channelID]--
+}

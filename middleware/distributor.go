@@ -33,6 +33,9 @@ func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
+		specificChannelRequested := ok
+		selectedByAffinity := false
+		channelContextReady := false
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
@@ -103,6 +106,7 @@ func Distribute() func(c *gin.Context) {
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
+					affinityTemporarilyUnavailable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
 						channelSupportsRequestPath(preferred, c.Request.URL.Path) {
@@ -111,57 +115,142 @@ func Distribute() func(c *gin.Context) {
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
 								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									if service.IsChannelPoolTemporarilyUnavailable(preferred, g, modelRequest.Model) {
+										affinityTemporarilyUnavailable = true
+										continue
+									}
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
 									affinityUsable = true
+									selectedByAffinity = true
 									service.MarkChannelAffinityUsed(c, g, preferred.Id)
 									break
 								}
 							}
 						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-							channel = preferred
-							selectGroup = usingGroup
-							affinityUsable = true
-							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+							if service.IsChannelPoolTemporarilyUnavailable(preferred, usingGroup, modelRequest.Model) {
+								affinityTemporarilyUnavailable = true
+							} else {
+								channel = preferred
+								selectGroup = usingGroup
+								affinityUsable = true
+								selectedByAffinity = true
+								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+							}
 						}
 					}
-					if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
+					if !affinityUsable && !affinityTemporarilyUnavailable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
 						service.ClearCurrentChannelAffinityCache(c)
 					}
 				}
 
+				if channel != nil && selectedByAffinity {
+					acquired, acquireErr := service.TryAcquireChannelPoolLease(c, channel)
+					if acquireErr != nil {
+						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, acquireErr.Error(), types.ErrorCodeGetChannelFailed)
+						return
+					}
+					if !acquired {
+						channel = nil
+						selectedByAffinity = false
+					} else if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
+						service.ReleaseCurrentChannelPoolLease(c)
+						channel = nil
+						selectedByAffinity = false
+					} else {
+						channelContextReady = true
+					}
+				}
+
 				if channel == nil {
-					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+					retryParam := &service.RetryParam{
 						Ctx:         c,
 						ModelName:   modelRequest.Model,
 						TokenGroup:  usingGroup,
 						RequestPath: c.Request.URL.Path,
 						Retry:       common.GetPointer(0),
-					})
-					if err != nil {
-						showGroup := usingGroup
-						if usingGroup == "auto" {
-							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+					}
+					poolFullSeen := false
+					setupRejectedSeen := false
+					for attempts := 0; attempts < 32; attempts++ {
+						channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(retryParam)
+						if err != nil {
+							showGroup := usingGroup
+							if usingGroup == "auto" {
+								showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+							}
+							message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
+							// 如果错误，但是渠道不为空，说明是数据库一致性问题
+							//if channel != nil {
+							//	common.SysError(fmt.Sprintf("渠道不存在：%d", channel.Id))
+							//	message = "数据库一致性已被破坏，请联系管理员"
+							//}
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, message, types.ErrorCodeModelNotFound)
+							return
 						}
-						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
-						// 如果错误，但是渠道不为空，说明是数据库一致性问题
-						//if channel != nil {
-						//	common.SysError(fmt.Sprintf("渠道不存在：%d", channel.Id))
-						//	message = "数据库一致性已被破坏，请联系管理员"
-						//}
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, message, types.ErrorCodeModelNotFound)
-						return
+						if channel == nil {
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+							return
+						}
+						acquired, acquireErr := service.TryAcquireChannelPoolLease(c, channel)
+						if acquireErr != nil {
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, acquireErr.Error(), types.ErrorCodeGetChannelFailed)
+							return
+						}
+						if acquired {
+							if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
+								setupRejectedSeen = true
+								service.ReleaseCurrentChannelPoolLease(c)
+								retryParam.SkipChannelID(channel.Id)
+								channel = nil
+								continue
+							}
+							channelContextReady = true
+							break
+						}
+						poolFullSeen = true
+						retryParam.SkipChannelID(channel.Id)
+						channel = nil
 					}
 					if channel == nil {
+						if setupRejectedSeen {
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, "no candidate channel passed setup checks", types.ErrorCodeGetChannelFailed)
+							return
+						}
+						if poolFullSeen {
+							abortWithOpenAiMessage(c, http.StatusTooManyRequests, "all candidate channels are at their configured concurrency limit", types.ErrorCodeGetChannelFailed)
+							return
+						}
 						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
 					}
 				}
 			}
 		}
+		if channel != nil && specificChannelRequested {
+			acquired, acquireErr := service.TryAcquireChannelPoolLease(c, channel)
+			if acquireErr != nil {
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, acquireErr.Error(), types.ErrorCodeGetChannelFailed)
+				return
+			}
+			if !acquired {
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests, service.NewChannelPoolFullError(channel).Error(), types.ErrorCodeGetChannelFailed)
+				return
+			}
+		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if channel != nil && !channelContextReady {
+			if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
+				service.ReleaseCurrentChannelPoolLease(c)
+				abortWithOpenAiMessage(c, setupErr.StatusCode, setupErr.Error(), setupErr.GetErrorCode())
+				return
+			}
+			channelContextReady = true
+		}
+		if channelContextReady {
+			defer service.ReleaseCurrentChannelPoolLease(c)
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)

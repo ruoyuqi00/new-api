@@ -206,6 +206,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			} else {
 				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 			}
+			service.ReleaseCurrentChannelPoolLease(c)
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
@@ -223,6 +224,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
+			service.ReleaseCurrentChannelPoolLease(c)
 			return
 		}
 
@@ -230,6 +232,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.LastError = newAPIError
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		service.MaybeCooldownSelectedChannelPool(c, newAPIError)
+		service.ReleaseCurrentChannelPoolLease(c)
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
@@ -318,6 +322,13 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 	if newAPIError != nil {
 		return nil, newAPIError
+	}
+	acquired, acquireErr := service.TryAcquireChannelPoolLease(c, channel)
+	if acquireErr != nil {
+		return nil, types.NewErrorWithStatusCode(acquireErr, types.ErrorCodeGetChannelFailed, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+	}
+	if !acquired {
+		return nil, service.NewChannelPoolFullError(channel)
 	}
 	return channel, nil
 }
@@ -517,9 +528,11 @@ func RelayTask(c *gin.Context) {
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		var channel *model.Channel
+		lockedChannelSelected := false
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
 			channel = lockedCh
+			lockedChannelSelected = true
 			if retryParam.GetRetry() > 0 {
 				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
 					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
@@ -535,6 +548,17 @@ func RelayTask(c *gin.Context) {
 				break
 			}
 		}
+		if lockedChannelSelected {
+			acquired, acquireErr := service.TryAcquireChannelPoolLease(c, channel)
+			if acquireErr != nil {
+				taskErr = service.TaskErrorWrapperLocal(acquireErr, "channel_pool_acquire_failed", http.StatusServiceUnavailable)
+				break
+			}
+			if !acquired {
+				taskErr = service.TaskErrorWrapperLocal(service.NewChannelPoolFullError(channel).Err, "channel_pool_full", http.StatusTooManyRequests)
+				break
+			}
+		}
 
 		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
@@ -544,21 +568,26 @@ func RelayTask(c *gin.Context) {
 			} else {
 				taskErr = service.TaskErrorWrapperLocal(bodyErr, "read_request_body_failed", http.StatusBadRequest)
 			}
+			service.ReleaseCurrentChannelPoolLease(c)
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
 		if taskErr == nil {
+			service.ReleaseCurrentChannelPoolLease(c)
 			break
 		}
 
 		if !taskErr.LocalError {
+			newAPIError := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
+				newAPIError)
+			service.MaybeCooldownSelectedChannelPool(c, newAPIError)
 		}
+		service.ReleaseCurrentChannelPoolLease(c)
 
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
 			break

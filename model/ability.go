@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -106,32 +107,70 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
+	return GetChannelWithOptions(group, model, retry, requestPath, ChannelSelectionOptions{})
+}
+
+func GetChannelWithOptions(group string, model string, retry int, requestPath string, options ChannelSelectionOptions) (*Channel, error) {
 	var abilities []Ability
 
-	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
-	if err != nil {
-		return nil, err
-	}
+	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) || common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
+		err := channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	}
-	if err != nil {
-		return nil, err
+		err := channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error
+		if err != nil {
+			return nil, err
+		}
 	}
 	abilities = filterAbilitiesByRequestPath(abilities, requestPath)
+	abilities = filterAbilitiesBySelectionOptions(abilities, options)
+	abilities = filterAbilitiesByChannelPoolAvailability(abilities, group, model)
 	channel := Channel{}
 	if len(abilities) > 0 {
+		priorities := make(map[int]struct{})
+		for _, ability := range abilities {
+			priority := int64(0)
+			if ability.Priority != nil {
+				priority = *ability.Priority
+			}
+			priorities[int(priority)] = struct{}{}
+		}
+		sortedPriorities := make([]int, 0, len(priorities))
+		for priority := range priorities {
+			sortedPriorities = append(sortedPriorities, priority)
+		}
+		sort.Sort(sort.Reverse(sort.IntSlice(sortedPriorities)))
+		if retry >= len(sortedPriorities) {
+			retry = len(sortedPriorities) - 1
+		}
+		targetPriority := int64(sortedPriorities[retry])
+
 		// Randomly choose one
 		weightSum := uint(0)
 		for _, ability_ := range abilities {
+			if ability_.Priority != nil && *ability_.Priority != targetPriority {
+				continue
+			}
+			if ability_.Priority == nil && targetPriority != 0 {
+				continue
+			}
 			weightSum += ability_.Weight + 10
+		}
+		if weightSum == 0 {
+			return nil, nil
 		}
 		// Randomly choose one
 		weight := common.GetRandomInt(int(weightSum))
 		for _, ability_ := range abilities {
+			if ability_.Priority != nil && *ability_.Priority != targetPriority {
+				continue
+			}
+			if ability_.Priority == nil && targetPriority != 0 {
+				continue
+			}
 			weight -= int(ability_.Weight) + 10
 			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
 			if weight <= 0 {
@@ -142,7 +181,7 @@ func GetChannel(group string, model string, retry int, requestPath string) (*Cha
 	} else {
 		return nil, nil
 	}
-	err = DB.First(&channel, "id = ?", channel.Id).Error
+	err := DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
 }
 
