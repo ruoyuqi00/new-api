@@ -133,3 +133,45 @@ Before enabling on production channels:
 5. Roll out per group, keeping one-account-per-channel for important pools.
 
 Rollback is clearing the two JSON fields or redeploying the previous image.
+
+## Production Deployment Record
+
+2026-07-07 18:27 Asia/Shanghai:
+
+- Server: `154.219.122.197`
+- Existing production source copied from:
+  `/opt/deploy-images/newapi-image-url-b64-src`
+- Patched build source:
+  `/opt/deploy-images/newapi-channel-pool-runtime-59688c50-20260707181527-src`
+- Patch applied:
+  `yuapi-channel-pool-runtime-59688c50.patch`
+- Built image:
+  `newapi:channel-pool-runtime-20260707-59688c50`
+- Previous image:
+  `newapi:image-url-b64-20260628`
+- Compose backup:
+  `/opt/newapi/backups/docker-compose-before-channel-pool-runtime-20260707182704.yml`
+- Recreated service:
+  `newapi` only.
+- Data services left running:
+  `newapi-mysql`, `newapi-redis`.
+- Data paths left untouched:
+  `/opt/newapi/mysql_data`, `/opt/newapi/redis_data`, `/opt/newapi/data`.
+
+Verification:
+
+```text
+go test ./model ./service ./middleware ./controller
+HTTP_ROOT=200
+newapi newapi:channel-pool-runtime-20260707-59688c50 Up (healthy)
+newapi-redis redis:7-alpine Up 2 weeks (healthy)
+newapi-mysql mysql:8.4 Up 2 weeks (healthy)
+```
+
+Notes:
+
+- The code is deployed, but the new runtime remains default-off until channel
+  settings include `channel_pool_concurrency_limit` or
+  `channel_pool_cooldown_seconds`.
+- Sub2API was not stopped or modified in this deployment; account migration is
+  still a separate, data-sensitive phase.
