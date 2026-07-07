@@ -1,22 +1,42 @@
-# 确保所有 SQL 迁移文件使用 LF 换行符
-backend/migrations/*.sql text eol=lf
+# Auto detect text files and perform LF normalization
+* text=auto
 
-# Go 源代码文件
+# Go files
 *.go text eol=lf
 
-# 前端 源代码文件
-*.ts text eol=lf
-*.tsx text eol=lf
-*.js text eol=lf
-*.jsx text eol=lf
-*.vue text eol=lf
-
-# Shell 脚本
-*.sh text eol=lf
-
-# YAML/YML 配置文件
+# Config files
+*.json text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
 
-# Dockerfile
-Dockerfile text eol=lf
+# JavaScript/TypeScript files
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# ============================================
+# GitHub Linguist - Language Detection
+# ============================================
+electron/** linguist-vendored
+web/** linguist-vendored
+
+# Un-vendor core frontend source to keep JavaScript visible in language stats
+web/src/components/** linguist-vendored=false
+web/src/pages/** linguist-vendored=false

@@ -1,149 +1,43 @@
-docs/claude-relay-service/
-.codex
-
-# ===================
-# Go 后端
-# ===================
-# 二进制文件
+.idea
+.vscode
+.zed
+.history
+upload
 *.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-backend/bin/
-backend/server
-backend/sub2api
-backend/main
-
-# Go 测试二进制
-*.test
-
-# 测试覆盖率
-*.out
-coverage.html
-
-# 依赖（使用 go mod）
-vendor/
-
-# Go 编译缓存
-backend/.gocache/
-
-# ===================
-# Node.js / Vue 前端
-# ===================
-node_modules/
-frontend/node_modules/
-frontend/dist/
-*.local
-*.tsbuildinfo
-vite.config.d.ts
-vite.config.js.timestamp-*
-
-# 日志
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# ===================
-# 环境配置
-# ===================
+*.db
+build
+*.db-journal
+logs
+web/default/dist
+web/classic/dist
+web/node_modules
+web/dist
 .env
-.env.local
-.env.*.local
-*.env
-!.env.example
-docker-compose.override.yml
-
-# ===================
-# IDE / 编辑器
-# ===================
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.project
-.settings/
-.classpath
-
-# ===================
-# 操作系统
-# ===================
+one-api
+new-api
+/__debug_bin*
 .DS_Store
-Thumbs.db
-Desktop.ini
-
-# ===================
-# 临时文件
-# ===================
-tmp/
-temp/
-*.tmp
-*.temp
-*.log
-*.bak
-__pycache__/
-*.pyc
-.cache/
-.dev/
-.serena/
-
-# ===================
-# 构建产物
-# ===================
-dist/
-build/
-release/
-
-# 后端嵌入的前端构建产物
-# Keep a placeholder file so `//go:embed all:dist` always has a match in CI/lint,
-# while still ignoring generated frontend build outputs.
-backend/internal/web/dist/
-!backend/internal/web/dist/
-backend/internal/web/dist/*
-!backend/internal/web/dist/.keep
-
-# 后端运行时缓存数据
-backend/data/
-
-# ===================
-# 本地配置文件（包含敏感信息）
-# ===================
-backend/config.yaml
-deploy/config.yaml
-backend/.installed
-
-# ===================
-# 其他
-# ===================
-tests
-CLAUDE.md
+tiktoken_cache
+.eslintcache
+.gocache
+.gomodcache/
+.cache
+plans
 .claude
-scripts
-.code-review-state
-#openspec/
-code-reviews/
-AGENTS.md
-backend/cmd/server/server
-deploy/docker-compose.override.yml
-.gocache/
-vite.config.js
-docs/*
-!docs/PAYMENT.md
-!docs/PAYMENT_CN.md
-!docs/ADMIN_PAYMENT_INTEGRATION_API.md
-!docs/KIRO_UPSTREAM_AUDIT_2026-05-23.md
-!docs/UPSTREAM_PROTOCOL_AUDIT_2026-05-25.md
-!docs/UPSTREAM_MERGE_2026-06-10.md
-!docs/UPSTREAM_PROTOCOL_CHECK_2026-06-15.md
-!docs/PROJECT_MAINTENANCE_MAP_2026-06-15.md
-!docs/NEWAPI_USER_CONCURRENCY_LIMIT_2026-06-21.md
-!docs/DISASTER_RECOVERY_AND_MIGRATION_2026-06-21.md
-!docs/legal/
-!docs/legal/*.md
-.serena/
-.codex/
-frontend/coverage/
-aicodex
-output/
+.cursor
+
+electron/node_modules
+electron/dist
+data/
+.gomodcache/
+.gocache-temp
+.gopath
+.test
+token_estimator_test.go
+skills-lock.json
+.playwright-mcp
+
+# Local-only live probes and scratch test workspaces.
+.local-tests/
+service/relayconvert/chat_responses_live_local_test.go
+service/openaicompat/chat_responses_live_local_test.go
