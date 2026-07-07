@@ -501,3 +501,53 @@ Safety notes:
 - Imported YuAPI channels are tagged `sub2-account-<id>`.
 - The rollback SQL restores the plus/pro bridge and disables imported direct
   channels without deleting them.
+
+## Post-Migration Channel Audit
+
+2026-07-07 follow-up:
+
+- Sub2API `gpt-plus` OpenAI/apikey inventory contained 6 accounts; all 6 were
+  imported as YuAPI direct channels.
+- Sub2API `gpt-pro` OpenAI/apikey inventory contained 6 accounts; 5 were
+  imported as YuAPI direct channels and 1 duplicate was already present as
+  YuAPI channel `2308`.
+- Imported enabled/disabled state initially mirrored Sub2API `schedulable`:
+  schedulable accounts became YuAPI `status=1`, non-schedulable accounts became
+  YuAPI `status=2`.
+- Channel `2326` (`sub2-account-7922`) was later disabled after direct smoke
+  returned upstream `403` group-access errors across multiple supported text
+  models. Its `abilities` rows were disabled as well.
+- Sub2API data remained untouched. Bridge channels `2294` and `2295` remain
+  disabled, not deleted.
+
+Current imported channel state after the `2326` safety disable:
+
+```text
+imported_channels status=1 count=5
+imported_channels status=2 count=6
+imported_abilities enabled=1 count=28
+imported_abilities enabled=0 count=34
+newapi container = healthy
+```
+
+Per-channel smoke:
+
+```text
+gpt-plus enabled migrated channels:
+  2322 sub2-account-7929 walkcoding.top       HTTP 200
+  2323 sub2-account-7930 mdkj.lol             HTTP 200
+  2324 sub2-account-7935 ppsubapi.com         HTTP 200
+
+gpt-pro enabled migrated/direct channels:
+  2326 sub2-account-7922 zz1cc.cc.cd          HTTP 403, disabled after smoke
+  2328 sub2-account-7928 walkcoding.top       HTTP 200
+  2329 sub2-account-7934 ppsubapi.com         HTTP 200
+  2308 existing duplicate mdkj.lol            HTTP 200
+
+normal user-token smoke after disabling 2326:
+  plus token 74 / gpt-5.4-mini HTTP 200, log id 6507, channel id 2322
+  pro token 88 / gpt-5.4-mini  HTTP 200, log id 6508, channel id 2318
+
+forced disabled-channel check:
+  channel 2326 HTTP 403, "channel disabled"
+```
