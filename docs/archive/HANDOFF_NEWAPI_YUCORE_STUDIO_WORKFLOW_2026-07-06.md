@@ -1,3 +1,10 @@
+# Archived: YuCore Studio / Canvas Handoff - 2026-07-06
+
+Archive notice: this is historical YuCore Studio/Canvas context only. It is
+not the current production baseline. Start from
+`BASELINE_PROJECT_REMOTE_PRODUCTION_2026-07-07.md` for current remote,
+production, and project-role decisions.
+
 # YuCore Studio / Canvas Handoff - 2026-07-06
 
 This file is the continuation handoff for the work in:
@@ -515,7 +522,11 @@ docker run -d --name yucore-qa-backend -p 3000:3000 `
   newapi:yucore-qa-admin-control-20260706
 ```
 
-## Resume Prompt For A New Window
+## Archived Resume Prompt For A New Window
+
+The prompt below belongs to the older YuCore Studio/Canvas window. For current
+production feature work, create a clean worktree from `ruoyu/main` as described
+in `BASELINE_PROJECT_REMOTE_PRODUCTION_2026-07-07.md`.
 
 Use this directly in the next window:
 

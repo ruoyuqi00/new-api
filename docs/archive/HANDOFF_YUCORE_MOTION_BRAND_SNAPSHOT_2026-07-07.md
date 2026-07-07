@@ -1,3 +1,10 @@
+# Archived: YuCore Motion / Brand Snapshot Handoff - 2026-07-07
+
+Archive notice: this is historical YuCore brand/motion context only. It is not
+the current production baseline. Start from
+`BASELINE_PROJECT_REMOTE_PRODUCTION_2026-07-07.md` for current remote,
+production, and project-role decisions.
+
 # YuCore Motion / Brand Snapshot Handoff - 2026-07-07
 
 This document records the current YuCore motion/brand state before switching to the next feature-development window.
@@ -201,7 +208,12 @@ NO_QA_RESIDUALS
 - QA output folders, browser profiles, logs, and SQLite snapshots should remain uncommitted unless a later task explicitly asks to archive test artifacts.
 - The current implementation is intentionally a branch snapshot, not a production-ready release claim.
 
-## Suggested Next Window
+## Archived Suggested Next Window
+
+The suggestion below was correct for the earlier YuCore feature window, but it
+is not the current production-function baseline. For current production work,
+use `ruoyu/main` as described in
+`BASELINE_PROJECT_REMOTE_PRODUCTION_2026-07-07.md`.
 
 For feature work, continue from this snapshot branch or create a new feature branch from it.
 
