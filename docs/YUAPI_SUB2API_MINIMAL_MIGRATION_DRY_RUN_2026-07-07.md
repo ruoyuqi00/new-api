@@ -603,3 +603,50 @@ plus / gpt-5.4-mini / concurrency 50:
   channels: 2322=22, 2323=28
   error samples: none
 ```
+
+## Observation Window
+
+2026-07-08 14:32 Asia/Shanghai check:
+
+- `newapi` was up for 19 hours and healthy on
+  `newapi:channel-pool-runtime-20260707-59688c50`.
+- `newapi-mysql` and `newapi-redis` remained healthy.
+- Sub2API bridge channels `2294` and `2295` remained disabled.
+- Channel `2324` remained enabled as fallback priority `80`.
+- Channel `2326` remained disabled after the upstream 403 smoke failure.
+- No explicit `UserConcurrencyLimit` override remained in the options table;
+  YuAPI was back on the default per-user concurrency limit.
+- Container logs for the last 24 hours had no matching panic, fatal, database,
+  Redis, or channel-pool runtime errors.
+
+Logs after the plus retest ended at log id `6724`:
+
+```text
+all logs after 6724:
+  type=2 consume records: 140
+  type=3 admin/manage records: 3
+  type=7 login records: 1
+
+real plus traffic:
+  token 82, channel 2323, 83 consume records
+  avg use_time=13.02s, max use_time=53s
+  no non-consume error records
+
+real pro traffic:
+  token 80, channel 2306, 7 consume records
+  token 80, channel 2318, 2 consume records
+  token 88, channel 2306, 1 consume record
+  no non-consume error records
+
+system/admin channel-test style records:
+  token_id=0 generated 47 pro-group consume records and was excluded from the
+  real-user traffic read.
+```
+
+Observation summary:
+
+- Plus real traffic used `2323` and stayed clean.
+- `2324` was not selected for real plus traffic after being moved to fallback.
+- Pro real traffic stayed on the existing YuAPI pro pool and stayed clean.
+- No evidence appeared that Sub2API bridge fallback was needed during the
+  observation window.
