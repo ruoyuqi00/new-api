@@ -527,9 +527,9 @@ ok   github.com/QuantumNous/new-api/relay
 
 ## Phase 6 - Request Quantity Bounds Triage
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Goal:
 
 Inspect the remaining upstream quantity-validation and saturation candidates
 from `d0bd8aac`/`c9943d37` and choose one narrow request-boundary fix that
@@ -545,7 +545,17 @@ Boundary:
 - Do not change tiered pre-consume defaults from `3fbad6a7`.
 - Keep deployment separate unless explicitly requested after tests.
 
-Planned acceptance checks:
+Accepted work for this phase:
+
+- Manually port the narrow max-token bounds from upstream `c9943d37`:
+  - OpenAI chat/completions: `max_tokens` and `max_completion_tokens`.
+  - Claude: `max_tokens` and `max_tokens_to_sample`.
+  - Gemini: `generationConfig.maxOutputTokens`.
+  - OpenAI Responses: `max_output_tokens`.
+- Keep image count and task duration quantity bounds deferred because they touch
+  additional image/task request surfaces and deserve their own focused tests.
+
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -557,3 +567,96 @@ Manual review checks:
 - The accepted validation change rejects only invalid or abusive quantities.
 - Existing normal image/task/text request quantities remain compatible.
 - Any deferred upstream patch is recorded with a reason.
+
+Implementation:
+
+- `relay/helper/valid_request.go`
+  - Added a shared `maxTokensLimit` / `exceedsMaxTokensLimit` guard.
+  - Extended the existing OpenAI `max_tokens` bound to also cover
+    `max_completion_tokens`.
+  - Added equivalent bounds for Claude `max_tokens` and
+    `max_tokens_to_sample`.
+  - Added equivalent bounds for Gemini `generationConfig.maxOutputTokens`.
+  - Added equivalent bounds for OpenAI Responses `max_output_tokens`.
+- `relay/helper/max_tokens_bounds_test.go`
+  - Added focused regressions proving pathological large max-token values are
+    rejected across OpenAI, Claude, Gemini, and Responses request validators.
+  - Added normal `8192` acceptance checks for OpenAI, Claude, Gemini, and
+    Responses paths.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+```
+
+## Phase 7 - Image/Task Quantity Bounds Follow-Up
+
+Status: planned.
+
+Next phase objective:
+
+Inspect the remaining request quantity bounds from upstream `d0bd8aac` and
+choose one narrow validation patch for image count (`n`) or task video duration
+(`seconds` / `duration`). Prefer a single request family per phase so each
+change has precise tests and rollback scope.
+
+Boundary:
+
+- Do not change account-pool or channel-pool scheduling semantics.
+- Do not change model prices, group ratios, provider priority, plus/pro routing,
+  or group/model mapping.
+- Do not port broad quota math conversion or admin audit UI changes in this
+  phase.
+- Keep deployment separate unless explicitly requested after tests.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+go test ./relay/helper ./relay/channel ./relay
+```
+
+Manual review checks:
+
+- Normal image/task quantities remain compatible.
+- The accepted validator rejects only invalid or abusive quantities.
+- Deferred image/task quantity candidates are recorded with a reason.
