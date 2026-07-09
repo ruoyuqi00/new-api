@@ -970,14 +970,14 @@ ok   github.com/QuantumNous/new-api/relay/channel
 
 ## Phase 10 - Billing Saturation Audit Follow-Up
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Objective:
 
-Decide whether YuAPI needs a small admin-only audit marker for quota saturation
-events, using upstream `bae799cc` as a reference. If accepted, keep the scope to
-server-side log metadata only; do not port the broader frontend usage-log UI
-unless a server-side marker would otherwise be invisible to operators.
+Add a small admin-only audit marker for task quota saturation events, using
+upstream `bae799cc` as a reference, while keeping Phase 9 quota results
+unchanged. Keep the scope to server-side log metadata only and defer broader
+frontend usage-log UI.
 
 Boundary:
 
@@ -988,7 +988,7 @@ Boundary:
 - Prefer server-side log metadata over frontend table changes.
 - Keep deployment separate unless explicitly requested after tests.
 
-Planned acceptance checks:
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -1001,3 +1001,117 @@ Manual review checks:
   channel/key/account data.
 - Normal non-saturated billing logs remain unchanged.
 - Any frontend/admin UI change is explicitly justified or deferred.
+
+Implementation:
+
+- `common/quota_math.go`
+  - Added `QuotaFromFloatChecked`, which preserves the existing saturated quota
+    result and also returns a `QuotaClamp` audit record when a value is clamped.
+  - `QuotaFromFloat` remains the compatibility wrapper, so existing quota
+    calculation call sites keep the same return values.
+  - `QuotaClamp` stores `kind`, stringified `original`, `clamped`, and optional
+    `op`. Stringifying the original value avoids invalid JSON for `Inf` or
+    `NaN`.
+- `relay/common/relay_info.go`
+  - Added `TaskQuotaClamp` for async task billing log metadata only.
+- `relay/relay_task.go`
+  - Task submit `OtherRatios` and submit-time adjusted-ratio recalculation now
+    use the checked conversion path.
+  - The first saturation event is attached to `RelayInfo.TaskQuotaClamp` with
+    an operation name (`task_submit_other_ratios` or
+    `task_submit_adjusted_ratios`).
+- `service/task_billing.go`
+  - Added `attachQuotaClampAdminInfo`, which writes only
+    `Other.admin_info.quota_saturation`.
+  - `LogTaskConsumption` attaches submit-time task quota saturation metadata.
+  - `RecalculateTaskQuota` accepts an optional clamp marker and preserves old
+    call sites through a variadic parameter.
+  - `RecalculateTaskQuotaByTokens` records
+    `task_token_recalculation` saturation metadata when token-based async
+    recalculation clamps.
+- Tests:
+  - `common/quota_math_test.go` covers checked conversion and audit maps.
+  - `relay/relay_task_test.go` covers checked task ratio conversions and
+    first-clamp retention on `RelayInfo`.
+  - `service/task_billing_test.go` covers admin-only quota saturation metadata,
+    no `admin_info` on normal non-saturated recalculation, checked token
+    recalculation, and preservation of existing `admin_info` fields.
+
+Deferred upstream scope:
+
+- Did not port the broader upstream `bae799cc` frontend usage-log display.
+- Did not port unrelated text/audio/tiered billing audit changes in this phase.
+- Did not change pricing, group ratios, provider priority, plus/pro routing,
+  group/model mapping, channel scheduling, account-pool behavior, or production
+  data.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./common ./relay ./service
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/common
+ok   github.com/QuantumNous/new-api/relay
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/common
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+```
+
+## Phase 11 - Upstream Low-Risk Bug Triage
+
+Status: planned.
+
+Next phase objective:
+
+Review recent upstream `origin/main` fixes again and pick one low-risk server-side
+bug fix that benefits YuAPI production without touching account-pool/channel-pool
+scheduling, provider priority, plus/pro routing, pricing, or group/model mapping.
+If no suitable upstream item is narrow enough, inspect YuAPI's local task/logging
+surface for one focused bug and document why it is safe to fix.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+Manual review checks:
+
+- The selected Phase 11 fix is independently revertible.
+- Scheduling and account/channel selection semantics remain unchanged.
+- Any deferred upstream item is recorded with a reason.

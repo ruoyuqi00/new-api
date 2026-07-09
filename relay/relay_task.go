@@ -195,7 +195,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 6. 将 OtherRatios 应用到基础额度
 	if !common.StringsContains(constant.TaskPricePatches, modelName) {
-		info.PriceData.Quota = applyTaskOtherRatiosQuota(info.PriceData.Quota, info.PriceData.OtherRatios)
+		quota, clamp := applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, info.PriceData.OtherRatios)
+		noteTaskQuotaClamp(info, clamp, "task_submit_other_ratios")
+		info.PriceData.Quota = quota
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
@@ -240,7 +242,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	finalQuota := info.PriceData.Quota
 	if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
 		// 基于调整后的 ratios 重新计算 quota
-		finalQuota = recalcQuotaFromRatios(info, adjustedRatios)
+		var clamp *common.QuotaClamp
+		finalQuota, clamp = recalcQuotaFromRatiosChecked(info, adjustedRatios)
+		noteTaskQuotaClamp(info, clamp, "task_submit_adjusted_ratios")
 		info.PriceData.OtherRatios = adjustedRatios
 		info.PriceData.Quota = finalQuota
 	}
@@ -256,6 +260,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
 // 公式: baseQuota × ∏(ratio) — 其中 baseQuota 是不含 OtherRatios 的基础额度。
 func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float64) int {
+	quota, _ := recalcQuotaFromRatiosChecked(info, ratios)
+	return quota
+}
+
+func recalcQuotaFromRatiosChecked(info *relaycommon.RelayInfo, ratios map[string]float64) (int, *common.QuotaClamp) {
 	// 从 PriceData 获取不含 OtherRatios 的基础价格
 	baseQuota := float64(info.PriceData.Quota)
 	// 先除掉原有的 OtherRatios 恢复基础额度
@@ -271,17 +280,29 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 			result *= ra
 		}
 	}
-	return common.QuotaFromFloat(result)
+	return common.QuotaFromFloatChecked(result)
 }
 
 func applyTaskOtherRatiosQuota(baseQuota int, ratios map[string]float64) int {
+	quota, _ := applyTaskOtherRatiosQuotaChecked(baseQuota, ratios)
+	return quota
+}
+
+func applyTaskOtherRatiosQuotaChecked(baseQuota int, ratios map[string]float64) (int, *common.QuotaClamp) {
 	result := float64(baseQuota)
 	for _, ra := range ratios {
 		if ra != 1.0 {
 			result *= ra
 		}
 	}
-	return common.QuotaFromFloat(result)
+	return common.QuotaFromFloatChecked(result)
+}
+
+func noteTaskQuotaClamp(info *relaycommon.RelayInfo, clamp *common.QuotaClamp, op string) {
+	if info == nil || info.TaskQuotaClamp != nil || clamp == nil {
+		return
+	}
+	info.TaskQuotaClamp = clamp.WithOp(op)
 }
 
 var fetchRespBuilders = map[int]func(c *gin.Context) (respBody []byte, taskResp *dto.TaskError){

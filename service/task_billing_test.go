@@ -336,6 +336,45 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+	other, err := common.StrToMap(log.Other)
+	require.NoError(t, err)
+	assert.NotContains(t, other, "admin_info")
+}
+
+func TestRecalculate_QuotaClampAdminInfo(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 16, 16, 16
+	const initQuota, preConsumed = 10000, 2000
+	const actualQuota = 3000
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-recalc-clamp", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	clamp := (&common.QuotaClamp{
+		Kind:     "overflow",
+		Original: "+Inf",
+		Clamped:  math.MaxInt32,
+	}).WithOp("task_submit_other_ratios")
+
+	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment", clamp)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	other, err := common.StrToMap(log.Other)
+	require.NoError(t, err)
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	saturation, ok := adminInfo["quota_saturation"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task_submit_other_ratios", saturation["op"])
+	assert.Equal(t, "overflow", saturation["kind"])
+	assert.Equal(t, "+Inf", saturation["original"])
+	assert.Equal(t, float64(math.MaxInt32), saturation["clamped"])
 }
 
 func TestRecalculate_PersistsActualQuota(t *testing.T) {
@@ -466,6 +505,36 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 func TestTaskTokenRecalculatedQuotaSaturates(t *testing.T) {
 	assert.Equal(t, 3000, taskTokenRecalculatedQuota(1000, 1.5, 2, 1))
 	assert.Equal(t, math.MaxInt32, taskTokenRecalculatedQuota(math.MaxInt32, 1.5, 2, 1.8446744073686647e19))
+
+	quota, clamp := taskTokenRecalculatedQuotaChecked(math.MaxInt32, 1.5, 2, 1.8446744073686647e19)
+	assert.Equal(t, math.MaxInt32, quota)
+	require.NotNil(t, clamp)
+	assert.Equal(t, "overflow", clamp.Kind)
+}
+
+func TestAttachQuotaClampAdminInfoPreservesExistingAdminInfo(t *testing.T) {
+	other := map[string]interface{}{
+		"admin_info": map[string]interface{}{
+			"existing": true,
+		},
+	}
+	clamp := (&common.QuotaClamp{
+		Kind:     "nan",
+		Original: "NaN",
+		Clamped:  0,
+	}).WithOp("task_token_recalculation")
+
+	attachQuotaClampAdminInfo(other, clamp)
+
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, adminInfo["existing"])
+	saturation, ok := adminInfo["quota_saturation"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task_token_recalculation", saturation["op"])
+	assert.Equal(t, "nan", saturation["kind"])
+	assert.Equal(t, "NaN", saturation["original"])
+	assert.Equal(t, 0, saturation["clamped"])
 }
 
 // ===========================================================================
