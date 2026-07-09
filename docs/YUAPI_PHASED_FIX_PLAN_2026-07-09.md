@@ -1093,9 +1093,9 @@ ok   github.com/QuantumNous/new-api/relay/channel
 
 ## Phase 11 - Upstream Low-Risk Bug Triage
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Objective:
 
 Review recent upstream `origin/main` fixes again and pick one low-risk server-side
 bug fix that benefits YuAPI production without touching account-pool/channel-pool
@@ -1103,9 +1103,10 @@ scheduling, provider priority, plus/pro routing, pricing, or group/model mapping
 If no suitable upstream item is narrow enough, inspect YuAPI's local task/logging
 surface for one focused bug and document why it is safe to fix.
 
-Planned acceptance checks:
+Acceptance checks:
 
 ```bash
+go test ./common ./relay ./service
 go test ./model ./service ./middleware ./controller
 go test ./relay/common ./relay/helper ./relay/channel ./relay
 ```
@@ -1115,3 +1116,127 @@ Manual review checks:
 - The selected Phase 11 fix is independently revertible.
 - Scheduling and account/channel selection semantics remain unchanged.
 - Any deferred upstream item is recorded with a reason.
+
+Upstream triage result:
+
+- Reviewed recent `origin/main` server-side fixes through sub-agent and local
+  git inspection.
+- The lowest-risk upstream candidates were already present in this branch:
+  - `fae39cd90` / `dfcb74b52`: subscription migration tag fixes.
+  - `0d5995eb6`: read-only token access for non-disabled tokens.
+  - `bfddc5fea`: omit `access_token` from normal user queries.
+  - `cf6ae6fde`: preserve SMTP PLAIN auth TLS guard.
+  - `d2f7f9ee3`: anonymous request body limit.
+  - `3aa113b5a`: Dify remote-image nil pointer fix.
+  - `87cc22d7e`: video task GET model lookup for token model limits.
+  - `df44a75d5`: ClickHouse log LIKE escaping.
+  - `0977965d9`: Ollama non-stream tool calls.
+  - `502858d35`: Claude empty tool-call arguments preservation.
+  - `933ea0cdd`: relay idle connection timeout.
+- Because the safe upstream fixes were already absorbed, Phase 11 used the
+  fallback path and fixed a local task/logging bug.
+
+Implementation:
+
+- `service/task_billing.go`
+  - `RefundTaskQuota` now sets `task.Quota = 0` after wallet/subscription and
+    token quota refunds succeed.
+  - Persisted tasks call `task.UpdateQuota()` so task list/detail views no
+    longer show the original pre-consumed quota after a successful refund.
+  - The refund log still records the original refunded quota amount.
+- `service/task_billing_test.go`
+  - Existing wallet and subscription refund tests now assert the in-memory task
+    quota is cleared.
+  - Added `TestRefundTaskQuota_PersistsZeroQuota`, which creates a real task row
+    and verifies the database `quota` is persisted to `0` after refund.
+
+Deferred scope:
+
+- Did not change account-pool/channel-pool scheduling, provider priority,
+  plus/pro routing, model pricing, group ratios, or group/model mapping.
+- Did not alter refund funding order; quota is cleared only after funding and
+  token refund steps complete.
+- Deferred log-stat request-id filtering as Phase 12 because it touches
+  controller/model log query contracts rather than task refund state.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./service
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./common ./relay ./service
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/common
+ok   github.com/QuantumNous/new-api/relay
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/common
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+```
+
+## Phase 12 - Log Stat Filter Alignment
+
+Status: planned.
+
+Next phase objective:
+
+Align log-stat filtering with log-list filtering for `request_id` and
+`upstream_request_id`, so admin/user log statistic cards narrow with the same
+request filters as the table. Keep the scope to log query/controller contracts
+only; do not change task billing, scheduling, pricing, routing, or account pool
+behavior.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./controller
+go test ./model ./service ./middleware ./controller
+```
+
+Manual review checks:
+
+- Existing log list filters remain unchanged.
+- Stats without request filters keep their current result.
+- Request-id filtered stats use exact-match semantics and do not introduce LIKE
+  wildcard behavior.

@@ -177,6 +177,13 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	// 2. 退还令牌额度
 	taskAdjustTokenQuota(ctx, task, -quota)
 
+	task.Quota = 0
+	if task.ID != 0 {
+		if err := task.UpdateQuota(); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("任务退款后回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
+		}
+	}
+
 	// 3. 记录日志
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID

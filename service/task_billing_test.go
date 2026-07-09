@@ -222,6 +222,7 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	// Token remain_quota should increase, used_quota should decrease
 	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
 	assert.Equal(t, -preConsumed, getTokenUsedQuota(t, tokenID))
+	assert.Equal(t, 0, task.Quota)
 
 	// A refund log should be created
 	log := getLastLog(t)
@@ -229,6 +230,34 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 	assert.Equal(t, preConsumed, log.Quota)
 	assert.Equal(t, "test-model", log.ModelName)
+}
+
+func TestRefundTaskQuota_PersistsZeroQuota(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 5, 5, 5
+	const initQuota, preConsumed = 10000, 2500
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-test-persist-refund", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
+
+	RefundTaskQuota(ctx, task, "persist refund quota")
+
+	assert.Equal(t, 0, task.Quota)
+	assert.Equal(t, 0, getTaskQuota(t, task.ID))
+	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeRefund, log.Type)
+	assert.Equal(t, preConsumed, log.Quota)
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
@@ -254,6 +283,7 @@ func TestRefundTaskQuota_Subscription(t *testing.T) {
 
 	// Token should also be refunded
 	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, 0, task.Quota)
 
 	log := getLastLog(t)
 	require.NotNil(t, log)
