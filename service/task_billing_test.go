@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"testing"
@@ -460,6 +461,11 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestTaskTokenRecalculatedQuotaSaturates(t *testing.T) {
+	assert.Equal(t, 3000, taskTokenRecalculatedQuota(1000, 1.5, 2, 1))
+	assert.Equal(t, math.MaxInt32, taskTokenRecalculatedQuota(math.MaxInt32, 1.5, 2, 1.8446744073686647e19))
 }
 
 // ===========================================================================

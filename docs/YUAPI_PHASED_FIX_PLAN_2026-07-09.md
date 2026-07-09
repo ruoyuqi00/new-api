@@ -852,9 +852,9 @@ ok   github.com/QuantumNous/new-api/controller
 
 ## Phase 9 - Task Billing Ratio Saturation Triage
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Goal:
 
 Inspect task quota calculation where provider `EstimateBilling` values are
 merged into `PriceData.OtherRatios` and multiplied into pre-consumed quota.
@@ -872,7 +872,18 @@ Boundary:
   tiny display fix.
 - Keep deployment separate unless explicitly requested after tests.
 
-Planned acceptance checks:
+Accepted work for this phase:
+
+- Manually port only the low-risk quota saturation primitive from upstream
+  `d0bd8aac`.
+- Apply saturating float-to-int conversion to task submit `OtherRatios` quota
+  multiplication.
+- Apply the same saturation to submit-time adjusted-ratio recomputation and
+  asynchronous token-based task quota recalculation.
+- Defer upstream `bae799cc` admin audit/UI surfacing because it is broader than
+  this phase and crosses log formatting plus frontend surfaces.
+
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -885,3 +896,108 @@ Manual review checks:
 - Any accepted saturation behavior has a focused overflow or mismatch
   regression test.
 - Deferred upstream billing/audit changes are listed with a reason.
+
+Implementation:
+
+- `common/quota_math.go`
+  - Added `QuotaFromFloat`, a shared saturating conversion for computed quota
+    products.
+  - Clamps overflow to `math.MaxInt32`, underflow to `math.MinInt32`, and `NaN`
+    to `0`.
+- `relay/relay_task.go`
+  - Added `applyTaskOtherRatiosQuota`.
+  - Task submit `OtherRatios` multiplication now computes in float64 and uses
+    `common.QuotaFromFloat` once at the final conversion.
+  - `recalcQuotaFromRatios` now preserves the base quota in float64 while
+    reversing old ratios and clamps the final adjusted quota.
+- `service/task_billing.go`
+  - Added `taskTokenRecalculatedQuota`.
+  - `RecalculateTaskQuotaByTokens` now saturates the final
+    `tokens * modelRatio * groupRatio * otherMultiplier` conversion.
+- Tests:
+  - `common/quota_math_test.go` covers normal values, overflow, underflow,
+    infinities, and `NaN`.
+  - `relay/relay_task_test.go` covers normal task ratio multiplication,
+    overflow saturation, and adjusted-ratio recomputation saturation.
+  - `service/task_billing_test.go` covers normal token recalculation and
+    overflow saturation.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./common ./relay ./service
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/common
+ok   github.com/QuantumNous/new-api/relay
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/common
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+```
+
+## Phase 10 - Billing Saturation Audit Follow-Up
+
+Status: planned.
+
+Next phase objective:
+
+Decide whether YuAPI needs a small admin-only audit marker for quota saturation
+events, using upstream `bae799cc` as a reference. If accepted, keep the scope to
+server-side log metadata only; do not port the broader frontend usage-log UI
+unless a server-side marker would otherwise be invisible to operators.
+
+Boundary:
+
+- Do not change account-pool or channel-pool scheduling semantics.
+- Do not change model prices, group ratios, provider priority, plus/pro
+  routing, or group/model mapping.
+- Do not change quota calculation results from Phase 9.
+- Prefer server-side log metadata over frontend table changes.
+- Keep deployment separate unless explicitly requested after tests.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+Manual review checks:
+
+- Saturation markers, if added, are admin-only and do not leak sensitive
+  channel/key/account data.
+- Normal non-saturated billing logs remain unchanged.
+- Any frontend/admin UI change is explicitly justified or deferred.
