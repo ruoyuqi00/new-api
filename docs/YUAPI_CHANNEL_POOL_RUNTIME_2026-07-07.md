@@ -3,6 +3,9 @@
 This note records the minimal Sub2API scheduler capability absorbed into
 YuAPI/NewAPI for the one-service migration.
 
+For the current live service status and rollback notes, read
+`docs/YUAPI_PRODUCTION_STATUS_2026-07-09.md` first.
+
 ## Goal
 
 Keep YuAPI as the only maintained API service while preserving the two Sub2API

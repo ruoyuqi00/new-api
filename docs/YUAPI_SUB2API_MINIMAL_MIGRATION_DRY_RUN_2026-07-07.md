@@ -7,6 +7,11 @@ and maintenance target.
 It intentionally does not contain real API keys, OAuth refresh tokens,
 passwords, account payloads, or production database credentials.
 
+Current short entry after the 2026-07-09 Sub2API app retirement:
+
+- `docs/YUAPI_PRODUCTION_STATUS_2026-07-09.md`
+- `docs/README.md`
+
 ## Scope
 
 Target shape:

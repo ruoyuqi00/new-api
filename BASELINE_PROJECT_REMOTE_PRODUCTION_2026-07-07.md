@@ -5,6 +5,55 @@ This is the current canonical baseline for the next work window.
 Use this document first. Older YuCore handoff files are now archived under
 `docs/archive/` and should be treated only as historical evidence.
 
+## 2026-07-09 Current Production Update
+
+The production direction changed after the original 2026-07-07 baseline:
+YuAPI/NewAPI is now the maintained public API service for the migrated GPT
+plus/pro text pools. Sub2API is retained as cold reference data, not as the
+plus/pro runtime hop.
+
+Current canonical follow-up documents:
+
+- `docs/YUAPI_PRODUCTION_STATUS_2026-07-09.md`
+  - Current service status, server rollback notes, channel state, and next
+    production work queue.
+- `docs/YUAPI_SUB2API_MINIMAL_MIGRATION_DRY_RUN_2026-07-07.md`
+  - Detailed migration log, channel audit, load smoke, observation window, and
+    Sub2API app retirement record.
+- `docs/YUAPI_CHANNEL_POOL_RUNTIME_2026-07-07.md`
+  - The minimal YuAPI scheduler/runtime patch for per-channel concurrency caps
+    and transient cooldowns.
+- `docs/YUAPI_UPSTREAM_NEWAPI_AUDIT_2026-07-09.md`
+  - Audit of recent `QuantumNous/new-api` upstream fixes and features to
+    consider for selective backport.
+
+Current production branch for YuAPI migration work:
+
+```text
+feature/yuapi-channel-pool-runtime-20260707
+remote: ruoyu/feature/yuapi-channel-pool-runtime-20260707
+latest production-operation record before this doc refresh:
+  9204192d docs: record sub2api app retirement
+latest audited upstream origin/main:
+  a79f9691 fix(affiliate): update referral message
+latest fetched upstream tag:
+  v1.0.0-rc.20
+```
+
+Current server state after the conservative retirement step:
+
+- `newapi` is running `newapi:channel-pool-runtime-20260707-59688c50`.
+- `newapi-mysql` and `newapi-redis` remain the active YuAPI data services.
+- The `sub2api` app container was stopped on 2026-07-09.
+- `sub2api-postgres`, `sub2api-redis`, `sub2api-caddy`, and volumes were kept.
+- `sub2api-caddy` must stay running for now because it still proxies YuAPI
+  domains such as `api.dtrljm.com`.
+- Do not remove Sub2API data volumes until the remaining non-plus/pro adapter
+  paths are either migrated, explicitly retired, or documented as out of scope.
+
+The older sections below remain useful historical context for repo roles and
+remote names, but they no longer describe the live plus/pro runtime shape.
+
 ## Executive Baseline
 
 - The production feature line is `ruoyu/main` in
@@ -25,7 +74,10 @@ Use this document first. Older YuCore handoff files are now archived under
 - URL: `https://github.com/QuantumNous/new-api.git`
 - Role: upstream / new-api reference line.
 - Default branch locally: `origin/main`.
-- Current observed `origin/main`: `12603a77 fix(redemption): add status filtering and cleanup action`
+- 2026-07-07 observed `origin/main`:
+  `12603a77 fix(redemption): add status filtering and cleanup action`
+- 2026-07-09 audited `origin/main`:
+  `a79f9691 fix(affiliate): update referral message`
 - Local `main`: `00d23abf`, tracks `origin/main`, and is behind upstream.
 - Production status: not the ruoyu production branch. Do not use local `main`
   for ruoyu production work.
@@ -116,7 +168,8 @@ or switch compose/systemd deployment to a ruoyu-owned image.
 
 - Remote: `origin`
 - Branch: `origin/main`
-- Observed commit: `12603a77`
+- 2026-07-07 observed commit: `12603a77`
+- 2026-07-09 audited commit: `a79f9691`
 - Product: QuantumNous new-api upstream line.
 - Local status: local `main` tracks this line and is behind it.
 - Role in this workspace: upstream/new-api reference and source of the YuCore
@@ -192,4 +245,3 @@ These files are historical context only:
 - `docs/archive/HANDOFF_YUCORE_MOTION_BRAND_SNAPSHOT_2026-07-07.md`
 
 Use them only when returning to YuCore Studio/Canvas or brand-motion polish.
-
