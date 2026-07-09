@@ -1714,11 +1714,11 @@ Known validation limitation:
   Phase 16 intentionally restored the default TypeScript baseline first and
   limited lint/format acceptance to the newly restored module.
 
-## Phase 17 - Frontend Lint/Format Debt Baseline
+## Phase 17 - Frontend Lint/Format Debt Baseline Batch 1
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Objective:
 
 Clean up the existing YuCore frontend lint/format debt in small, mechanical
 batches so future frontend changes can use narrower and more reliable
@@ -1726,13 +1726,86 @@ acceptance checks. Keep this stage behavior-preserving and frontend-only; do
 not change backend billing, logging, task settlement, scheduling, pricing rules,
 provider priority, account pools, or channel pools.
 
-Planned acceptance checks:
+Implementation:
+
+- Cleaned the first low-risk YuCore frontend lint/format batch:
+  - `components/yucore-command-center.tsx`
+  - `components/yucore-home.tsx`
+  - `components/yucore-terminal-card.tsx`
+  - `components/yucore-persistent-core.tsx`
+  - `i18n/use-yucore-translation.ts`
+- Merged duplicate imports and normalized formatter output in the touched files.
+- Replaced the terminal-card array-index key with a data-derived key.
+- Replaced YuCore i18n interpolation regex `replace` with `replaceAll`.
+- Extracted pure helper functions in `yucore-persistent-core.tsx` to remove
+  nested ternaries and data-derived React key warnings without changing the dot
+  generation formulas.
+- Did not keep partial `yucore-studio-workspace.tsx` cleanup in this batch;
+  that larger file remains scheduled for a dedicated phase.
+- Did not change backend code, schemas, billing, logging semantics, task
+  settlement, scheduling, pricing rules, provider priority, account pools, or
+  channel pools.
+
+Acceptance checks:
 
 ```bash
-bunx oxlint -c .oxlintrc.json src/features/yucore-brand
-bunx oxfmt --check src/features/yucore-brand
-bun run typecheck
-go test ./model ./service ./middleware ./controller
+docker run --rm \
+  -v "${PWD}:/src" \
+  -v yuapi-bun-cache:/root/.bun \
+  -v yuapi-web-node-modules:/src/web/node_modules \
+  -w /src/web/default oven/bun:1.2.23 \
+  bunx oxlint -c .oxlintrc.json \
+  src/features/yucore-brand/components/yucore-command-center.tsx \
+  src/features/yucore-brand/components/yucore-home.tsx \
+  src/features/yucore-brand/components/yucore-terminal-card.tsx \
+  src/features/yucore-brand/i18n/use-yucore-translation.ts \
+  src/features/yucore-brand/components/yucore-persistent-core.tsx
+```
+
+```bash
+docker run --rm \
+  -v "${PWD}:/src" \
+  -v yuapi-bun-cache:/root/.bun \
+  -v yuapi-web-node-modules:/src/web/node_modules \
+  -w /src/web/default oven/bun:1.2.23 \
+  bunx oxfmt --check \
+  src/features/yucore-brand/components/yucore-command-center.tsx \
+  src/features/yucore-brand/components/yucore-home.tsx \
+  src/features/yucore-brand/components/yucore-terminal-card.tsx \
+  src/features/yucore-brand/i18n/use-yucore-translation.ts \
+  src/features/yucore-brand/components/yucore-persistent-core.tsx
+```
+
+```bash
+docker run --rm \
+  -v "${PWD}:/src" \
+  -v yuapi-bun-cache:/root/.bun \
+  -v yuapi-web-node-modules:/src/web/node_modules \
+  -w /src/web/default oven/bun:1.2.23 \
+  bun run typecheck
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+Result:
+
+```text
+Found 0 warnings and 0 errors.
+All matched files use the correct format.
+$ tsgo -b
+
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
 ```
 
 Manual review checks:
@@ -1740,5 +1813,47 @@ Manual review checks:
 - Fix lint and format debt by category, not by broad UI rewrites.
 - Keep YuCore public copy, navigation, routes, and studio behavior unchanged
   unless a lint fix requires a no-op extraction.
+- Do not mix this frontend hygiene work with channel runtime, account-pool,
+  quota, or scheduling changes.
+
+Known validation limitation:
+
+- Full-directory `oxlint` for `src/features/yucore-brand` still reports
+  remaining pre-existing debt after this batch, mostly nested ternaries in
+  `yucore-boot-canvas.tsx`, `yucore-entrance-loader.tsx`,
+  `yucore-motion-canvas.tsx`, and `yucore-studio-workspace.tsx`, plus several
+  Studio hook/key/no-non-null assertion issues.
+- Full-directory `oxfmt --check src/features/yucore-brand` still reports
+  formatting differences in untouched YuCore files. Phase 17 deliberately
+  avoided broad all-directory formatting churn.
+
+## Phase 18 - Frontend Lint/Format Debt Baseline Batch 2
+
+Status: planned.
+
+Next phase objective:
+
+Continue YuCore frontend lint/format cleanup in a dedicated batch for the
+heavier animation and Studio files. Start with one file group at a time
+(`yucore-boot-canvas`, `yucore-entrance-loader`, `yucore-motion-canvas`, then
+`yucore-studio-workspace`) and keep every change behavior-preserving. Do not
+change backend billing, logging, task settlement, scheduling, pricing rules,
+provider priority, account pools, or channel pools.
+
+Planned acceptance checks:
+
+```bash
+bunx oxlint -c .oxlintrc.json <touched YuCore files>
+bunx oxfmt --check <touched YuCore files>
+bun run typecheck
+go test ./model ./service ./middleware ./controller
+```
+
+Manual review checks:
+
+- Prefer pure helper extraction for nested ternaries rather than UI rewrites.
+- Keep generated particle positions, timing formulas, routes, and Studio
+  persistence semantics unchanged unless a lint fix has a clearly equivalent
+  rewrite.
 - Do not mix this frontend hygiene work with channel runtime, account-pool,
   quota, or scheduling changes.
