@@ -650,3 +650,65 @@ Observation summary:
 - Pro real traffic stayed on the existing YuAPI pro pool and stayed clean.
 - No evidence appeared that Sub2API bridge fallback was needed during the
   observation window.
+
+## Conservative Sub2API App Retirement
+
+2026-07-09 16:54 Asia/Shanghai:
+
+- `newapi` had been healthy for about 45 hours on
+  `newapi:channel-pool-runtime-20260707-59688c50`.
+- NewAPI bridge channels `2294` and `2295` remained disabled and had no new
+  hits after the migration cutover.
+- YuAPI plus/pro real traffic after the previous observation window remained
+  clean:
+  - plus token `82` used channel `2322` for 69 successful consume records.
+  - pro token `80` used channel `2308` for 19 successful consume records.
+  - no plus/pro non-consume error records were found.
+- Sub2API `usage_logs` had no records since `2026-07-01`; its latest usage row
+  was from `2026-06-28`.
+- Sub2API public logs still showed health checks, unauthorized probes, and web
+  scans, but no successful billed Sub2API usage.
+
+Action taken:
+
+- Backed up current Sub2API runtime config to:
+  `/opt/migration-backups/yuapi-sub2api-retire-20260709165441`
+- Stopped only the `sub2api` app service:
+
+```bash
+cd /opt/sub2api
+docker compose stop sub2api
+```
+
+Kept running:
+
+- `sub2api-caddy` because it still proxies YuAPI domains such as
+  `api.dtrljm.com`.
+- `sub2api-postgres`.
+- `sub2api-redis`.
+- Kiro/Windsurf/mail helper containers.
+- All Sub2API data volumes and config files.
+
+Post-stop smoke:
+
+```text
+newapi container: healthy
+api.dtrljm.com /: HTTP 200
+plus token 82 / gpt-5.4-mini: HTTP 200, log id 7013, channel id 2323
+pro token 80 / gpt-5.4-mini: HTTP 200, log id 7014, channel id 2308
+sub2api app container: Exited (0)
+sub2api-postgres: healthy
+sub2api-redis: healthy
+sub2api-caddy: running
+```
+
+Rollback command if Sub2API app is unexpectedly needed:
+
+```bash
+cd /opt/sub2api
+docker compose start sub2api
+```
+
+Do not remove Sub2API Postgres/Redis volumes until YuAPI-only operation has
+completed a longer soak and the remaining non-plus/pro adapter paths are either
+migrated, explicitly retired, or documented as out of scope.
