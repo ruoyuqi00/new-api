@@ -422,9 +422,9 @@ ok   github.com/QuantumNous/new-api/relay
 
 ## Phase 5 - Task/Billing Saturation Follow-Up
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Goal:
 
 Review the deferred upstream quota/billing saturation chain and YuAPI's local
 task-billing paths as one small phase. The goal is to decide whether YuAPI needs
@@ -441,7 +441,20 @@ Boundary:
   document it as a candidate and keep the code change out until explicitly
   accepted.
 
-Planned acceptance checks:
+Accepted work for this phase:
+
+- Manually port only the low-risk saturation guard from upstream billing fixes:
+  - `48b7f491`: prevent overflow in `composeTieredTextQuota` by saturating the
+    final tiered quota plus tool-call surcharge total.
+- Keep `d0bd8aac`, `c9943d37`, and `bae799cc` deferred because they are a
+  coordinated validation/saturation/audit batch across task, image, text, audio,
+  and UI surfaces.
+- Do not port the broader audit/UI saturation markers from `bae799cc` in this
+  phase.
+- Do not port tiered pre-consume behavior changes from `3fbad6a7` in this
+  phase.
+
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -454,3 +467,93 @@ Manual review checks:
 - Any clamp or transaction change records how it affects wallet, token, and
   subscription billing.
 - Channel/account-pool lease acquire/release behavior remains unchanged.
+
+Implementation:
+
+- `service/text_quota.go`
+  - Added `quotaFromDecimalSaturating` for the local tiered text quota path.
+  - `composeTieredTextQuota` now saturates the final sum of tiered quota plus
+    tool-call surcharge instead of converting only the surcharge and then doing
+    unchecked integer addition.
+- `service/text_quota_test.go`
+  - Added fallback-path saturation coverage for `tieredQuota + surcharge`.
+  - Added `TieredResult` path saturation coverage for
+    `actualQuotaBeforeGroup * groupRatio + surcharge`.
+  - Existing normal surcharge tests still cover ordinary pricing behavior.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./service
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+```
+
+## Phase 6 - Request Quantity Bounds Triage
+
+Status: planned.
+
+Next phase objective:
+
+Inspect the remaining upstream quantity-validation and saturation candidates
+from `d0bd8aac`/`c9943d37` and choose one narrow request-boundary fix that
+prevents abusive quantity inputs before they enter billing math. Prefer
+validation that rejects impossible user input over deeper billing rewrites.
+
+Boundary:
+
+- Do not change account-pool or channel-pool scheduling semantics.
+- Do not change model prices, group ratios, provider priority, plus/pro routing,
+  or group/model mapping.
+- Do not port the full saturation audit/UI stack from `bae799cc`.
+- Do not change tiered pre-consume defaults from `3fbad6a7`.
+- Keep deployment separate unless explicitly requested after tests.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+go test ./relay/helper ./relay/channel ./relay
+```
+
+Manual review checks:
+
+- The accepted validation change rejects only invalid or abusive quantities.
+- Existing normal image/task/text request quantities remain compatible.
+- Any deferred upstream patch is recorded with a reason.

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -471,4 +473,31 @@ func TestComposeTieredTextQuotaErrorFallbackUsesPreConsumedQuota(t *testing.T) {
 
 	require.Equal(t, int64(12500), summary.ToolCallSurchargeQuota.Round(0).IntPart())
 	require.Equal(t, 14500, quota)
+}
+
+func TestComposeTieredTextQuotaSaturatesFallbackTotal(t *testing.T) {
+	summary := textQuotaSummary{
+		ToolCallSurchargeQuota: decimal.NewFromInt(100),
+	}
+
+	quota := composeTieredTextQuota(&relaycommon.RelayInfo{}, summary, math.MaxInt32-50, nil)
+
+	require.Equal(t, math.MaxInt32, quota)
+}
+
+func TestComposeTieredTextQuotaSaturatesTieredResultTotal(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			GroupRatio: 1,
+		},
+	}
+	summary := textQuotaSummary{
+		ToolCallSurchargeQuota: decimal.NewFromInt(100),
+	}
+
+	quota := composeTieredTextQuota(relayInfo, summary, 0, &billingexpr.TieredResult{
+		ActualQuotaBeforeGroup: float64(math.MaxInt32 - 50),
+	})
+
+	require.Equal(t, math.MaxInt32, quota)
 }

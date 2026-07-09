@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -150,15 +151,24 @@ func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaS
 
 	if tieredResult != nil {
 		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
-			return int(decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup).
+			return quotaFromDecimalSaturating(decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup).
 				Mul(decimal.NewFromFloat(snap.GroupRatio)).
-				Add(summary.ToolCallSurchargeQuota).
-				Round(0).
-				IntPart())
+				Add(summary.ToolCallSurchargeQuota))
 		}
 	}
 
-	return tieredQuota + int(summary.ToolCallSurchargeQuota.Round(0).IntPart())
+	return quotaFromDecimalSaturating(decimal.NewFromInt(int64(tieredQuota)).Add(summary.ToolCallSurchargeQuota))
+}
+
+func quotaFromDecimalSaturating(d decimal.Decimal) int {
+	rounded := d.Round(0)
+	if rounded.GreaterThanOrEqual(decimal.NewFromInt(math.MaxInt32)) {
+		return math.MaxInt32
+	}
+	if rounded.LessThanOrEqual(decimal.NewFromInt(math.MinInt32)) {
+		return math.MinInt32
+	}
+	return int(rounded.IntPart())
 }
 
 func isImageGenerationOnlyBillingModel(modelName string) bool {
