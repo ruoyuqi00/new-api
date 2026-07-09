@@ -1217,9 +1217,9 @@ ok   github.com/QuantumNous/new-api/relay/channel
 
 ## Phase 12 - Log Stat Filter Alignment
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Objective:
 
 Align log-stat filtering with log-list filtering for `request_id` and
 `upstream_request_id`, so admin/user log statistic cards narrow with the same
@@ -1227,7 +1227,7 @@ request filters as the table. Keep the scope to log query/controller contracts
 only; do not change task billing, scheduling, pricing, routing, or account pool
 behavior.
 
-Planned acceptance checks:
+Acceptance checks:
 
 ```bash
 go test ./model ./controller
@@ -1240,3 +1240,105 @@ Manual review checks:
 - Stats without request filters keep their current result.
 - Request-id filtered stats use exact-match semantics and do not introduce LIKE
   wildcard behavior.
+
+Implementation:
+
+- `controller/log.go`
+  - `GetLogsStat` now reads `request_id` and `upstream_request_id`.
+  - `GetLogsSelfStat` now reads the same request-id filters.
+- `model/log.go`
+  - `SumUsedQuota` now accepts `requestId` and `upstreamRequestId`.
+  - Both the quota sum query and the recent RPM/TPM query apply exact
+    `request_id = ?` and `upstream_request_id = ?` filters when provided.
+- `model/log_stat_test.go`
+  - Added request-id and upstream-request-id coverage for quota, RPM, and TPM.
+  - Confirms missing request ids return zero stats.
+
+Deferred scope:
+
+- Did not change log list filtering behavior.
+- Did not change `type` statistic semantics; existing stats continue to count
+  consume logs for quota/RPM/TPM.
+- Did not change task billing, scheduling, pricing, routing, account-pool, or
+  channel-pool behavior.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./common ./relay ./service
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/common
+ok   github.com/QuantumNous/new-api/relay
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/relay/common
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+```
+
+## Phase 13 - Async Task Billing Node Metadata
+
+Status: planned.
+
+Next phase objective:
+
+Improve async task billing log observability by recording the originating
+`node_name` in admin-only log metadata for task refunds and task quota
+recalculations. Keep this as a metadata-only change; do not add request-id
+persistence, schema changes, billing amount changes, scheduling changes, or
+account/channel pool changes in this phase.
+
+Planned acceptance checks:
+
+```bash
+go test ./service
+go test ./model ./service ./middleware ./controller
+```
+
+Manual review checks:
+
+- `node_name` is admin-only and stripped from user-visible log responses.
+- Existing log `Other` fields are preserved.
+- Funding/token quota refund and settlement order remains unchanged.
