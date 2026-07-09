@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 )
 
 func resetChannelPoolRuntimeForTest(t *testing.T) {
@@ -21,6 +22,28 @@ func resetChannelPoolRuntimeForTest(t *testing.T) {
 		channelPoolMemoryInflight = map[int]int{}
 		channelPoolMemoryCooldown = map[string]time.Time{}
 		channelPoolMemoryMu.Unlock()
+	})
+}
+
+func resetChannelPoolSelectionCacheForTest(t *testing.T) {
+	t.Helper()
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
+	oldGroup2Model2Channels := group2model2channels
+	oldChannelsIDM := channelsIDM
+	oldChannel2AdvancedCustomConfig := channel2advancedCustomConfig
+	common.MemoryCacheEnabled = true
+	channelSyncLock.Lock()
+	group2model2channels = map[string]map[string][]int{}
+	channelsIDM = map[int]*Channel{}
+	channel2advancedCustomConfig = map[int]*dto.AdvancedCustomConfig{}
+	channelSyncLock.Unlock()
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = oldMemoryCacheEnabled
+		channelSyncLock.Lock()
+		group2model2channels = oldGroup2Model2Channels
+		channelsIDM = oldChannelsIDM
+		channel2advancedCustomConfig = oldChannel2AdvancedCustomConfig
+		channelSyncLock.Unlock()
 	})
 }
 
@@ -58,6 +81,114 @@ func TestChannelPoolMemoryLeaseHonorsLimitAndRelease(t *testing.T) {
 	thirdLease.Release()
 }
 
+func TestChannelPoolCandidateStatusReportsReasons(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+
+	nilStatus := ChannelPoolCandidateStatusFor(nil, "gpt-plus", "gpt-5")
+	if nilStatus.Available {
+		t.Fatalf("nil channel should not be available")
+	}
+	if nilStatus.Reason != ChannelPoolCandidateReasonNoChannel {
+		t.Fatalf("nil channel reason mismatch: %s", nilStatus.Reason)
+	}
+
+	unlimited := &Channel{Id: 10}
+	unlimitedStatus := ChannelPoolCandidateStatusFor(unlimited, "gpt-plus", "gpt-5")
+	if !unlimitedStatus.Available || unlimitedStatus.Reason != ChannelPoolCandidateReasonAvailable {
+		t.Fatalf("unlimited channel should be available, got %+v", unlimitedStatus)
+	}
+	if unlimitedStatus.HasHardLimit || unlimitedStatus.Limit != 0 || unlimitedStatus.Inflight != 0 {
+		t.Fatalf("unlimited channel should not report hard limit state, got %+v", unlimitedStatus)
+	}
+
+	limited := &Channel{
+		Id:            11,
+		OtherSettings: `{"channel_pool_concurrency_limit":1}`,
+	}
+	initialStatus := ChannelPoolCandidateStatusFor(limited, "gpt-plus", "gpt-5")
+	if !initialStatus.Available || initialStatus.Reason != ChannelPoolCandidateReasonAvailable {
+		t.Fatalf("limited channel should start available, got %+v", initialStatus)
+	}
+	if !initialStatus.HasHardLimit || initialStatus.Limit != 1 || initialStatus.Inflight != 0 {
+		t.Fatalf("limited channel should report empty hard limit state, got %+v", initialStatus)
+	}
+
+	lease, acquired, err := AcquireChannelPoolLease(limited)
+	if err != nil {
+		t.Fatalf("AcquireChannelPoolLease returned error: %v", err)
+	}
+	if !acquired || lease == nil {
+		t.Fatalf("limited channel lease should be acquired")
+	}
+	fullStatus := ChannelPoolCandidateStatusFor(limited, "gpt-plus", "gpt-5")
+	if fullStatus.Available || fullStatus.Reason != ChannelPoolCandidateReasonFull {
+		t.Fatalf("limited channel should report full, got %+v", fullStatus)
+	}
+	if fullStatus.Limit != 1 || fullStatus.Inflight != 1 || !fullStatus.HasHardLimit {
+		t.Fatalf("limited channel full status mismatch: %+v", fullStatus)
+	}
+	lease.Release()
+}
+
+func TestChannelPoolSelectionSnapshotCountsCandidateReasons(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+
+	skipped := &Channel{
+		Id:            21,
+		OtherSettings: `{"channel_pool_concurrency_limit":1}`,
+	}
+	full := &Channel{
+		Id:            22,
+		OtherSettings: `{"channel_pool_concurrency_limit":1}`,
+	}
+	cooling := &Channel{
+		Id:            23,
+		OtherSettings: `{"channel_pool_concurrency_limit":1}`,
+	}
+	available := &Channel{
+		Id:            25,
+		OtherSettings: `{"channel_pool_concurrency_limit":1}`,
+	}
+
+	lease, acquired, err := AcquireChannelPoolLease(full)
+	if err != nil {
+		t.Fatalf("AcquireChannelPoolLease returned error: %v", err)
+	}
+	if !acquired || lease == nil {
+		t.Fatalf("full channel lease should be acquired")
+	}
+	t.Cleanup(lease.Release)
+	CooldownChannelPool(cooling.Id, "gpt-plus", "gpt-5", 30, "test")
+
+	channelSyncLock.Lock()
+	group2model2channels["gpt-plus"] = map[string][]int{
+		"gpt-5": {skipped.Id, full.Id, cooling.Id, 24, available.Id},
+	}
+	channelsIDM[skipped.Id] = skipped
+	channelsIDM[full.Id] = full
+	channelsIDM[cooling.Id] = cooling
+	channelsIDM[available.Id] = available
+	channelSyncLock.Unlock()
+
+	snapshot := ChannelPoolSelectionSnapshotFor("gpt-plus", "gpt-5", "", ChannelSelectionOptions{
+		SkipChannelIDs: map[int]struct{}{skipped.Id: {}},
+	})
+
+	if !snapshot.CacheEnabled {
+		t.Fatalf("snapshot should report memory cache enabled")
+	}
+	if snapshot.CandidateCount != 3 {
+		t.Fatalf("candidate count mismatch: %+v", snapshot)
+	}
+	if snapshot.AvailableCount != 1 || snapshot.FullCount != 1 || snapshot.CooldownCount != 1 {
+		t.Fatalf("reason counts mismatch: %+v", snapshot)
+	}
+	if snapshot.MissingChannelCount != 1 || snapshot.SelectionSkippedCount != 1 || snapshot.PathSkippedCount != 0 {
+		t.Fatalf("filter counts mismatch: %+v", snapshot)
+	}
+}
+
 func TestChannelPoolCooldownMakesCandidateUnavailable(t *testing.T) {
 	resetChannelPoolRuntimeForTest(t)
 
@@ -68,6 +199,10 @@ func TestChannelPoolCooldownMakesCandidateUnavailable(t *testing.T) {
 	CooldownChannelPool(channel.Id, "gpt-plus", "gpt-5", 30, "test")
 	if ChannelPoolCandidateAvailable(channel, "gpt-plus", "gpt-5") {
 		t.Fatalf("candidate should be unavailable during cooldown")
+	}
+	status := ChannelPoolCandidateStatusFor(channel, "gpt-plus", "gpt-5")
+	if status.Available || status.Reason != ChannelPoolCandidateReasonCooldown || !status.CoolingDown {
+		t.Fatalf("candidate should report cooldown, got %+v", status)
 	}
 	if !ChannelPoolCandidateAvailable(channel, "gpt-team", "gpt-5") {
 		t.Fatalf("cooldown should be scoped by group and model")

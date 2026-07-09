@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -135,6 +136,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 
 			channel, _ = model.GetRandomSatisfiedChannelWithOptions(autoGroup, param.ModelName, priorityRetry, param.RequestPath, param.ChannelSelectionOptions())
 			if channel == nil {
+				logChannelPoolSelectionSnapshot(param.Ctx, autoGroup, param.ModelName, priorityRetry, param.RequestPath, param.ChannelSelectionOptions())
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
 				logger.LogDebug(param.Ctx, "No available channel in group %s for model %s at priorityRetry %d, trying next group", autoGroup, param.ModelName, priorityRetry)
@@ -175,6 +177,32 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
+		if channel == nil {
+			logChannelPoolSelectionSnapshot(param.Ctx, param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath, param.ChannelSelectionOptions())
+		}
 	}
 	return channel, selectGroup, nil
+}
+
+func logChannelPoolSelectionSnapshot(ctx *gin.Context, group string, modelName string, retry int, requestPath string, options model.ChannelSelectionOptions) {
+	snapshot := model.ChannelPoolSelectionSnapshotFor(group, modelName, requestPath, options)
+	msg := fmt.Sprintf(
+		"channel pool selection snapshot: group=%s model=%s retry=%d cache=%t candidates=%d available=%d full=%d cooldown=%d missing=%d skipped=%d path_skipped=%d",
+		group,
+		modelName,
+		retry,
+		snapshot.CacheEnabled,
+		snapshot.CandidateCount,
+		snapshot.AvailableCount,
+		snapshot.FullCount,
+		snapshot.CooldownCount,
+		snapshot.MissingChannelCount,
+		snapshot.SelectionSkippedCount,
+		snapshot.PathSkippedCount,
+	)
+	if snapshot.FullCount > 0 || snapshot.CooldownCount > 0 {
+		logger.LogWarn(ctx, msg)
+		return
+	}
+	logger.LogDebug(ctx, msg)
 }

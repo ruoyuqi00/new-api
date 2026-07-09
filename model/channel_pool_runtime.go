@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 const (
@@ -28,6 +30,34 @@ var (
 
 type ChannelSelectionOptions struct {
 	SkipChannelIDs map[int]struct{}
+}
+
+const (
+	ChannelPoolCandidateReasonAvailable = "available"
+	ChannelPoolCandidateReasonCooldown  = "cooldown"
+	ChannelPoolCandidateReasonFull      = "full"
+	ChannelPoolCandidateReasonNoChannel = "no_channel"
+)
+
+type ChannelPoolCandidateStatus struct {
+	ChannelID    int
+	Available    bool
+	Reason       string
+	Limit        int
+	Inflight     int
+	CoolingDown  bool
+	HasHardLimit bool
+}
+
+type ChannelPoolSelectionSnapshot struct {
+	CacheEnabled          bool
+	CandidateCount        int
+	AvailableCount        int
+	FullCount             int
+	CooldownCount         int
+	MissingChannelCount   int
+	SelectionSkippedCount int
+	PathSkippedCount      int
 }
 
 type ChannelPoolLease struct {
@@ -72,17 +102,103 @@ func ChannelPoolCooldownSeconds(channel *Channel) int {
 }
 
 func ChannelPoolCandidateAvailable(channel *Channel, group string, modelName string) bool {
-	if channel == nil {
-		return false
+	return ChannelPoolCandidateStatusFor(channel, group, modelName).Available
+}
+
+func ChannelPoolCandidateStatusFor(channel *Channel, group string, modelName string) ChannelPoolCandidateStatus {
+	status := ChannelPoolCandidateStatus{
+		Reason: ChannelPoolCandidateReasonNoChannel,
 	}
+	if channel == nil {
+		return status
+	}
+	status.ChannelID = channel.Id
 	if isChannelPoolCoolingDown(channel.Id, group, modelName) {
-		return false
+		status.Reason = ChannelPoolCandidateReasonCooldown
+		status.CoolingDown = true
+		return status
 	}
 	limit := ChannelPoolConcurrencyLimit(channel)
+	status.Limit = limit
 	if limit <= 0 {
-		return true
+		status.Reason = ChannelPoolCandidateReasonAvailable
+		status.Available = true
+		return status
 	}
-	return getChannelPoolInflight(channel.Id) < limit
+	status.HasHardLimit = true
+	status.Inflight = getChannelPoolInflight(channel.Id)
+	if status.Inflight >= limit {
+		status.Reason = ChannelPoolCandidateReasonFull
+		return status
+	}
+	status.Reason = ChannelPoolCandidateReasonAvailable
+	status.Available = true
+	return status
+}
+
+func ChannelPoolSelectionSnapshotFor(group string, modelName string, requestPath string, options ChannelSelectionOptions) ChannelPoolSelectionSnapshot {
+	snapshot := ChannelPoolSelectionSnapshot{
+		CacheEnabled: common.MemoryCacheEnabled,
+	}
+	if !common.MemoryCacheEnabled {
+		return snapshot
+	}
+
+	var candidates []*Channel
+	channelSyncLock.RLock()
+	if group2model2channels == nil {
+		channelSyncLock.RUnlock()
+		return snapshot
+	}
+
+	seen := make(map[int]struct{})
+	collectModelCandidates := func(lookupModel string) {
+		for _, channelID := range group2model2channels[group][lookupModel] {
+			if _, ok := seen[channelID]; ok {
+				continue
+			}
+			seen[channelID] = struct{}{}
+
+			channel, ok := channelsIDM[channelID]
+			if ok && !channelPoolPathAllowed(channelID, channel, requestPath) {
+				snapshot.PathSkippedCount++
+				continue
+			}
+			if _, skip := options.SkipChannelIDs[channelID]; skip {
+				snapshot.SelectionSkippedCount++
+				continue
+			}
+			if !ok {
+				snapshot.MissingChannelCount++
+				continue
+			}
+
+			snapshot.CandidateCount++
+			candidates = append(candidates, channel)
+		}
+	}
+
+	collectModelCandidates(modelName)
+	normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+	if normalizedModel != modelName {
+		collectModelCandidates(normalizedModel)
+	}
+	channelSyncLock.RUnlock()
+
+	for _, channel := range candidates {
+		status := ChannelPoolCandidateStatusFor(channel, group, modelName)
+		switch status.Reason {
+		case ChannelPoolCandidateReasonFull:
+			snapshot.FullCount++
+		case ChannelPoolCandidateReasonCooldown:
+			snapshot.CooldownCount++
+		default:
+			if status.Available {
+				snapshot.AvailableCount++
+			}
+		}
+	}
+	return snapshot
 }
 
 func AcquireChannelPoolLease(channel *Channel) (*ChannelPoolLease, bool, error) {
@@ -98,6 +214,14 @@ func AcquireChannelPoolLease(channel *Channel) (*ChannelPoolLease, bool, error) 
 	}
 	lease := acquireMemoryChannelPoolSlot(channel.Id, limit)
 	return lease, lease != nil, nil
+}
+
+func channelPoolPathAllowed(channelID int, channel *Channel, requestPath string) bool {
+	if requestPath == "" || channel == nil || channel.Type != constant.ChannelTypeAdvancedCustom {
+		return true
+	}
+	config := channel2advancedCustomConfig[channelID]
+	return config != nil && config.SupportsPath(requestPath)
 }
 
 func CooldownChannelPool(channelID int, group string, modelName string, seconds int, reason string) {

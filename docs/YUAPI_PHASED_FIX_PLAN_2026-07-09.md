@@ -196,9 +196,9 @@ ok   github.com/QuantumNous/new-api/controller
 
 ## Phase 3 - Channel-Pool Scheduler Observability
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Goal:
 
 Harden YuAPI channel-pool scheduling visibility without changing the current
 plus/pro routing policy. Add enough counters/log context/tests to explain why a
@@ -212,7 +212,7 @@ Boundary:
 - Do not delete or rewrite existing plus/pro channels.
 - Keep lease acquire/release behavior explicit and covered by focused tests.
 
-Planned acceptance checks:
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -226,3 +226,110 @@ Manual review checks:
   disconnect paths.
 - Added observability does not expose API keys, OAuth tokens, or account
   credentials.
+
+Implementation:
+
+- `model/channel_pool_runtime.go`
+  - Added `ChannelPoolCandidateStatusFor`, which preserves the existing
+    availability decision while exposing a non-secret reason:
+    `available`, `full`, `cooldown`, or `no_channel`.
+  - Added `ChannelPoolSelectionSnapshotFor`, a read-only selection summary for
+    empty channel-selection results. It reports candidate, available, full,
+    cooldown, missing, skipped, and path-skipped counts.
+  - Kept channel-cache locking narrow: the snapshot collects candidate channel
+    pointers under the cache read lock, then checks cooldown/inflight state
+    after releasing it.
+- `service/channel_pool.go`
+  - Added request-scoped lease logs for reuse, replacement, full acquire,
+    acquire, and release paths.
+  - Added context-aware affinity skip logging via
+    `IsChannelPoolTemporarilyUnavailableWithContext`.
+  - Log payloads only include channel id, group, model, reason, limit,
+    inflight, cooldown, and hard-limit state. They do not include API keys,
+    OAuth tokens, token keys, channel keys, or account credentials.
+- `service/channel_select.go`
+  - Logs a channel-pool selection snapshot when random selection returns no
+    channel.
+  - Uses warn level only when the snapshot shows `full` or `cooldown`; ordinary
+    no-candidate snapshots remain debug-only.
+- `middleware/distributor.go`
+  - Affinity channel-pool skip checks now use the context-aware service wrapper
+    so production logs keep the request id.
+- `model/channel_pool_runtime_test.go`
+  - Added coverage for candidate status reasons and selection snapshot counts.
+- `service/channel_pool_test.go`
+  - Added focused service tests proving same-channel lease reuse does not
+    double-count, replacing a selected channel releases the old lease, release
+    is idempotent, and full state remains visible through the context-aware
+    wrapper.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+```
+
+## Phase 4 - Upstream Fix Triage And Low-Risk Bug Sweep
+
+Status: planned.
+
+Next phase objective:
+
+Compare YuAPI against the current upstream `QuantumNous/new-api` fix stream and
+select only low-risk bug fixes that do not disturb YuAPI provider adapters,
+plus/pro routing, group/model mapping, account-pool scheduling, or billing.
+If no upstream fix is worth merging immediately, run a local bug sweep focused
+on relay error handling, quota settlement edge cases, and channel selection
+fallbacks.
+
+Boundary:
+
+- Do not rebase YuAPI onto upstream or bulk-merge upstream feature work.
+- Do not change production channel/account data, provider priority, pricing, or
+  plus/pro channel routing.
+- Treat upstream patches as candidates; each accepted patch needs a small diff,
+  focused tests, and a documented reason.
+- Keep deployment separate from this phase unless explicitly requested after
+  code review and tests.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+go test ./relay/helper ./relay/channel ./relay
+```
+
+Manual review checks:
+
+- Every imported upstream fix has a referenced commit or PR and a YuAPI-specific
+  compatibility note.
+- Rejected upstream changes are listed with a short reason.
+- Any locally found bug has a reproduction note or focused regression test.

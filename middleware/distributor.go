@@ -115,7 +115,7 @@ func Distribute() func(c *gin.Context) {
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
 								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
-									if service.IsChannelPoolTemporarilyUnavailable(preferred, g, modelRequest.Model) {
+									if service.IsChannelPoolTemporarilyUnavailableWithContext(c, preferred, g, modelRequest.Model) {
 										affinityTemporarilyUnavailable = true
 										continue
 									}
@@ -129,7 +129,7 @@ func Distribute() func(c *gin.Context) {
 								}
 							}
 						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-							if service.IsChannelPoolTemporarilyUnavailable(preferred, usingGroup, modelRequest.Model) {
+							if service.IsChannelPoolTemporarilyUnavailableWithContext(c, preferred, usingGroup, modelRequest.Model) {
 								affinityTemporarilyUnavailable = true
 							} else {
 								channel = preferred

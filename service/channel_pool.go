@@ -23,23 +23,31 @@ func TryAcquireChannelPoolLease(c *gin.Context, channel *model.Channel) (bool, e
 	if existing, ok := c.Get(ginKeyChannelPoolLease); ok {
 		if lease, ok := existing.(*model.ChannelPoolLease); ok && lease != nil {
 			if lease.ChannelID() == channel.Id {
+				logger.LogDebug(c, "channel pool lease reuse: channel #%d", channel.Id)
 				return true, nil
 			}
+			logger.LogWarn(c, fmt.Sprintf("channel pool lease replaced: old_channel #%d new_channel #%d", lease.ChannelID(), channel.Id))
 			lease.Release()
 			c.Set(ginKeyChannelPoolLease, nil)
 		}
 	}
+	group := channelPoolGroup(c)
+	modelName := channelPoolModel(c)
+	beforeAcquireStatus := model.ChannelPoolCandidateStatusFor(channel, group, modelName)
 	lease, acquired, err := model.AcquireChannelPoolLease(channel)
 	if err != nil {
 		logger.LogError(c, fmt.Sprintf("channel pool acquire failed open (channel #%d): %v", channel.Id, err))
 		return true, nil
 	}
 	if !acquired {
+		fullStatus := model.ChannelPoolCandidateStatusFor(channel, group, modelName)
+		logger.LogWarn(c, channelPoolDecisionLogMessage("full", fullStatus, group, modelName))
 		return false, nil
 	}
 	if lease != nil {
 		c.Set(ginKeyChannelPoolLease, lease)
 	}
+	logger.LogDebug(c, channelPoolDecisionLogMessage("acquired", beforeAcquireStatus, group, modelName))
 	return true, nil
 }
 
@@ -53,13 +61,23 @@ func ReleaseCurrentChannelPoolLease(c *gin.Context) {
 	}
 	lease, ok := existing.(*model.ChannelPoolLease)
 	if ok && lease != nil {
+		logger.LogDebug(c, "channel pool lease release: channel #%d", lease.ChannelID())
 		lease.Release()
 	}
 	c.Set(ginKeyChannelPoolLease, nil)
 }
 
 func IsChannelPoolTemporarilyUnavailable(channel *model.Channel, group string, modelName string) bool {
-	return !model.ChannelPoolCandidateAvailable(channel, group, modelName)
+	status := model.ChannelPoolCandidateStatusFor(channel, group, modelName)
+	return !status.Available
+}
+
+func IsChannelPoolTemporarilyUnavailableWithContext(c *gin.Context, channel *model.Channel, group string, modelName string) bool {
+	status := model.ChannelPoolCandidateStatusFor(channel, group, modelName)
+	if !status.Available {
+		logger.LogWarn(c, channelPoolDecisionLogMessage("skip", status, group, modelName))
+	}
+	return !status.Available
 }
 
 func NewChannelPoolFullError(channel *model.Channel) *types.NewAPIError {
@@ -115,4 +133,30 @@ func shouldCooldownChannelPool(err *types.NewAPIError) bool {
 		return true
 	}
 	return false
+}
+
+func channelPoolDecisionLogMessage(action string, status model.ChannelPoolCandidateStatus, group string, modelName string) string {
+	return fmt.Sprintf("channel pool %s: channel #%d group=%s model=%s reason=%s limit=%d inflight=%d cooldown=%t hard_limit=%t",
+		action,
+		status.ChannelID,
+		group,
+		modelName,
+		status.Reason,
+		status.Limit,
+		status.Inflight,
+		status.CoolingDown,
+		status.HasHardLimit,
+	)
+}
+
+func channelPoolGroup(c *gin.Context) string {
+	group := common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
+	if group != "" {
+		return group
+	}
+	return common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+}
+
+func channelPoolModel(c *gin.Context) string {
+	return common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 }
