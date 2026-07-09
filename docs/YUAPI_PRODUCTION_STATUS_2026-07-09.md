@@ -133,3 +133,4 @@ The bridge channels are disabled but preserved.
 - `docs/YUAPI_CHANNEL_POOL_RUNTIME_2026-07-07.md`
 - `docs/YUAPI_SUB2API_MINIMAL_MIGRATION_DRY_RUN_2026-07-07.md`
 - `docs/YUAPI_UPSTREAM_NEWAPI_AUDIT_2026-07-09.md`
+- `docs/YUAPI_PHASED_FIX_PLAN_2026-07-09.md`

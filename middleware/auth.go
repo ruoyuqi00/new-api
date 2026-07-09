@@ -273,6 +273,14 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			c.Abort()
 			return
 		}
+		if token.Status == common.TokenStatusDisabled {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgTokenStatusUnavailable),
+			})
+			c.Abort()
+			return
+		}
 
 		userCache, err := model.GetUserCache(token.UserId)
 		if err != nil {
