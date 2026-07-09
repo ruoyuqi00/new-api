@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,6 +79,139 @@ func validatePrompt(prompt string) *dto.TaskError {
 	return nil
 }
 
+// MaxTaskDurationSeconds caps user-supplied video duration before it can be
+// used as a billing multiplier through task OtherRatios.
+const MaxTaskDurationSeconds = 3600
+
+func validateTaskDurationBounds(req TaskSubmitReq) *dto.TaskError {
+	if taskErr := validateTaskDurationValue("duration", req.Duration, false); taskErr != nil {
+		return taskErr
+	}
+	if taskErr := validateTaskDurationValue("seconds", req.Seconds, true); taskErr != nil {
+		return taskErr
+	}
+	return validateMetadataTaskDurationBounds(req.Metadata)
+}
+
+func validateMetadataTaskDurationBounds(metadata map[string]interface{}) *dto.TaskError {
+	if metadata == nil {
+		return nil
+	}
+	for _, key := range []string{"duration", "durationSeconds"} {
+		if value, ok := metadata[key]; ok {
+			if taskErr := validateTaskDurationValue("metadata."+key, value, true); taskErr != nil {
+				return taskErr
+			}
+		}
+	}
+	if rawParameters, ok := metadata["parameters"]; ok {
+		if parameters, ok := rawParameters.(map[string]interface{}); ok {
+			for _, key := range []string{"duration", "durationSeconds"} {
+				if value, exists := parameters[key]; exists {
+					if taskErr := validateTaskDurationValue("metadata.parameters."+key, value, true); taskErr != nil {
+						return taskErr
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateTaskDurationValue(field string, value interface{}, allowEmpty bool) *dto.TaskError {
+	seconds, exists, err := parseTaskDurationValue(value, allowEmpty)
+	if err != nil || !exists {
+		if !exists {
+			return nil
+		}
+		return invalidTaskDurationError(field)
+	}
+	if seconds < 0 || seconds > MaxTaskDurationSeconds {
+		return invalidTaskDurationError(field)
+	}
+	return nil
+}
+
+func invalidTaskDurationError(field string) *dto.TaskError {
+	return createTaskError(
+		fmt.Errorf("%s must be an integer between 0 and %d", field, MaxTaskDurationSeconds),
+		"invalid_seconds",
+		http.StatusBadRequest,
+		true,
+	)
+}
+
+func parseTaskDurationValue(value interface{}, allowEmpty bool) (int, bool, error) {
+	switch v := value.(type) {
+	case nil:
+		return 0, false, nil
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" && allowEmpty {
+			return 0, false, nil
+		}
+		seconds, err := strconv.Atoi(trimmed)
+		if err != nil {
+			return 0, true, err
+		}
+		return seconds, true, nil
+	case int:
+		return v, true, nil
+	case int8:
+		return int(v), true, nil
+	case int16:
+		return int(v), true, nil
+	case int32:
+		return int(v), true, nil
+	case int64:
+		if v > int64(MaxTaskDurationSeconds) {
+			return MaxTaskDurationSeconds + 1, true, nil
+		}
+		if v < 0 {
+			return -1, true, nil
+		}
+		return int(v), true, nil
+	case uint:
+		if v > uint(MaxTaskDurationSeconds) {
+			return MaxTaskDurationSeconds + 1, true, nil
+		}
+		return int(v), true, nil
+	case uint8:
+		return int(v), true, nil
+	case uint16:
+		return int(v), true, nil
+	case uint32:
+		if v > uint32(MaxTaskDurationSeconds) {
+			return MaxTaskDurationSeconds + 1, true, nil
+		}
+		return int(v), true, nil
+	case uint64:
+		if v > uint64(MaxTaskDurationSeconds) {
+			return MaxTaskDurationSeconds + 1, true, nil
+		}
+		return int(v), true, nil
+	case float32:
+		return parseTaskDurationFloat(float64(v))
+	case float64:
+		return parseTaskDurationFloat(v)
+	default:
+		return 0, true, fmt.Errorf("unsupported duration value %T", value)
+	}
+}
+
+func parseTaskDurationFloat(value float64) (int, bool, error) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value != math.Trunc(value) {
+		return 0, true, fmt.Errorf("duration must be an integer")
+	}
+	if value > float64(MaxTaskDurationSeconds) {
+		return MaxTaskDurationSeconds + 1, true, nil
+	}
+	if value < 0 {
+		return -1, true, nil
+	}
+	return int(value), true, nil
+}
+
 func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string) (TaskSubmitReq, error) {
 	var req TaskSubmitReq
 	if _, err := c.MultipartForm(); err != nil {
@@ -95,6 +229,7 @@ func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string
 	}
 
 	if durationStr := formData.Get("seconds"); durationStr != "" {
+		req.Seconds = durationStr
 		if duration, err := strconv.Atoi(durationStr); err == nil {
 			req.Duration = duration
 		}
@@ -156,6 +291,10 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 		return taskErr
 	}
 
+	if taskErr := validateTaskDurationBounds(req); taskErr != nil {
+		return taskErr
+	}
+
 	action := constant.TaskActionTextGenerate
 	if hasInputReference {
 		action = constant.TaskActionGenerate
@@ -214,6 +353,10 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 	}
 
 	if taskErr := validatePrompt(req.Prompt); taskErr != nil {
+		return taskErr
+	}
+
+	if taskErr := validateTaskDurationBounds(req); taskErr != nil {
 		return taskErr
 	}
 

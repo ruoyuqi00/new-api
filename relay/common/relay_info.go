@@ -723,10 +723,16 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 			t.Duration = durationInt
 		} else {
 			var durationStr string
-			if err := common.Unmarshal(aux.Duration, &durationStr); err == nil && durationStr != "" {
-				if v, err := strconv.Atoi(durationStr); err == nil {
-					t.Duration = v
+			if err := common.Unmarshal(aux.Duration, &durationStr); err != nil {
+				return fmt.Errorf("duration must be an integer")
+			}
+			durationStr = strings.TrimSpace(durationStr)
+			if durationStr != "" {
+				v, err := strconv.Atoi(durationStr)
+				if err != nil {
+					return fmt.Errorf("duration must be an integer: %w", err)
 				}
+				t.Duration = v
 			}
 		}
 	}

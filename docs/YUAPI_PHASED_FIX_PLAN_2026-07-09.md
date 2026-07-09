@@ -730,9 +730,9 @@ ok   github.com/QuantumNous/new-api/relay
 
 ## Phase 8 - Task Duration Bounds Follow-Up
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Goal:
 
 Inspect the remaining upstream task duration bound from `d0bd8aac` and decide
 whether YuAPI should reject abusive video task `seconds` / `duration` values at
@@ -746,7 +746,18 @@ Boundary:
 - Do not port broad quota math conversion or admin audit UI changes.
 - Keep deployment separate unless explicitly requested after tests.
 
-Planned acceptance checks:
+Accepted work for this phase:
+
+- Add a shared task-duration request validator for YuAPI task submit paths.
+- Reject negative, non-numeric, overflowed, or above-bound `seconds` values.
+- Reject negative or above-bound `duration` values.
+- Reject task metadata duration values that can override provider request or
+  task `OtherRatios`, including `metadata.durationSeconds` and
+  `metadata.parameters.duration`.
+- Preserve provider-specific default duration behavior when duration is absent
+  or zero.
+
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -759,3 +770,118 @@ Manual review checks:
 - Invalid or abusive duration values are rejected before they reach
   `OtherRatios`.
 - Provider-specific default duration behavior remains unchanged.
+
+Review notes:
+
+- A read-only subagent audit confirmed that `ValidateMultipartDirect` and
+  `ValidateBasicTaskRequest` were the right shared request-boundary hooks.
+- The audit also confirmed metadata duration bypasses for Gemini/Vertex
+  `durationSeconds` and Ali `parameters.duration`; those are included in this
+  phase because they feed task duration multipliers.
+- No duration field participates in account-pool or channel-pool selection.
+  Local request rejection happens before bad values can reach upstream
+  provider calls or cooldown handling.
+
+Implementation:
+
+- `relay/common/relay_utils.go`
+  - Added `MaxTaskDurationSeconds = 3600`.
+  - Added shared task duration validation for standard `duration`, standard
+    `seconds`, `metadata.duration`, `metadata.durationSeconds`,
+    `metadata.parameters.duration`, and
+    `metadata.parameters.durationSeconds`.
+  - `ValidateMultipartDirect` and `ValidateBasicTaskRequest` now reject bad
+    duration fields before storing `task_request`.
+  - Multipart task parsing now preserves explicit `seconds` strings so
+    non-numeric values cannot be silently dropped.
+- `relay/common/relay_info.go`
+  - `TaskSubmitReq.UnmarshalJSON` now returns a validation error for explicit
+    non-integer or overflowed JSON `duration` values instead of silently
+    normalizing them to zero.
+- `relay/common/relay_utils_test.go`
+  - Added JSON coverage for above-bound, negative, non-numeric, fractional, and
+    metadata duration inputs.
+  - Added multipart coverage for non-numeric and above-bound `seconds`.
+  - Added acceptance coverage for normal values, max-bound metadata duration,
+    and zero duration preserving provider defaults.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/common
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/relay/common
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+```
+
+## Phase 9 - Task Billing Ratio Saturation Triage
+
+Status: planned.
+
+Next phase objective:
+
+Inspect task quota calculation where provider `EstimateBilling` values are
+merged into `PriceData.OtherRatios` and multiplied into pre-consumed quota.
+Decide whether YuAPI should add saturating arithmetic or narrower validation
+for task billing multipliers, using upstream `d0bd8aac` / `bae799cc` as
+references without importing broad audit UI or pricing behavior changes.
+
+Boundary:
+
+- Do not change account-pool or channel-pool scheduling semantics.
+- Do not change model prices, group ratios, provider priority, plus/pro
+  routing, or group/model mapping.
+- Do not change provider-supported normal duration/resolution values.
+- Do not port broad admin audit UI changes unless a task-billing bug requires a
+  tiny display fix.
+- Keep deployment separate unless explicitly requested after tests.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+Manual review checks:
+
+- Normal task prices and plus/pro routing remain unchanged.
+- Any accepted saturation behavior has a focused overflow or mismatch
+  regression test.
+- Deferred upstream billing/audit changes are listed with a reason.
