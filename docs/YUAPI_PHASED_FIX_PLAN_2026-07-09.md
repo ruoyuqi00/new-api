@@ -299,9 +299,9 @@ ok   github.com/QuantumNous/new-api/relay
 
 ## Phase 4 - Upstream Fix Triage And Low-Risk Bug Sweep
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Goal:
 
 Compare YuAPI against the current upstream `QuantumNous/new-api` fix stream and
 select only low-risk bug fixes that do not disturb YuAPI provider adapters,
@@ -320,7 +320,7 @@ Boundary:
 - Keep deployment separate from this phase unless explicitly requested after
   code review and tests.
 
-Planned acceptance checks:
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -333,3 +333,124 @@ Manual review checks:
   compatibility note.
 - Rejected upstream changes are listed with a short reason.
 - Any locally found bug has a reproduction note or focused regression test.
+
+Upstream triage:
+
+- Fetched and inspected `origin/main` without rebasing or merging. This YuAPI
+  branch and `origin/main` have no clean merge-base in this worktree, so accepted
+  changes were manually ported as narrow patches.
+- Accepted upstream candidate:
+  - `043720f9` / PR `#5923`: task quota persistence after delta settlement and
+    Ali video non-positive duration fallback.
+  - YuAPI compatibility note: the accepted patch touches only persisted task
+    quota after already-computed settlement and Ali request normalization. It
+    does not change channel/account selection, provider priority, plus/pro
+    routing, group/model mapping, pricing, or account-pool scheduling.
+- Deferred upstream candidates:
+  - `3fbad6a7`: tiered pre-consume fallback changes pre-consumption and pricing
+    behavior; defer to a dedicated billing phase.
+  - `48b7f491`, `d0bd8aac`, `c9943d37`, `bae799cc`: quota/billing saturation
+    chain is broader than this phase; inspect together in Phase 5.
+  - `70ea899e`: transaction and row-locking changes are high blast radius for
+    production billing; defer until lock semantics are reviewed against YuAPI.
+  - `5fc35e28`: user/email/password hardening is useful but broad; defer to a
+    user/auth hardening phase.
+  - Web, i18n, and build-only changes: not relevant to the production
+    provider/account-pool consolidation path in this phase.
+
+Implementation:
+
+- `model/task.go`
+  - Added `Task.UpdateQuota()` for a single-column quota writeback.
+- `service/task_billing.go`
+  - After `RecalculateTaskQuota` computes and applies the delta, it now writes
+    the final `task.Quota` back to `tasks.quota` and logs a non-fatal error if
+    the persistence step fails.
+- `relay/channel/task/ali/adaptor.go`
+  - Restores Ali video default duration to 5 seconds when request seconds or
+    metadata normalize to a non-positive duration.
+- `service/task_billing_test.go`
+  - Added a persisted-task regression proving `tasks.quota` equals the actual
+    settled quota after recalculation.
+- `relay/channel/task/ali/adaptor_test.go`
+  - Added regressions for `seconds: "0"` and metadata `parameters.duration: 0`.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./service ./relay/channel/task/ali
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/relay/channel/task/ali
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+```
+
+## Phase 5 - Task/Billing Saturation Follow-Up
+
+Status: planned.
+
+Next phase objective:
+
+Review the deferred upstream quota/billing saturation chain and YuAPI's local
+task-billing paths as one small phase. The goal is to decide whether YuAPI needs
+safe clamping or transaction hardening around quota settlement without changing
+pricing, provider routing, channel/account-pool scheduling, or production data.
+
+Boundary:
+
+- Do not change account-pool or channel-pool scheduling semantics.
+- Do not change model prices, group ratios, provider priority, plus/pro routing,
+  or group/model mapping.
+- Do not deploy or migrate production data inside the phase.
+- If an upstream patch changes billing formulas or pre-consumption behavior,
+  document it as a candidate and keep the code change out until explicitly
+  accepted.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+go test ./relay/helper ./relay/channel ./relay
+```
+
+Manual review checks:
+
+- Every accepted billing change has a focused test covering the exact edge case.
+- Any clamp or transaction change records how it affects wallet, token, and
+  subscription billing.
+- Channel/account-pool lease acquire/release behavior remains unchanged.

@@ -171,6 +171,13 @@ func getSubscriptionUsed(t *testing.T, id int) int64 {
 	return sub.AmountUsed
 }
 
+func getTaskQuota(t *testing.T, id int64) int {
+	t.Helper()
+	var task model.Task
+	require.NoError(t, model.DB.Select("quota").Where("id = ?", id).First(&task).Error)
+	return task.Quota
+}
+
 func getLastLog(t *testing.T) *model.Log {
 	t.Helper()
 	var log model.Log
@@ -328,6 +335,28 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+}
+
+func TestRecalculate_PersistsActualQuota(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 15, 15, 15
+	const initQuota, preConsumed = 10000, 2000
+	const actualQuota = 3500
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-recalc-persist", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
+
+	RecalculateTaskQuota(ctx, task, actualQuota, "persist actual quota")
+
+	assert.Equal(t, actualQuota, task.Quota)
+	assert.Equal(t, actualQuota, getTaskQuota(t, task.ID))
 }
 
 func TestRecalculate_NegativeDelta(t *testing.T) {

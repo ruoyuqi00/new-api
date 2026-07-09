@@ -170,3 +170,37 @@ func TestConvertToAliRequestWan25I2VKeepsLegacyImgURL(t *testing.T) {
 	require.Contains(t, string(body), `"img_url"`)
 	require.NotContains(t, string(body), `"media"`)
 }
+
+func TestConvertToAliRequestFallsBackWhenSecondsIsNonPositive(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	req := relaycommon.TaskSubmitReq{
+		Model:   "wan2.5-i2v-preview",
+		Prompt:  "animate the first frame",
+		Image:   "https://example.com/first.png",
+		Seconds: "0",
+	}
+
+	aliReq, err := adaptor.convertToAliRequest(testRelayInfo(), req)
+
+	require.NoError(t, err)
+	require.Equal(t, 5, aliReq.Parameters.Duration)
+}
+
+func TestConvertToAliRequestFallsBackWhenMetadataDurationIsNonPositive(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	req := relaycommon.TaskSubmitReq{
+		Model:  "wan2.5-i2v-preview",
+		Prompt: "animate the first frame",
+		Image:  "https://example.com/first.png",
+		Metadata: map[string]interface{}{
+			"parameters": map[string]interface{}{
+				"duration": 0,
+			},
+		},
+	}
+
+	aliReq, err := adaptor.convertToAliRequest(testRelayInfo(), req)
+
+	require.NoError(t, err)
+	require.Equal(t, 5, aliReq.Parameters.Duration)
+}

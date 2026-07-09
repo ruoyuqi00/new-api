@@ -434,6 +434,9 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 	if aliReq.Model != upstreamModel {
 		return nil, errors.New("can't change model with metadata")
 	}
+	if aliReq.Parameters.Duration <= 0 {
+		aliReq.Parameters.Duration = 5
+	}
 
 	if err := normalizeWan27I2VInput(aliReq, req); err != nil {
 		return nil, err
