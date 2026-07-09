@@ -1415,9 +1415,9 @@ ok   github.com/QuantumNous/new-api/relay
 
 ## Phase 14 - Log Stat Type Semantics Review
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Objective:
 
 Review log statistic `type` filtering semantics before changing behavior. The
 current stats query intentionally or historically counts consume logs for quota,
@@ -1426,7 +1426,7 @@ the UI expects usage stats to remain consume-only or to follow the selected log
 type. If a fix is accepted, keep it limited to log-stat query semantics and
 tests.
 
-Planned acceptance checks:
+Acceptance checks:
 
 ```bash
 go test ./model ./controller
@@ -1439,3 +1439,92 @@ Manual review checks:
   channel-pool changes.
 - Existing default stats (`type=0`) remain unchanged.
 - Any non-consume `type` behavior change is explicitly documented with tests.
+
+Review findings:
+
+- `origin/main` has the same consume-only `SumUsedQuota` behavior: the stats
+  query accepts `logType` but always filters quota/RPM/TPM to `LogTypeConsume`.
+- Local list endpoints do honor `type` filters, but the common-log stats badges
+  are named as usage metrics (`Usage`, `RPM`, `TPM`), not as generic log-count
+  or wallet-ledger metrics.
+- Non-consume log types such as top-up/refund/error can carry quota or timing
+  fields for audit context, but including them in RPM/TPM would blur the
+  operational meaning of "current usage".
+
+Decision:
+
+- Preserve current behavior: log stats remain consume-usage stats regardless of
+  non-consume `type` filters.
+- Treat the `type` argument as endpoint/API compatibility until a dedicated
+  generic log-stat endpoint exists.
+
+Implementation:
+
+- `model/log.go`
+  - Added a short `SumUsedQuota` comment documenting the consume-usage semantics
+    and compatibility-only `logType` argument.
+- `model/log_stat_test.go`
+  - Added `TestSumUsedQuotaAlwaysReportsConsumeStats` to lock behavior when
+    callers pass refund/top-up filters to the stats endpoint.
+
+Deferred scope:
+
+- Did not change UI labels, list filtering, stats API shape, or response fields.
+- Did not add a generic log-type stats endpoint.
+- Did not change task billing, scheduling, pricing, provider priority,
+  account-pool, or channel-pool behavior.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+```
+
+## Phase 15 - Usage Log Request Metadata Visibility
+
+Status: planned.
+
+Next phase objective:
+
+Review common usage-log detail/table visibility for request correlation fields
+added in earlier phases (`request_id`, `upstream_request_id`, and async task
+admin metadata). If a fix is needed, keep it display/serialization-only and do
+not alter log writes, billing, task settlement, scheduling, pricing, provider
+priority, account pools, or channel pools.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+```
+
+Manual review checks:
+
+- Existing request-id filters continue to work.
+- User-visible log responses still strip admin-only metadata.
+- No schema, billing, routing, account-pool, or channel-pool changes.

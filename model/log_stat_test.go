@@ -100,3 +100,63 @@ func TestSumUsedQuotaFiltersRequestIds(t *testing.T) {
 	assert.Equal(t, 0, stat.Rpm)
 	assert.Equal(t, 0, stat.Tpm)
 }
+
+func TestSumUsedQuotaAlwaysReportsConsumeStats(t *testing.T) {
+	truncateTables(t)
+
+	now := common.GetTimestamp()
+	logs := []Log{
+		{
+			UserId:           2,
+			Username:         "bob",
+			CreatedAt:        now,
+			Type:             LogTypeConsume,
+			ModelName:        "gpt-b",
+			TokenName:        "tok-b",
+			Quota:            100,
+			PromptTokens:     10,
+			CompletionTokens: 5,
+			ChannelId:        8,
+			Group:            "vip",
+		},
+		{
+			UserId:           2,
+			Username:         "bob",
+			CreatedAt:        now,
+			Type:             LogTypeRefund,
+			ModelName:        "gpt-b",
+			TokenName:        "tok-b",
+			Quota:            900,
+			PromptTokens:     90,
+			CompletionTokens: 90,
+			ChannelId:        8,
+			Group:            "vip",
+		},
+		{
+			UserId:           2,
+			Username:         "bob",
+			CreatedAt:        now,
+			Type:             LogTypeTopup,
+			ModelName:        "gpt-b",
+			TokenName:        "tok-b",
+			Quota:            700,
+			PromptTokens:     70,
+			CompletionTokens: 70,
+			ChannelId:        8,
+			Group:            "vip",
+		},
+	}
+	require.NoError(t, LOG_DB.Create(&logs).Error)
+
+	stat, err := SumUsedQuota(LogTypeRefund, now-1, now+1, "gpt-b", "bob", "tok-b", 8, "vip", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, 100, stat.Quota)
+	assert.Equal(t, 1, stat.Rpm)
+	assert.Equal(t, 15, stat.Tpm)
+
+	stat, err = SumUsedQuota(LogTypeTopup, now-1, now+1, "gpt-b", "bob", "tok-b", 8, "vip", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, 100, stat.Quota)
+	assert.Equal(t, 1, stat.Rpm)
+	assert.Equal(t, 15, stat.Tpm)
+}

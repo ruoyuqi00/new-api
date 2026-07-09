@@ -615,6 +615,7 @@ type Stat struct {
 	Tpm   int `json:"tpm"`
 }
 
+// SumUsedQuota reports consume-usage stats; logType is accepted for endpoint compatibility.
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestId string, upstreamRequestId string) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
 
