@@ -630,9 +630,9 @@ ok   github.com/QuantumNous/new-api/relay
 
 ## Phase 7 - Image/Task Quantity Bounds Follow-Up
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Goal:
 
 Inspect the remaining request quantity bounds from upstream `d0bd8aac` and
 choose one narrow validation patch for image count (`n`) or task video duration
@@ -648,7 +648,16 @@ Boundary:
   phase.
 - Keep deployment separate unless explicitly requested after tests.
 
-Planned acceptance checks:
+Accepted work for this phase:
+
+- Manually port only the image count bound from upstream `d0bd8aac`:
+  - Add `dto.MaxImageN`.
+  - Reject OpenAI image JSON `n` values above the bound.
+  - Reject multipart image edit `n` values that are negative, non-integer, or
+    above the bound.
+- Keep task video duration (`seconds` / `duration`) deferred to the next phase.
+
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -660,3 +669,93 @@ Manual review checks:
 - Normal image/task quantities remain compatible.
 - The accepted validator rejects only invalid or abusive quantities.
 - Deferred image/task quantity candidates are recorded with a reason.
+
+Implementation:
+
+- `dto/openai_image.go`
+  - Added `MaxImageN = 128` as the image-generation count bound.
+- `relay/helper/valid_request.go`
+  - JSON image requests now reject `n > MaxImageN`.
+  - Multipart image edit requests now parse `n` explicitly and reject negative,
+    non-integer, or above-bound values before converting to `uint`.
+  - Missing or zero `n` still defaults to 1.
+- `relay/helper/openai_image_request_test.go`
+  - Added JSON coverage for overflow-sized `n`, above-bound `n`, bound value,
+    and absent default.
+  - Added multipart coverage for negative `n` rejection and bound value.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+```
+
+## Phase 8 - Task Duration Bounds Follow-Up
+
+Status: planned.
+
+Next phase objective:
+
+Inspect the remaining upstream task duration bound from `d0bd8aac` and decide
+whether YuAPI should reject abusive video task `seconds` / `duration` values at
+the task request validator. Keep this phase scoped to task duration only.
+
+Boundary:
+
+- Do not change account-pool or channel-pool scheduling semantics.
+- Do not change model prices, group ratios, provider priority, plus/pro routing,
+  or group/model mapping.
+- Do not port broad quota math conversion or admin audit UI changes.
+- Keep deployment separate unless explicitly requested after tests.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./service ./middleware ./controller
+go test ./relay/helper ./relay/channel ./relay
+```
+
+Manual review checks:
+
+- Normal supported video durations remain compatible.
+- Invalid or abusive duration values are rejected before they reach
+  `OtherRatios`.
+- Provider-specific default duration behavior remains unchanged.
