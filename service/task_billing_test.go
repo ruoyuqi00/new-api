@@ -260,6 +260,32 @@ func TestRefundTaskQuota_PersistsZeroQuota(t *testing.T) {
 	assert.Equal(t, preConsumed, log.Quota)
 }
 
+func TestRefundTaskQuota_NodeAdminInfo(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 6, 6, 6
+	const initQuota, preConsumed = 10000, 2500
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-test-refund-node", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.NodeName = "submit-node-a"
+
+	RefundTaskQuota(ctx, task, "node metadata refund")
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	other, err := common.StrToMap(log.Other)
+	require.NoError(t, err)
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "submit-node-a", adminInfo["node_name"])
+}
+
 func TestRefundTaskQuota_Subscription(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
@@ -385,6 +411,7 @@ func TestRecalculate_QuotaClampAdminInfo(t *testing.T) {
 	seedChannel(t, channelID)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.NodeName = "submit-node-b"
 	clamp := (&common.QuotaClamp{
 		Kind:     "overflow",
 		Original: "+Inf",
@@ -405,6 +432,7 @@ func TestRecalculate_QuotaClampAdminInfo(t *testing.T) {
 	assert.Equal(t, "overflow", saturation["kind"])
 	assert.Equal(t, "+Inf", saturation["original"])
 	assert.Equal(t, float64(math.MaxInt32), saturation["clamped"])
+	assert.Equal(t, "submit-node-b", adminInfo["node_name"])
 }
 
 func TestRecalculate_PersistsActualQuota(t *testing.T) {

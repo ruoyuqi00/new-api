@@ -1320,9 +1320,9 @@ ok   github.com/QuantumNous/new-api/relay/channel
 
 ## Phase 13 - Async Task Billing Node Metadata
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Objective:
 
 Improve async task billing log observability by recording the originating
 `node_name` in admin-only log metadata for task refunds and task quota
@@ -1330,7 +1330,7 @@ recalculations. Keep this as a metadata-only change; do not add request-id
 persistence, schema changes, billing amount changes, scheduling changes, or
 account/channel pool changes in this phase.
 
-Planned acceptance checks:
+Acceptance checks:
 
 ```bash
 go test ./service
@@ -1342,3 +1342,100 @@ Manual review checks:
 - `node_name` is admin-only and stripped from user-visible log responses.
 - Existing log `Other` fields are preserved.
 - Funding/token quota refund and settlement order remains unchanged.
+
+Implementation:
+
+- `service/task_billing.go`
+  - Added `ensureTaskAdminInfo`, shared by task billing admin-only metadata
+    helpers.
+  - Added `attachTaskNodeAdminInfo`, which writes `admin_info.node_name` from
+    `task.PrivateData.NodeName`, falling back to `common.NodeName` only when the
+    task snapshot does not carry a node.
+  - `RefundTaskQuota` now records async refund `node_name` in admin-only log
+    metadata and passes `NodeName` into `RecordTaskBillingLog` for data export
+    consistency.
+  - `RecalculateTaskQuota` now records async difference-settlement `node_name`
+    alongside any existing `quota_saturation` metadata.
+- `service/task_billing_test.go`
+  - Added `TestRefundTaskQuota_NodeAdminInfo`.
+  - Extended quota saturation metadata coverage to verify `node_name` and
+    `quota_saturation` coexist under `admin_info`.
+
+Deferred scope:
+
+- Did not add request-id persistence to task private data.
+- Did not add schema changes.
+- Did not change billing amount calculations, refund order, settlement order,
+  scheduling, routing, provider priority, account pools, or channel pools.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./service
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/common ./relay/helper ./relay/channel ./relay
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/relay/common
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+```
+
+## Phase 14 - Log Stat Type Semantics Review
+
+Status: planned.
+
+Next phase objective:
+
+Review log statistic `type` filtering semantics before changing behavior. The
+current stats query intentionally or historically counts consume logs for quota,
+RPM, and TPM even when a non-consume `type` filter is supplied. Determine whether
+the UI expects usage stats to remain consume-only or to follow the selected log
+type. If a fix is accepted, keep it limited to log-stat query semantics and
+tests.
+
+Planned acceptance checks:
+
+```bash
+go test ./model ./controller
+go test ./model ./service ./middleware ./controller
+```
+
+Manual review checks:
+
+- No task billing, scheduling, pricing, provider priority, account-pool, or
+  channel-pool changes.
+- Existing default stats (`type=0`) remain unchanged.
+- Any non-consume `type` behavior change is explicitly documented with tests.

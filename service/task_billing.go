@@ -140,16 +140,45 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 	return other
 }
 
-func attachQuotaClampAdminInfo(other map[string]interface{}, clamp *common.QuotaClamp) {
-	if other == nil || clamp == nil {
-		return
+func ensureTaskAdminInfo(other map[string]interface{}) map[string]interface{} {
+	if other == nil {
+		return nil
 	}
 	adminInfo, _ := other["admin_info"].(map[string]interface{})
 	if adminInfo == nil {
 		adminInfo = make(map[string]interface{})
 		other["admin_info"] = adminInfo
 	}
+	return adminInfo
+}
+
+func attachQuotaClampAdminInfo(other map[string]interface{}, clamp *common.QuotaClamp) {
+	if clamp == nil {
+		return
+	}
+	adminInfo := ensureTaskAdminInfo(other)
+	if adminInfo == nil {
+		return
+	}
 	adminInfo["quota_saturation"] = clamp.AuditMap()
+}
+
+func attachTaskNodeAdminInfo(other map[string]interface{}, task *model.Task) {
+	if task == nil {
+		return
+	}
+	nodeName := strings.TrimSpace(task.PrivateData.NodeName)
+	if nodeName == "" {
+		nodeName = strings.TrimSpace(common.NodeName)
+	}
+	if nodeName == "" {
+		return
+	}
+	adminInfo := ensureTaskAdminInfo(other)
+	if adminInfo == nil {
+		return
+	}
+	adminInfo["node_name"] = nodeName
 }
 
 // taskModelName 从 BillingContext 或 Properties 中获取模型名称。
@@ -188,6 +217,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
+	attachTaskNodeAdminInfo(other, task)
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
@@ -198,6 +228,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		TokenId:   task.PrivateData.TokenId,
 		Group:     task.Group,
 		Other:     other,
+		NodeName:  task.PrivateData.NodeName,
 	})
 }
 
@@ -255,6 +286,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	other["pre_consumed_quota"] = preConsumedQuota
 	other["actual_quota"] = actualQuota
 	attachQuotaClampAdminInfo(other, firstQuotaClamp(quotaClamps...))
+	attachTaskNodeAdminInfo(other, task)
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   logType,
