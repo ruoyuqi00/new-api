@@ -1618,9 +1618,9 @@ this phase:
 
 ## Phase 16 - Frontend Typecheck Baseline Cleanup
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Objective:
 
 Restore the default frontend typecheck baseline by fixing the existing
 `pricing` and `yucore-brand` TypeScript blockers discovered during Phase 15.
@@ -1628,13 +1628,73 @@ Keep the work limited to frontend compile/type correctness; do not change
 backend billing, logging, task settlement, scheduling, pricing rules, provider
 priority, account pools, or channel pools.
 
-Planned acceptance checks:
+Implementation:
+
+- Restored `web/default/src/features/yucore-brand/data/content.ts`, the shared
+  YuCore content module imported by the YuCore brand components and pricing
+  page.
+- Added explicit TypeScript shapes for YuCore signals, metrics, capabilities,
+  studio modules, and the studio accent union so downstream component indexing
+  remains type-safe.
+- Kept the root `.gitignore` unchanged. The new file lives under a `data/`
+  directory that is ignored by the repository's broad root rule, so it was
+  intentionally added with `git add -f` as the smallest version-control change.
+- Did not change backend code, schemas, billing, logging semantics, task
+  settlement, scheduling, pricing rules, provider priority, account pools, or
+  channel pools.
+
+Acceptance checks:
 
 ```bash
-bun run typecheck
-bunx oxlint -c .oxlintrc.json src/features/pricing/index.tsx src/features/yucore-brand
-bunx oxfmt --check src/features/pricing/index.tsx src/features/yucore-brand
-go test ./model ./service ./middleware ./controller
+docker run --rm \
+  -v "${PWD}:/src" \
+  -v yuapi-bun-cache:/root/.bun \
+  -v yuapi-web-node-modules:/src/web/node_modules \
+  -w /src/web/default oven/bun:1.2.23 \
+  bun run typecheck
+```
+
+```bash
+docker run --rm \
+  -v "${PWD}:/src" \
+  -v yuapi-bun-cache:/root/.bun \
+  -v yuapi-web-node-modules:/src/web/node_modules \
+  -w /src/web/default oven/bun:1.2.23 \
+  bunx oxlint -c .oxlintrc.json \
+  src/features/yucore-brand/data/content.ts
+```
+
+```bash
+docker run --rm \
+  -v "${PWD}:/src" \
+  -v yuapi-bun-cache:/root/.bun \
+  -v yuapi-web-node-modules:/src/web/node_modules \
+  -w /src/web/default oven/bun:1.2.23 \
+  bunx oxfmt --check src/features/yucore-brand/data/content.ts
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+Result:
+
+```text
+$ tsgo -b
+
+Found 0 warnings and 0 errors.
+All matched files use the correct format.
+
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
 ```
 
 Manual review checks:
@@ -1644,3 +1704,41 @@ Manual review checks:
 - Type fixes do not rewrite YuCore branding behavior or dashboard pricing
   semantics beyond compile correctness.
 - No backend, schema, scheduling, billing, account-pool, or channel-pool changes.
+
+Known validation limitation:
+
+- Full-directory `oxlint` and `oxfmt --check` for `src/features/yucore-brand`
+  still expose pre-existing lint/format debt outside this phase, including
+  nested ternaries, array-index keys, hook dependency warnings,
+  `replaceAll` compatibility, non-null assertions, and broad formatting churn.
+  Phase 16 intentionally restored the default TypeScript baseline first and
+  limited lint/format acceptance to the newly restored module.
+
+## Phase 17 - Frontend Lint/Format Debt Baseline
+
+Status: planned.
+
+Next phase objective:
+
+Clean up the existing YuCore frontend lint/format debt in small, mechanical
+batches so future frontend changes can use narrower and more reliable
+acceptance checks. Keep this stage behavior-preserving and frontend-only; do
+not change backend billing, logging, task settlement, scheduling, pricing rules,
+provider priority, account pools, or channel pools.
+
+Planned acceptance checks:
+
+```bash
+bunx oxlint -c .oxlintrc.json src/features/yucore-brand
+bunx oxfmt --check src/features/yucore-brand
+bun run typecheck
+go test ./model ./service ./middleware ./controller
+```
+
+Manual review checks:
+
+- Fix lint and format debt by category, not by broad UI rewrites.
+- Keep YuCore public copy, navigation, routes, and studio behavior unchanged
+  unless a lint fix requires a no-op extraction.
+- Do not mix this frontend hygiene work with channel runtime, account-pool,
+  quota, or scheduling changes.
