@@ -92,6 +92,13 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
+export interface QuotaSaturationInfo {
+  op?: string
+  kind?: string
+  original?: string
+  clamped?: number | string
+}
+
 export interface LogOtherData {
   admin_info?: {
     is_multi_key?: boolean
@@ -99,6 +106,7 @@ export interface LogOtherData {
     use_channel?: number[]
     local_count_tokens?: boolean
     channel_affinity?: ChannelAffinityInfo
+    quota_saturation?: QuotaSaturationInfo
     // Top-up audit fields (type=1, admin only)
     payment_method?: string
     callback_payment_method?: string

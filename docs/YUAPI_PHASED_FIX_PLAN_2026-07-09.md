@@ -1507,9 +1507,9 @@ ok   github.com/QuantumNous/new-api/middleware
 
 ## Phase 15 - Usage Log Request Metadata Visibility
 
-Status: planned.
+Status: completed.
 
-Next phase objective:
+Objective:
 
 Review common usage-log detail/table visibility for request correlation fields
 added in earlier phases (`request_id`, `upstream_request_id`, and async task
@@ -1517,7 +1517,7 @@ admin metadata). If a fix is needed, keep it display/serialization-only and do
 not alter log writes, billing, task settlement, scheduling, pricing, provider
 priority, account pools, or channel pools.
 
-Planned acceptance checks:
+Acceptance checks:
 
 ```bash
 go test ./model ./service ./middleware ./controller
@@ -1528,3 +1528,119 @@ Manual review checks:
 - Existing request-id filters continue to work.
 - User-visible log responses still strip admin-only metadata.
 - No schema, billing, routing, account-pool, or channel-pool changes.
+
+Review findings:
+
+- `request_id` and `upstream_request_id` are already present on the backend
+  `Log` JSON payload and are rendered at the top of the common usage-log details
+  dialog.
+- User/self log responses still pass through `formatUserLogs`, which strips
+  `Other.admin_info` before returning data to non-admin users.
+- Phase 13 async task billing metadata (`admin_info.node_name`) and Phase 10
+  saturation audit metadata (`admin_info.quota_saturation`) were persisted, but
+  non-top-up common-log details did not have a generic admin-only section to
+  render those fields.
+
+Implementation:
+
+- `web/default/src/features/usage-logs/types.ts`
+  - Added `QuotaSaturationInfo` and typed `LogOtherData.admin_info.quota_saturation`.
+- `web/default/src/features/usage-logs/components/dialogs/details-dialog.tsx`
+  - Added an admin-only runtime metadata section for non-top-up `node_name` and
+    quota saturation audit fields (`op`, `kind`, `original`, `clamped`).
+  - Reused existing `Runtime`, `Node Name`, `Operation`, `Type`, `Value`, and
+    `Result` labels to avoid widening i18n scope.
+  - Cleaned local lint issues in the touched dialog file by replacing index
+    keys with data-derived keys and extracting the reasoning-effort badge
+    variant helper.
+
+Deferred scope:
+
+- Did not change log write paths, task billing, refund/recalculate order,
+  schemas, filters, scheduling, pricing, provider priority, account pools, or
+  channel pools.
+- Did not add a new generic log metadata API.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./model ./service ./middleware ./controller
+```
+
+```bash
+docker run --rm \
+  -v "${PWD}:/src" \
+  -v yuapi-bun-cache:/root/.bun \
+  -v yuapi-web-node-modules:/src/web/node_modules \
+  -w /src/web/default oven/bun:1.2.23 \
+  bunx oxlint -c .oxlintrc.json \
+  src/features/usage-logs/components/dialogs/details-dialog.tsx \
+  src/features/usage-logs/types.ts
+```
+
+```bash
+docker run --rm \
+  -v "${PWD}:/src" \
+  -v yuapi-bun-cache:/root/.bun \
+  -v yuapi-web-node-modules:/src/web/node_modules \
+  -w /src/web/default oven/bun:1.2.23 \
+  bunx oxfmt --check \
+  src/features/usage-logs/components/dialogs/details-dialog.tsx \
+  src/features/usage-logs/types.ts
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/model
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/middleware
+ok   github.com/QuantumNous/new-api/controller
+
+Found 0 warnings and 0 errors.
+All matched files use the correct format.
+```
+
+Known validation limitation:
+
+`bun run typecheck` still fails on pre-existing frontend baseline issues outside
+this phase:
+
+- `src/features/pricing/index.tsx`: implicit `any` for `signal`.
+- `src/features/yucore-brand/**`: missing `../data/content` / `./data/content`
+  module plus downstream implicit `any` and color-key indexing errors.
+
+## Phase 16 - Frontend Typecheck Baseline Cleanup
+
+Status: planned.
+
+Next phase objective:
+
+Restore the default frontend typecheck baseline by fixing the existing
+`pricing` and `yucore-brand` TypeScript blockers discovered during Phase 15.
+Keep the work limited to frontend compile/type correctness; do not change
+backend billing, logging, task settlement, scheduling, pricing rules, provider
+priority, account pools, or channel pools.
+
+Planned acceptance checks:
+
+```bash
+bun run typecheck
+bunx oxlint -c .oxlintrc.json src/features/pricing/index.tsx src/features/yucore-brand
+bunx oxfmt --check src/features/pricing/index.tsx src/features/yucore-brand
+go test ./model ./service ./middleware ./controller
+```
+
+Manual review checks:
+
+- Missing YuCore content module is restored or imports are aligned with the
+  current source tree.
+- Type fixes do not rewrite YuCore branding behavior or dashboard pricing
+  semantics beyond compile correctness.
+- No backend, schema, scheduling, billing, account-pool, or channel-pool changes.

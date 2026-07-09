@@ -82,6 +82,12 @@ function timingTextColorClass(
   return 'text-rose-600'
 }
 
+function reasoningEffortVariant(effort: string): StatusBadgeProps['variant'] {
+  if (effort === 'high') return 'orange'
+  if (effort === 'medium') return 'yellow'
+  return 'green'
+}
+
 function DetailRow(props: {
   label: React.ReactNode
   value: React.ReactNode
@@ -326,8 +332,13 @@ function BillingBreakdown(props: {
 
   return (
     <DetailSection label={t('Billing Details')}>
-      {rows.map((row, idx) => (
-        <DetailRow key={idx} label={row.label} value={row.value} mono />
+      {rows.map((row) => (
+        <DetailRow
+          key={`${row.label}-${row.value}`}
+          label={row.label}
+          value={row.value}
+          mono
+        />
       ))}
     </DetailSection>
   )
@@ -392,8 +403,13 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
 
   return (
     <DetailSection label={t('Token Breakdown')}>
-      {rows.map((row, idx) => (
-        <DetailRow key={idx} label={row.label} value={row.value} mono />
+      {rows.map((row) => (
+        <DetailRow
+          key={`${row.label}-${row.value}`}
+          label={row.label}
+          value={row.value}
+          mono
+        />
       ))}
     </DetailSection>
   )
@@ -463,6 +479,34 @@ export function DetailsDialog(props: DetailsDialogProps) {
     isTopup &&
     props.isAdmin &&
     (topupAuditFields.length > 0 || showLegacyTopupWarning)
+  const quotaSaturation = adminInfo?.quota_saturation
+  const adminRuntimeFields =
+    props.isAdmin && adminInfo
+      ? ([
+          !isTopup &&
+            adminInfo.node_name && {
+              label: t('Node Name'),
+              value: adminInfo.node_name,
+            },
+          quotaSaturation?.op && {
+            label: t('Operation'),
+            value: quotaSaturation.op,
+          },
+          quotaSaturation?.kind && {
+            label: t('Type'),
+            value: quotaSaturation.kind,
+          },
+          quotaSaturation?.original && {
+            label: t('Value'),
+            value: quotaSaturation.original,
+          },
+          quotaSaturation?.clamped != null && {
+            label: t('Result'),
+            value: String(quotaSaturation.clamped),
+          },
+        ].filter(Boolean) as Array<{ label: string; value: string }>)
+      : []
+  const showAdminRuntimeSection = adminRuntimeFields.length > 0
   const manageOperator = (() => {
     if (!isManage || !props.isAdmin || !adminInfo) return null
     const username = adminInfo.admin_username
@@ -761,9 +805,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
             icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
             label={t('Top-up Audit Info')}
           >
-            {topupAuditFields.map((field, idx) => (
+            {topupAuditFields.map((field) => (
               <DetailRow
-                key={idx}
+                key={`${field.label}-${field.value}`}
                 label={field.label}
                 value={field.value}
                 mono
@@ -779,6 +823,23 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 </span>
               </div>
             )}
+          </DetailSection>
+        )}
+
+        {/* Runtime audit metadata (admin only) */}
+        {showAdminRuntimeSection && (
+          <DetailSection
+            icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
+            label={t('Runtime')}
+          >
+            {adminRuntimeFields.map((field) => (
+              <DetailRow
+                key={`${field.label}-${field.value}`}
+                label={field.label}
+                value={field.value}
+                mono
+              />
+            ))}
           </DetailSection>
         )}
 
@@ -850,9 +911,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
             {operationText != null && (
               <DetailRow label={t('Operation')} value={operationText} />
             )}
-            {loginAuditFields.map((field, idx) => (
+            {loginAuditFields.map((field) => (
               <DetailRow
-                key={idx}
+                key={`${field.label}-${field.value}`}
                 label={field.label}
                 value={field.value}
                 mono
@@ -905,13 +966,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
             value={
               <StatusBadge
                 label={other.reasoning_effort}
-                variant={
-                  other.reasoning_effort === 'high'
-                    ? 'orange'
-                    : other.reasoning_effort === 'medium'
-                      ? 'yellow'
-                      : 'green'
-                }
+                variant={reasoningEffortVariant(other.reasoning_effort)}
                 size='sm'
                 copyable={false}
               />
@@ -1096,12 +1151,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
             icon={<Settings2 className='size-3.5' aria-hidden='true' />}
             label={`${t('Param Override')} (${other.po.length})`}
           >
-            {other.po.filter(Boolean).map((line, idx) => {
+            {other.po.filter(Boolean).map((line) => {
               const parsed = parseAuditLine(line)
               if (!parsed) return null
               return (
                 <div
-                  key={idx}
+                  key={`${parsed.action}-${parsed.content}`}
                   className='bg-background/60 flex min-w-0 flex-col gap-1.5 rounded border p-2 sm:flex-row sm:items-start sm:gap-2'
                 >
                   <StatusBadge
