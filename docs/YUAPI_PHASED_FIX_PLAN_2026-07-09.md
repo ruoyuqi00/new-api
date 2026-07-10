@@ -2268,7 +2268,7 @@ gpt-5.5-openai-compact: ["openai-response-compact"]
 
 ## Phase 22 - Strategy And Protocol Bug Sweep
 
-Status: in progress.
+Status: completed.
 
 Objective:
 
@@ -2378,13 +2378,46 @@ ok   github.com/QuantumNous/new-api/model
 git diff --check passed.
 ```
 
-Deployment plan:
+Deployment:
 
-- Push this phase commit first.
-- Build and replace only the `newapi` service container on production.
-- Keep `newapi-mysql`, `newapi-redis`, retained Sub2API services, volumes, and
-  live data untouched.
-- Verify container health plus `/`, `/api/pricing`, and endpoint metadata smoke.
+- Pushed code/docs commit:
+  `0809480bc fix: expose embedding endpoint metadata`.
+- Built production image from that commit:
+  `newapi:channel-pool-runtime-20260710-0809480bc`.
+- Backed up compose before changing the image line:
+  `/opt/newapi/backups/docker-compose-before-phase22-embedding-20260710101008.yml`.
+- Updated only the `newapi` service image in `/opt/newapi/docker-compose.yml`.
+- Ran `docker compose up -d newapi`.
+- `newapi-mysql`, `newapi-redis`, retained Sub2API services, volumes, and live
+  data were not modified.
+
+Production smoke:
+
+```text
+newapi image: newapi:channel-pool-runtime-20260710-0809480bc
+newapi health: healthy
+newapi-mysql: healthy, unchanged
+newapi-redis: healthy, unchanged
+local /: HTTP 200
+local /api/pricing: HTTP 200
+local /api/status: HTTP 200
+domain https://api.dtrljm.com/: HTTP 200
+```
+
+Protocol metadata smoke:
+
+```text
+/api/pricing items: 32
+/api/pricing embedding items: 0
+/api/pricing compact items: 1
+gpt-5.5-openai-compact: ["openai-response-compact"]
+```
+
+Note:
+
+- The live production dataset currently exposes no enabled embedding models in
+  `/api/pricing`, so embedding endpoint metadata is verified by the new
+  `common` unit tests and will appear when embedding-like abilities are enabled.
 
 ## Phase 23 - Video Endpoint Metadata Triage
 

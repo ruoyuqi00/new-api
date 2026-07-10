@@ -22,7 +22,7 @@ payloads.
 workspace: D:\wflogin\new-api-ruoyu-push
 branch: feature/yuapi-channel-pool-runtime-20260707
 remote branch: ruoyu/feature/yuapi-channel-pool-runtime-20260707
-latest deployed code commit: 4bb40fda0 fix: expose compact response endpoint metadata
+latest deployed code commit: 0809480bc fix: expose embedding endpoint metadata
 ```
 
 Important remotes:
@@ -51,7 +51,7 @@ polish until a separate UI window deliberately resumes that work.
 Observed on `154.219.122.197` after the Phase 21 deployment:
 
 ```text
-newapi              newapi:channel-pool-runtime-20260710-4bb40fda0   healthy
+newapi              newapi:channel-pool-runtime-20260710-0809480bc   healthy
 newapi-mysql        mysql:8.4                                       healthy
 newapi-redis        redis:7-alpine                                  healthy
 sub2api             sub2api-provider-adapters:...                   Exited (0)
@@ -77,6 +77,21 @@ local /api/pricing: HTTP 200
 local /api/status: HTTP 200
 local unauth /v1/models: HTTP 401
 domain https://api.dtrljm.com/: HTTP 200
+/api/pricing compact metadata: gpt-5.5-openai-compact -> openai-response-compact
+```
+
+No production database data, account pool settings, channel priorities, MySQL
+volumes, Redis volumes, or retained Sub2API data services were modified.
+
+Phase 22 deploy smoke on 2026-07-10:
+
+```text
+compose backup: /opt/newapi/backups/docker-compose-before-phase22-embedding-20260710101008.yml
+local /: HTTP 200
+local /api/pricing: HTTP 200
+local /api/status: HTTP 200
+domain https://api.dtrljm.com/: HTTP 200
+/api/pricing embedding metadata: 0 live embedding items currently enabled
 /api/pricing compact metadata: gpt-5.5-openai-compact -> openai-response-compact
 ```
 
