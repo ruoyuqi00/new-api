@@ -43,32 +43,48 @@ Relevant backend status docs:
 
 ## Current UI State
 
-The unfinished UI work is intentionally paused.
+The unfinished UI work is intentionally paused, but it has been preserved in a
+portable remote branch.
 
-Known local stash:
+Use this branch for the next UI window:
+
+```text
+feature/yucore-ui-polish-20260710
+remote: ruoyu/feature/yucore-ui-polish-20260710
+wip commit: ace6a3ee6 wip: preserve yucore motion canvas cleanup
+```
+
+The original local stash still exists on this machine:
 
 ```text
 stash@{0}: On feature/yuapi-channel-pool-runtime-20260707: wip: phase 20 yucore motion canvas lint cleanup
 ```
 
-Do not apply this stash in backend production work. In a UI-only window, inspect
-it first before deciding whether to apply it:
+Do not depend on that stash when moving computers. It is local-only. The
+portable source is the remote UI branch above.
+
+If you are still on this original machine, you can inspect the old stash for
+historical comparison:
 
 ```bash
 git stash show --stat stash@{0}
 git stash show --patch stash@{0}
 ```
 
-If the new UI window needs the stashed work, apply it on a dedicated UI branch
-or worktree, not directly on an active production backend deployment branch.
+The stale phased-plan doc change from the stash was intentionally not carried
+into the UI branch because Phase 21/22 production docs are newer. The UI branch
+preserves the actual UI WIP file:
+
+```text
+web/default/src/features/yucore-brand/components/yucore-motion-canvas.tsx
+```
 
 ## Recommended UI Workspace
 
 Preferred approach:
 
-1. Create a dedicated UI branch/worktree from the current pushed feature branch
-   or from the preserved YuCore snapshot branch.
-2. Apply or inspect the UI stash only inside that UI workspace.
+1. Check out `ruoyu/feature/yucore-ui-polish-20260710`.
+2. Continue from the preserved `yucore-motion-canvas.tsx` WIP.
 3. Keep UI commits separate from backend production fix phases.
 4. Run frontend checks before considering any deployment.
 
@@ -144,8 +160,8 @@ Important boundaries:
   server deployment.
 - The current production backend is already deployed through Phase 22 and should
   stay stable.
-- Inspect, but do not blindly apply, stash@{0}: wip: phase 20 yucore motion
-  canvas lint cleanup.
+- Start from remote branch ruoyu/feature/yucore-ui-polish-20260710, which
+  preserves the previous yucore-motion-canvas WIP.
 
 Goal:
 Make the YuCore UI feel complete enough to review as a real product surface:

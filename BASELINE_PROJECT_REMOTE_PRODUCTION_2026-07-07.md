@@ -14,6 +14,9 @@ plus/pro runtime hop.
 
 Current canonical follow-up documents:
 
+- `docs/PORTABLE_WORKSPACE_BASELINE_2026-07-10.md`
+  - Current portable baseline for moving development to another computer,
+    including branch map, clone commands, and UI continuation branch.
 - `docs/YUAPI_PRODUCTION_STATUS_2026-07-09.md`
   - Current service status, server rollback notes, channel state, and next
     production work queue.
@@ -33,17 +36,25 @@ Current canonical follow-up documents:
 ## 2026-07-10 Production Work Boundary
 
 YuCore UI / brand / Studio / Canvas work is paused for the current production
-backend window. It is preserved as local and feature-branch history only, with
-unfinished local UI lint work stashed as:
+backend window. The previously local UI stash has now been preserved as a
+dedicated remote branch:
+
+```text
+ruoyu/feature/yucore-ui-polish-20260710
+head: ace6a3ee6 wip: preserve yucore motion canvas cleanup
+```
+
+The original local stash still exists on this machine as:
 
 ```text
 stash@{0}: wip: phase 20 yucore motion canvas lint cleanup
 ```
 
-Do not apply that stash, resume YuCore UI lint cleanup, or treat YuCore UI as a
-production deployment input until a separate UI window explicitly restarts it.
-Current production work should stay on backend protocol, routing, billing, and
-strategy hardening for YuAPI.
+Use the remote UI branch, not the local stash, when moving to another computer.
+Do not resume YuCore UI lint cleanup or treat YuCore UI as a production
+deployment input until a separate UI window explicitly restarts it. Current
+production work should stay on backend protocol, routing, billing, and strategy
+hardening for YuAPI.
 
 Current production branch for YuAPI migration work:
 
@@ -51,14 +62,14 @@ Current production branch for YuAPI migration work:
 feature/yuapi-channel-pool-runtime-20260707
 remote: ruoyu/feature/yuapi-channel-pool-runtime-20260707
 latest production-operation record before this doc refresh:
-  0809480bc fix: expose embedding endpoint metadata
+  3b2072a94 docs: add yucore ui next window handoff
 latest audited upstream origin/main:
   246d62aa5 chore: remove dead files resurrected by v1.0 launch commit
 latest fetched upstream tag:
   v1.0.0-rc.20
 ```
 
-Current server state after the Phase 21 production deploy:
+Current server state after the Phase 22 production deploy:
 
 - `newapi` is running `newapi:channel-pool-runtime-20260710-0809480bc`.
 - `newapi-mysql` and `newapi-redis` remain the active YuAPI data services.
@@ -204,11 +215,16 @@ D:\wflogin\new-api
   purpose: YuCore / new-api snapshot workspace
 
 D:\wflogin\new-api-ruoyu-push
-  branch: snapshot/yucore-motion-brand-20260707-ruoyu
-  purpose: pushed ruoyu snapshot branch workspace
+  branch: feature/yuapi-channel-pool-runtime-20260707
+  purpose: current YuAPI backend baseline and docs workspace
+
+D:\wflogin\yucore-ui-polish-20260710
+  branch: feature/yucore-ui-polish-20260710
+  purpose: portable YuCore UI continuation branch with preserved motion canvas WIP
 ```
 
-Do not use either as the next production feature workspace.
+Do not rely on these exact local paths on another computer. Recreate the needed
+branches from `ruoyu` using `docs/PORTABLE_WORKSPACE_BASELINE_2026-07-10.md`.
 
 ## Recommended Next Production Workspace
 
