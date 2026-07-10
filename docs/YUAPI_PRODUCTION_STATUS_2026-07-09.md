@@ -22,6 +22,8 @@ payloads.
 workspace: D:\wflogin\new-api-ruoyu-push
 branch: feature/yuapi-channel-pool-runtime-20260707
 remote branch: ruoyu/feature/yuapi-channel-pool-runtime-20260707
+default remote branch: ruoyu/main
+repo baseline commit: 52354ce1f docs: record portable workspace baseline
 latest deployed code commit: 0809480bc fix: expose embedding endpoint metadata
 ```
 
@@ -32,14 +34,16 @@ origin = https://github.com/QuantumNous/new-api.git
 ruoyu  = https://github.com/ruoyuqi00/sub2api-provider-adapters.git
 ```
 
-Do not push local `main` to `ruoyu/main`. Local `main` tracks upstream
-`QuantumNous/new-api` and is not the YuAPI production feature line.
+`ruoyu/main` was fast-forwarded on 2026-07-10 and now points at the same commit
+as `ruoyu/feature/yuapi-channel-pool-runtime-20260707`. On this older local
+workspace, local `main` may still track upstream `QuantumNous/new-api`; do not
+push that upstream-tracking branch to `ruoyu/main`.
 
 ## YuCore UI Boundary
 
 YuCore UI / brand / Studio / Canvas work is not part of the current production
-deployment stream. The unfinished local UI lint cleanup is intentionally kept in
-stash `wip: phase 20 yucore motion canvas lint cleanup` and must not be applied
+deployment stream. The unfinished UI lint cleanup has been preserved as the
+remote branch `ruoyu/feature/yucore-ui-polish-20260710` and must not be merged
 or deployed during backend protocol/strategy phases.
 
 Current backend production phases may update YuAPI/NewAPI server code,

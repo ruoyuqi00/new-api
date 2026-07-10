@@ -59,12 +59,15 @@ hardening for YuAPI.
 Current production branch for YuAPI migration work:
 
 ```text
+default branch: ruoyu/main
 feature/yuapi-channel-pool-runtime-20260707
 remote: ruoyu/feature/yuapi-channel-pool-runtime-20260707
-latest production-operation record before this doc refresh:
-  3b2072a94 docs: add yucore ui next window handoff
+current repo baseline:
+  52354ce1f docs: record portable workspace baseline
+remote-entry cleanup:
+  ruoyu/main was fast-forwarded to 52354ce1f on 2026-07-10
 latest audited upstream origin/main:
-  246d62aa5 chore: remove dead files resurrected by v1.0 launch commit
+  4e570389d fix: use GORM v2 row locking for subscription resets
 latest fetched upstream tag:
   v1.0.0-rc.20
 ```
@@ -85,16 +88,18 @@ remote names, but they no longer describe the live plus/pro runtime shape.
 
 ## Executive Baseline
 
-- The production feature line is `ruoyu/main` in
+- The clean default production entry is now `ruoyu/main` in
   `https://github.com/ruoyuqi00/sub2api-provider-adapters.git`.
+- `ruoyu/main` points at the same commit as
+  `ruoyu/feature/yuapi-channel-pool-runtime-20260707` as of 2026-07-10.
 - The YuCore WebGL / brand UI work is preserved as a non-production snapshot.
-- The local `main` branch is not the production feature line. It tracks
-  `origin/main`, where `origin` is `QuantumNous/new-api`.
+- On this older local workspace, the local `main` branch may still track
+  `origin/main`, where `origin` is `QuantumNous/new-api`. On a clean clone made
+  with `git clone -o ruoyu`, local `main` should track `ruoyu/main`.
 - Do not merge the YuCore snapshot into production until production features
   are stable and a deliberate UI/brand replacement plan exists.
-- The current deploy compose on the Sub2API production line still points at the
-  upstream image `weishaw/sub2api:latest`. Custom production deployment needs a
-  ruoyu-owned image such as `ghcr.io/ruoyuqi00/sub2api:<version>`.
+- The current YuAPI deployment uses a locally built `newapi` image. Changing
+  Git branches alone does not update the running server.
 
 ## Remote Map
 
@@ -119,10 +124,12 @@ remote names, but they no longer describe the live plus/pro runtime shape.
 - Current observed branches:
 
 ```text
-main                                        4cf70f0d docs: record nova media frontend poc
+main                                        52354ce1 docs: record portable workspace baseline
+feature/yuapi-channel-pool-runtime-20260707 52354ce1 docs: record portable workspace baseline
+feature/yucore-ui-polish-20260710           f9cec8a5 docs: record portable workspace baseline
 docs/uag-newapi-image2-handoff-20260609     6c6c5557
 media-frontend-nova-replacement-20260622    03ac14a7
-snapshot/yucore-motion-brand-20260707-ruoyu 1c77b9b0
+snapshot/yucore-motion-brand-20260707-ruoyu d892fbec
 ```
 
 ## Project Roles
@@ -147,14 +154,15 @@ snapshot/yucore-motion-brand-20260707-ruoyu 1c77b9b0
 
 - Remote: `ruoyu`
 - Branch: `ruoyu/main`
-- Commit: `4cf70f0d`
-- Product: Sub2API production feature line.
+- Commit: `52354ce1`
+- Product: YuAPI/NewAPI production backend baseline after the minimal Sub2API
+  plus/pro migration.
 - Stack observed from repo:
-  - backend: Go / Gin / Ent
-  - frontend: Vue 3 / Vite
-  - data: PostgreSQL + Redis
-  - deployment: Docker Compose, Caddy, systemd helpers under `deploy/`
-- This is the line to use for near-term production feature adjustments.
+  - backend: Go
+  - frontend: `web/default`
+  - production data services: MySQL + Redis
+  - deployment: Docker Compose with the `newapi` service behind retained Caddy
+- This is the default line to use for near-term production backend fixes.
 
 ### Brand UI Upgrade Project
 
@@ -261,8 +269,8 @@ alone will not deploy custom changes.
 
 ## Do Not Do
 
-- Do not push local `main` to `ruoyu/main`; local `main` is the `origin/main`
-  new-api line.
+- Do not push a local `main` that tracks `origin/main` to `ruoyu/main`. In
+  clean clones, use `git clone -o ruoyu` so local `main` tracks `ruoyu/main`.
 - Do not treat the YuCore snapshot as production.
 - Do not merge `snapshot/yucore-motion-brand-20260707-ruoyu` into `ruoyu/main`
   until production feature work is stable and UI replacement is explicitly

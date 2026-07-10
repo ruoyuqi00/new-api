@@ -22,6 +22,13 @@ origin = https://github.com/QuantumNous/new-api.git
 `origin/main` is upstream NewAPI reference only. Do not use local `main` as the
 YuAPI production or UI continuation line.
 
+2026-07-10 remote-entry cleanup:
+
+- `ruoyu/main` is now the clean default YuAPI production backend entry.
+- `ruoyu/main` points at the same commit as
+  `ruoyu/feature/yuapi-channel-pool-runtime-20260707`.
+- The named feature branch is retained as a pinned backend phase line.
+
 ## Current Fixed Backend Baseline
 
 Production backend work is stable through Phase 22.
@@ -29,6 +36,8 @@ Production backend work is stable through Phase 22.
 ```text
 branch: feature/yuapi-channel-pool-runtime-20260707
 remote branch: ruoyu/feature/yuapi-channel-pool-runtime-20260707
+default clone branch: ruoyu/main
+current repo baseline commit: 52354ce1f docs: record portable workspace baseline
 latest deployed code commit: 0809480bc fix: expose embedding endpoint metadata
 latest deploy record: ee44b5e26 docs: record phase 22 production deploy
 portable UI handoff base commit: 3b2072a94 docs: add yucore ui next window handoff
@@ -79,10 +88,12 @@ Use these branches deliberately:
 
 | Branch | Remote | Purpose | Use Now |
 | --- | --- | --- | --- |
-| `feature/yuapi-channel-pool-runtime-20260707` | `ruoyu` | Current YuAPI production backend baseline and docs | Yes, for backend fixes |
+| `main` | `ruoyu` | Clean default YuAPI production backend baseline for new clones | Yes, default backend entry |
+| `feature/yuapi-channel-pool-runtime-20260707` | `ruoyu` | Pinned YuAPI backend phase branch, same head as `ruoyu/main` on 2026-07-10 | Yes, for backend fixes |
 | `feature/yucore-ui-polish-20260710` | `ruoyu` | Next YuCore UI / Studio / Canvas continuation branch | Yes, for UI work |
 | `snapshot/yucore-motion-brand-20260707-ruoyu` | `ruoyu` | Historical YuCore brand snapshot | Reference only |
-| `main` | `ruoyu` | Older Sub2API production feature line | Do not use for current YuAPI UI work |
+| `media-frontend-nova-replacement-20260622` | `ruoyu` | Parallel historical media/protocol fixes; audit selectively only | Reference only |
+| `docs/uag-newapi-image2-handoff-20260609` | `ruoyu` | Old UAG image2 handoff/archive line | Reference only |
 | `main` | `origin` | Upstream QuantumNous/new-api reference | Reference only |
 
 Local-only worktrees on this machine, not required on a new computer:
@@ -101,19 +112,31 @@ The new computer should recreate only the worktrees it needs.
 Clone the user-owned repo:
 
 ```bash
-git clone https://github.com/ruoyuqi00/sub2api-provider-adapters.git yuapi
+git clone -o ruoyu https://github.com/ruoyuqi00/sub2api-provider-adapters.git yuapi
 cd yuapi
 git remote add origin https://github.com/QuantumNous/new-api.git
 git fetch --all --prune
 ```
 
-If `origin` already exists after clone, verify the names instead of adding it:
+Expected default checkout after clone:
+
+```bash
+git status --short --branch
+# ## main...ruoyu/main
+```
+
+If the repository was cloned without `-o ruoyu`, verify and rename remotes
+before adding the upstream reference:
 
 ```bash
 git remote -v
+git remote rename origin ruoyu
+git remote add origin https://github.com/QuantumNous/new-api.git
+git fetch --all --prune
 ```
 
-Backend baseline checkout:
+Backend baseline checkout is already `main` after a clean clone. To work on the
+named backend phase branch instead:
 
 ```bash
 git checkout -B feature/yuapi-channel-pool-runtime-20260707 \
@@ -131,7 +154,7 @@ Recommended if working on both backend and UI on the new computer:
 
 ```bash
 git worktree add ../yuapi-backend \
-  ruoyu/feature/yuapi-channel-pool-runtime-20260707
+  ruoyu/main
 git worktree add ../yucore-ui \
   ruoyu/feature/yucore-ui-polish-20260710
 ```
@@ -186,7 +209,9 @@ Keep that separate from UI work.
 
 ## Do Not Do
 
-- Do not push local `main` to `ruoyu/main`.
+- Do not push a local `main` that tracks upstream `origin/main` to
+  `ruoyu/main`. On a clean clone made with `git clone -o ruoyu`, local `main`
+  should track `ruoyu/main`.
 - Do not merge UI WIP into the backend production branch by accident.
 - Do not use the local stash as the only source of UI work; the portable source
   is now `ruoyu/feature/yucore-ui-polish-20260710`.
