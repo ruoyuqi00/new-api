@@ -2037,32 +2037,106 @@ Known validation limitation:
   formatting differences in untouched YuCore files. Phase 19 intentionally kept
   formatting scoped to `yucore-entrance-loader.tsx`.
 
-## Phase 20 - Frontend Lint/Format Debt Baseline Batch 4
+## Phase 20 - Tiered Billing Pre-Consume Estimate
+
+Status: completed.
+
+Objective:
+
+Backport the small upstream `3fbad6a7` tiered billing safety fix so paid
+tiered-expression models still reserve a plausible completion-token quota when
+the client omits `max_tokens`. Keep the change narrow to pricing pre-consume
+math and tests. Do not change protocol routing, channel selection, provider
+priority, account pools, channel pools, scheduler behavior, schemas, or
+production data.
+
+Implementation:
+
+- `relay/helper/price.go`
+  - Added `defaultTieredPreConsumeMaxTokens = 8192`.
+  - `modelPriceHelperTiered` now uses explicit `meta.MaxTokens` when present.
+  - When `max_tokens` is omitted and group ratio is non-zero, tiered
+    pre-consume estimates completion cost with the default 8192 tokens.
+  - Zero-ratio/free groups keep zero completion fallback so free pre-consume
+    behavior stays unchanged.
+- `relay/helper/price_test.go`
+  - Added coverage for paid omitted-`max_tokens` fallback.
+  - Added coverage proving explicit `max_tokens` remains authoritative.
+  - Added coverage proving zero-ratio/free groups still pre-consume zero.
+- Did not change frontend code, protocol routing, channel selection, provider
+  priority, scheduler behavior, account pools, channel pools, schemas, or
+  production data.
+
+Acceptance checks:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper ./service ./controller ./model
+```
+
+```bash
+git diff --check
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/model
+
+git diff --check passed.
+```
+
+Manual review checks:
+
+- Paid groups with omitted `max_tokens` use the fallback completion estimate for
+  tiered pre-consume.
+- Explicit `max_tokens` remains authoritative.
+- Free groups / zero group ratio still pre-consume zero.
+- No frontend, scheduler, account-pool, channel-pool, protocol-routing, schema,
+  or production-data changes.
+
+Known validation limitation:
+
+- This phase only backports the narrow tiered pre-consume fallback from
+  upstream `3fbad6a7`.
+- It does not change model exposure, group ratio strategy, protocol routing,
+  provider adapter behavior, or live channel settings.
+
+## Phase 21 - Production Protocol Path Triage
 
 Status: planned.
 
 Next phase objective:
 
-Continue the YuCore frontend hygiene pass with
-`yucore-motion-canvas.tsx` as the next isolated animation-file batch. Keep the
-change behavior-preserving: remove nested ternaries with pure helper
-extractions, run formatter only on the touched file, and avoid any backend,
-schema, scheduling, billing, provider priority, account-pool, or channel-pool
-changes.
+Return to production protocol and strategy work by auditing the remaining
+non-plus/pro routes that could be affected by future policy updates: image
+generation, Responses/compact Responses, Anthropic/Claude-style traffic,
+Codex/subscription-style channels, Kiro/Windsurf/provider adapters, and
+admin-only media tooling. The goal is to identify one narrow, testable backend
+fix or hardening step before changing any live channel strategy. Do not change
+frontend/YuCore UI, production data, provider priority, account pools, channel
+pools, scheduler behavior, or live deployment in this phase.
 
 Planned acceptance checks:
 
 ```bash
-bunx oxlint -c .oxlintrc.json src/features/yucore-brand/components/yucore-motion-canvas.tsx
-bunx oxfmt --check src/features/yucore-brand/components/yucore-motion-canvas.tsx
-bun run typecheck
-go test ./model ./service ./middleware ./controller
+go test ./relay/helper ./relay/channel ./relay ./service ./controller ./model
 ```
 
 Manual review checks:
 
-- Preserve canvas lifecycle behavior, animation timing, randomization formulas,
-  and visual density.
-- Prefer small pure helper extraction over UI or animation redesign.
-- Keep the phase frontend-only and separate from channel runtime, account-pool,
-  quota, pricing, and scheduling work.
+- Document which protocol paths are in scope and which are explicitly deferred.
+- Prefer a small protocol/strategy bug fix with focused tests over broad
+  routing or adapter rewrites.
+- Keep plus/pro channel strategy and account-pool settings unchanged unless a
+  later phase explicitly targets them.
+- Do not resume YuCore UI lint work in this production phase; the local UI WIP
+  is preserved in stash `wip: phase 20 yucore motion canvas lint cleanup`.
