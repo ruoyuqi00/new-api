@@ -2112,31 +2112,143 @@ Known validation limitation:
 
 ## Phase 21 - Production Protocol Path Triage
 
-Status: planned.
+Status: code/test completed; production deploy pending.
 
-Next phase objective:
+Objective:
 
 Return to production protocol and strategy work by auditing the remaining
 non-plus/pro routes that could be affected by future policy updates: image
 generation, Responses/compact Responses, Anthropic/Claude-style traffic,
 Codex/subscription-style channels, Kiro/Windsurf/provider adapters, and
-admin-only media tooling. The goal is to identify one narrow, testable backend
-fix or hardening step before changing any live channel strategy. Do not change
-frontend/YuCore UI, production data, provider priority, account pools, channel
-pools, scheduler behavior, or live deployment in this phase.
+admin-only media tooling.
 
-Planned acceptance checks:
+Accepted narrow fix:
+
+- Correct the protocol capability surface for Responses compact models.
+- Models ending in the compact suffix should advertise
+  `openai-response-compact`, not generic `openai`.
+- Codex/subscription-style base models should advertise `openai-response`,
+  because the Codex adapter only serves `/v1/responses` and
+  `/v1/responses/compact`.
+
+Boundary:
+
+- Do not change frontend/YuCore UI.
+- Do not apply the local YuCore UI stash
+  `wip: phase 20 yucore motion canvas lint cleanup`.
+- Do not change production data, provider priority, account pools, channel
+  pools, scheduler behavior, group/model routing, or live channel settings.
+- Do not backport upstream `246d62aa5` in this phase; it only deletes dead
+  files and does not improve runtime behavior.
+- Deployment may replace only the YuAPI service image/container after tests;
+  MySQL, Redis, volumes, and live data must remain untouched.
+
+Acceptance checks:
 
 ```bash
+go test ./common
 go test ./relay/helper ./relay/channel ./relay ./service ./controller ./model
+git diff --check
 ```
 
 Manual review checks:
 
 - Document which protocol paths are in scope and which are explicitly deferred.
-- Prefer a small protocol/strategy bug fix with focused tests over broad
-  routing or adapter rewrites.
+- Prefer the small protocol capability fix over broad routing or adapter
+  rewrites.
 - Keep plus/pro channel strategy and account-pool settings unchanged unless a
   later phase explicitly targets them.
 - Do not resume YuCore UI lint work in this production phase; the local UI WIP
   is preserved in stash `wip: phase 20 yucore motion canvas lint cleanup`.
+
+Upstream triage:
+
+- Fetched `origin/main` again on 2026-07-10.
+- The incremental range `a79f96919..origin/main` contains only upstream
+  `246d62aa5`, which removes dead files resurrected by the v1.0 launch commit.
+- Did not backport it in this production deploy because it has no runtime
+  protocol, routing, billing, Responses, channel capability, or scheduler
+  behavior change.
+
+Implementation:
+
+- `common/model.go`
+  - Added `OpenAIResponseCompactModelSuffix`.
+  - Added `IsOpenAIResponseCompactModel` so protocol capability code can check
+    compact models without importing `ratio_setting` into `common`.
+- `setting/ratio_setting/compact_suffix.go`
+  - Reused the shared common suffix constant to keep the existing
+    `ratio_setting.CompactModelSuffix` API stable.
+- `common/endpoint_type.go`
+  - Compact-suffixed models now advertise
+    `openai-response-compact`.
+  - Codex channels now advertise `openai-response` for base models and
+    `openai-response-compact` for compact-suffixed models.
+  - Existing OpenAI, xAI, image, Jina, Claude, Gemini, and Sora endpoint
+    defaults are otherwise unchanged.
+- `common/endpoint_type_test.go`
+  - Added focused coverage for compact model endpoint exposure.
+  - Added Codex base/compact endpoint coverage.
+  - Added regression coverage for existing OpenAI response-only and xAI
+    defaults.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./common
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper ./relay/channel ./relay ./service ./controller ./model
+```
+
+```bash
+git diff --check
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/common
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/model
+
+git diff --check passed.
+```
+
+Deployment plan:
+
+- Push this phase commit first.
+- Build and replace only the `newapi` service container on production.
+- Keep `newapi-mysql`, `newapi-redis`, `sub2api-postgres`, `sub2api-redis`,
+  `sub2api-caddy`, volumes, and live data untouched.
+- Verify with container health and a small API smoke after deployment.
+
+## Phase 22 - Strategy And Protocol Bug Sweep
+
+Status: planned.
+
+Next phase objective:
+
+After Phase 21 is deployed and smoked, continue backend-only strategy/protocol
+hardening. Start with request-path capability checks and adapter-specific edge
+cases for non-plus/pro traffic, then pick one small fix. Do not resume YuCore
+UI work, do not change production data, and do not alter account-pool or
+channel-pool scheduling semantics unless Phase 22 explicitly narrows to that
+topic first.

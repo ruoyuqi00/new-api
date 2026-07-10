@@ -15,6 +15,27 @@ latest fetched tag: v1.0.0-rc.20
 v1.0.0-rc.20: 6ce7305c feat(price): add token ratios for GPT-5.6 models
 ```
 
+## 2026-07-10 Incremental Upstream Check
+
+Fetched `origin/main` again during Phase 21. The audited range
+`a79f96919..origin/main` contains one commit:
+
+```text
+246d62aa5 chore: remove dead files resurrected by v1.0 launch commit (#6041)
+```
+
+Decision:
+
+- Do not backport this in the Phase 21 production deploy.
+- It deletes dead files only: `controller/swag_video.go`,
+  `controller/task_video.go`, and `service/pre_consume_quota.go`.
+- No runtime protocol, routing, billing, Responses, channel capability, or
+  scheduler behavior changes were found in this upstream increment.
+- Treat it as optional later cleanup, not as a production hardening fix.
+
+Phase 21 therefore proceeds with a local YuAPI compact endpoint capability fix
+instead of an upstream backport.
+
 The previous project baseline had observed `origin/main` at `12603a77`.
 Between `12603a77` and `origin/main`, upstream added backend, billing, security,
 web, and i18n changes.

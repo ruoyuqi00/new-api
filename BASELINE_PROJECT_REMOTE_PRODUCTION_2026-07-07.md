@@ -27,6 +27,21 @@ Current canonical follow-up documents:
   - Audit of recent `QuantumNous/new-api` upstream fixes and features to
     consider for selective backport.
 
+## 2026-07-10 Production Work Boundary
+
+YuCore UI / brand / Studio / Canvas work is paused for the current production
+backend window. It is preserved as local and feature-branch history only, with
+unfinished local UI lint work stashed as:
+
+```text
+stash@{0}: wip: phase 20 yucore motion canvas lint cleanup
+```
+
+Do not apply that stash, resume YuCore UI lint cleanup, or treat YuCore UI as a
+production deployment input until a separate UI window explicitly restarts it.
+Current production work should stay on backend protocol, routing, billing, and
+strategy hardening for YuAPI.
+
 Current production branch for YuAPI migration work:
 
 ```text
@@ -35,7 +50,7 @@ remote: ruoyu/feature/yuapi-channel-pool-runtime-20260707
 latest production-operation record before this doc refresh:
   9204192d docs: record sub2api app retirement
 latest audited upstream origin/main:
-  a79f9691 fix(affiliate): update referral message
+  246d62aa5 chore: remove dead files resurrected by v1.0 launch commit
 latest fetched upstream tag:
   v1.0.0-rc.20
 ```

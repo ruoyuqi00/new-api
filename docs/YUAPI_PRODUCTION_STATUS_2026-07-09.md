@@ -35,6 +35,17 @@ ruoyu  = https://github.com/ruoyuqi00/sub2api-provider-adapters.git
 Do not push local `main` to `ruoyu/main`. Local `main` tracks upstream
 `QuantumNous/new-api` and is not the YuAPI production feature line.
 
+## YuCore UI Boundary
+
+YuCore UI / brand / Studio / Canvas work is not part of the current production
+deployment stream. The unfinished local UI lint cleanup is intentionally kept in
+stash `wip: phase 20 yucore motion canvas lint cleanup` and must not be applied
+or deployed during backend protocol/strategy phases.
+
+Current backend production phases may update YuAPI/NewAPI server code,
+protocol routing metadata, tests, and docs. They must not mix in YuCore UI
+polish until a separate UI window deliberately resumes that work.
+
 ## Server State
 
 Observed on `154.219.122.197` after the retirement step:
@@ -116,12 +127,16 @@ The bridge channels are disabled but preserved.
 1. Keep YuAPI-only plus/pro operation under observation.
 2. Selectively backport important upstream `QuantumNous/new-api` fixes; do not
    wholesale merge `origin/main`.
-3. Harden YuAPI scheduling observability:
+3. Harden protocol capability surfaces before changing live strategy:
+   - Responses/compact Responses endpoint metadata;
+   - channel-test endpoint selection for Codex/subscription-style channels;
+   - request-path support checks for advanced custom channels.
+4. Harden YuAPI scheduling observability:
    - channel-pool full/cooldown counters;
    - clear admin log surface for skipped cooled/full channels;
    - safer per-channel fallback diagnostics.
-4. Review billing/price edge cases before changing model exposure or pricing.
-5. Review remaining non-plus/pro paths separately:
+5. Review billing/price edge cases before changing model exposure or pricing.
+6. Review remaining non-plus/pro paths separately:
    - image routes;
    - Kiro/Windsurf/provider adapters;
    - CC/Anthropic-style pools;
