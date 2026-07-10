@@ -49,5 +49,8 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		// add to first
 		endpointTypes = append([]constant.EndpointType{constant.EndpointTypeImageGeneration}, endpointTypes...)
 	}
+	if IsEmbeddingModel(modelName) {
+		endpointTypes = append([]constant.EndpointType{constant.EndpointTypeEmbeddings}, endpointTypes...)
+	}
 	return endpointTypes
 }

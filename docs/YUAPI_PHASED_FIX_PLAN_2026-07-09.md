@@ -2268,9 +2268,9 @@ gpt-5.5-openai-compact: ["openai-response-compact"]
 
 ## Phase 22 - Strategy And Protocol Bug Sweep
 
-Status: planned.
+Status: in progress.
 
-Next phase objective:
+Objective:
 
 After Phase 21 is deployed and smoked, continue backend-only strategy/protocol
 hardening. Start with request-path capability checks and adapter-specific edge
@@ -2278,3 +2278,124 @@ cases for non-plus/pro traffic, then pick one small fix. Do not resume YuCore
 UI work, do not change production data, and do not alter account-pool or
 channel-pool scheduling semantics unless Phase 22 explicitly narrows to that
 topic first.
+
+Accepted narrow fix:
+
+- Correct endpoint metadata for embedding models.
+- The runtime and channel-test paths already recognize embedding requests and
+  use `/v1/embeddings`.
+- Pricing/model metadata should expose `embeddings` as the first supported
+  endpoint for embedding-like models instead of advertising only generic
+  chat/OpenAI endpoints.
+
+Boundary:
+
+- Do not change real request routing, provider priority, model mapping,
+  account pools, channel pools, scheduler behavior, billing formulas, schemas,
+  production data, or YuCore UI.
+- Do not add OpenAI video channel-test behavior in this phase; `openai-video`
+  endpoint metadata remains a separate candidate because video submit/fetch
+  paths involve async task request bodies.
+- Deployment may replace only the YuAPI `newapi` service image/container after
+  tests; MySQL, Redis, volumes, retained Sub2API services, and live data must
+  remain untouched.
+
+Acceptance checks:
+
+```bash
+go test ./common
+go test ./relay/helper ./relay/channel ./relay ./service ./controller ./model
+git diff --check
+```
+
+Manual review checks:
+
+- Embedding-like model names advertise `embeddings` first.
+- Existing compact, Codex, image, response-only, xAI, Claude, Gemini, and Sora
+  endpoint behavior remains unchanged except for embedding metadata
+  prepending.
+- No scheduler/account-pool/channel-pool code is touched.
+
+Upstream triage:
+
+- Fetched `origin/main` again on 2026-07-10.
+- `origin/main` remained at `246d62aa5`.
+- The range `246d62aa5..origin/main` contained no new commits, so Phase 22 did
+  not backport upstream code.
+
+Implementation:
+
+- `common/model.go`
+  - Added `EmbeddingModels` patterns for `embedding`, `embed`, `prefix:m3e`,
+    and `bge-`.
+  - Added `IsEmbeddingModel`.
+- `common/endpoint_type.go`
+  - Prepends `embeddings` to supported endpoint metadata for embedding-like
+    models.
+  - Leaves the existing channel-native endpoint list in place after
+    `embeddings`, so Gemini embedding models still retain their Gemini/OpenAI
+    metadata after the explicit embeddings endpoint.
+- `common/endpoint_type_test.go`
+  - Added OpenAI, Gemini, and BGE embedding endpoint metadata coverage.
+
+Verification:
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./common
+```
+
+```bash
+docker run --rm -e GOPROXY=https://goproxy.cn,direct \
+  -e GOSUMDB=sum.golang.google.cn \
+  -v "${PWD}:/src" \
+  -v yuapi-go-mod-cache:/go/pkg/mod \
+  -v yuapi-go-build-cache:/root/.cache/go-build \
+  -w /src golang:1.25.1 \
+  go test ./relay/helper ./relay/channel ./relay ./service ./controller ./model
+```
+
+```bash
+git diff --check
+```
+
+Result:
+
+```text
+ok   github.com/QuantumNous/new-api/common
+ok   github.com/QuantumNous/new-api/relay/helper
+ok   github.com/QuantumNous/new-api/relay/channel
+ok   github.com/QuantumNous/new-api/relay
+ok   github.com/QuantumNous/new-api/service
+ok   github.com/QuantumNous/new-api/controller
+ok   github.com/QuantumNous/new-api/model
+
+git diff --check passed.
+```
+
+Deployment plan:
+
+- Push this phase commit first.
+- Build and replace only the `newapi` service container on production.
+- Keep `newapi-mysql`, `newapi-redis`, retained Sub2API services, volumes, and
+  live data untouched.
+- Verify container health plus `/`, `/api/pricing`, and endpoint metadata smoke.
+
+## Phase 23 - Video Endpoint Metadata Triage
+
+Status: planned.
+
+Next phase objective:
+
+Review `openai-video` endpoint metadata and channel-test behavior separately.
+The endpoint type exists and Sora channels advertise it, but video submit/fetch
+paths involve async task request bodies and should not be folded into Phase 22's
+embedding metadata fix. Decide whether the safe next step is only default
+endpoint metadata, channel-test request construction, or a broader async-video
+smoke harness. Do not change account pools, channel-pool scheduling, live
+channel priorities, production data, or YuCore UI.

@@ -42,3 +42,20 @@ func TestGetEndpointTypesByChannelTypeExistingDefaults(t *testing.T) {
 		GetEndpointTypesByChannelType(constant.ChannelTypeXai, "grok-4"),
 	)
 }
+
+func TestGetEndpointTypesByChannelTypeEmbeddingModels(t *testing.T) {
+	require.Equal(t,
+		[]constant.EndpointType{constant.EndpointTypeEmbeddings, constant.EndpointTypeOpenAI},
+		GetEndpointTypesByChannelType(constant.ChannelTypeOpenAI, "text-embedding-3-large"),
+	)
+
+	require.Equal(t,
+		[]constant.EndpointType{constant.EndpointTypeEmbeddings, constant.EndpointTypeGemini, constant.EndpointTypeOpenAI},
+		GetEndpointTypesByChannelType(constant.ChannelTypeGemini, "gemini-embedding-001"),
+	)
+
+	require.Equal(t,
+		[]constant.EndpointType{constant.EndpointTypeEmbeddings, constant.EndpointTypeOpenAI},
+		GetEndpointTypesByChannelType(constant.ChannelTypeOpenAI, "bge-large-zh-v1.5"),
+	)
+}

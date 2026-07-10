@@ -19,6 +19,12 @@ var (
 		"flux-",
 		"flux.1-",
 	}
+	EmbeddingModels = []string{
+		"embedding",
+		"embed",
+		"prefix:m3e",
+		"bge-",
+	}
 	OpenAITextModels = []string{
 		"gpt-",
 		"o1",
@@ -48,6 +54,19 @@ func IsImageGenerationModel(modelName string) bool {
 			return true
 		}
 		if strings.HasPrefix(m, "prefix:") && strings.HasPrefix(modelName, strings.TrimPrefix(m, "prefix:")) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsEmbeddingModel(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	for _, m := range EmbeddingModels {
+		if strings.HasPrefix(m, "prefix:") && strings.HasPrefix(modelName, strings.TrimPrefix(m, "prefix:")) {
+			return true
+		}
+		if strings.Contains(modelName, m) {
 			return true
 		}
 	}
