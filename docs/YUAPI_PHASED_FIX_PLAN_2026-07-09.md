@@ -2112,7 +2112,7 @@ Known validation limitation:
 
 ## Phase 21 - Production Protocol Path Triage
 
-Status: code/test completed; production deploy pending.
+Status: completed.
 
 Objective:
 
@@ -2232,13 +2232,39 @@ ok   github.com/QuantumNous/new-api/model
 git diff --check passed.
 ```
 
-Deployment plan:
+Deployment:
 
-- Push this phase commit first.
-- Build and replace only the `newapi` service container on production.
-- Keep `newapi-mysql`, `newapi-redis`, `sub2api-postgres`, `sub2api-redis`,
-  `sub2api-caddy`, volumes, and live data untouched.
-- Verify with container health and a small API smoke after deployment.
+- Pushed code/docs commit:
+  `4bb40fda0 fix: expose compact response endpoint metadata`.
+- Built production image from that commit:
+  `newapi:channel-pool-runtime-20260710-4bb40fda0`.
+- Backed up compose before changing the image line:
+  `/opt/newapi/backups/docker-compose-before-phase21-compact-20260710094446.yml`.
+- Updated only the `newapi` service image in `/opt/newapi/docker-compose.yml`.
+- Ran `docker compose up -d newapi`.
+- `newapi-mysql`, `newapi-redis`, Sub2API retained services, volumes, and live
+  data were not modified.
+
+Production smoke:
+
+```text
+newapi image: newapi:channel-pool-runtime-20260710-4bb40fda0
+newapi health: healthy
+newapi-mysql: healthy, unchanged
+newapi-redis: healthy, unchanged
+local /: HTTP 200
+local /api/pricing: HTTP 200
+local /api/status: HTTP 200
+local unauth /v1/models: HTTP 401
+domain https://api.dtrljm.com/: HTTP 200
+```
+
+Protocol metadata smoke:
+
+```text
+/api/pricing compact items: 1
+gpt-5.5-openai-compact: ["openai-response-compact"]
+```
 
 ## Phase 22 - Strategy And Protocol Bug Sweep
 

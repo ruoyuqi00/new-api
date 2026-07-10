@@ -48,16 +48,16 @@ Current production branch for YuAPI migration work:
 feature/yuapi-channel-pool-runtime-20260707
 remote: ruoyu/feature/yuapi-channel-pool-runtime-20260707
 latest production-operation record before this doc refresh:
-  9204192d docs: record sub2api app retirement
+  4bb40fda0 fix: expose compact response endpoint metadata
 latest audited upstream origin/main:
   246d62aa5 chore: remove dead files resurrected by v1.0 launch commit
 latest fetched upstream tag:
   v1.0.0-rc.20
 ```
 
-Current server state after the conservative retirement step:
+Current server state after the Phase 21 production deploy:
 
-- `newapi` is running `newapi:channel-pool-runtime-20260707-59688c50`.
+- `newapi` is running `newapi:channel-pool-runtime-20260710-4bb40fda0`.
 - `newapi-mysql` and `newapi-redis` remain the active YuAPI data services.
 - The `sub2api` app container was stopped on 2026-07-09.
 - `sub2api-postgres`, `sub2api-redis`, `sub2api-caddy`, and volumes were kept.

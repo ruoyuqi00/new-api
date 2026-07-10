@@ -22,7 +22,7 @@ payloads.
 workspace: D:\wflogin\new-api-ruoyu-push
 branch: feature/yuapi-channel-pool-runtime-20260707
 remote branch: ruoyu/feature/yuapi-channel-pool-runtime-20260707
-last production record before this status note: 9204192d docs: record sub2api app retirement
+latest deployed code commit: 4bb40fda0 fix: expose compact response endpoint metadata
 ```
 
 Important remotes:
@@ -48,10 +48,10 @@ polish until a separate UI window deliberately resumes that work.
 
 ## Server State
 
-Observed on `154.219.122.197` after the retirement step:
+Observed on `154.219.122.197` after the Phase 21 deployment:
 
 ```text
-newapi              newapi:channel-pool-runtime-20260707-59688c50   healthy
+newapi              newapi:channel-pool-runtime-20260710-4bb40fda0   healthy
 newapi-mysql        mysql:8.4                                       healthy
 newapi-redis        redis:7-alpine                                  healthy
 sub2api             sub2api-provider-adapters:...                   Exited (0)
@@ -67,6 +67,21 @@ api.dtrljm.com /: HTTP 200
 plus token 82 / gpt-5.4-mini: HTTP 200, log id 7013, channel id 2323
 pro token 80 / gpt-5.4-mini: HTTP 200, log id 7014, channel id 2308
 ```
+
+Phase 21 deploy smoke on 2026-07-10:
+
+```text
+compose backup: /opt/newapi/backups/docker-compose-before-phase21-compact-20260710094446.yml
+local /: HTTP 200
+local /api/pricing: HTTP 200
+local /api/status: HTTP 200
+local unauth /v1/models: HTTP 401
+domain https://api.dtrljm.com/: HTTP 200
+/api/pricing compact metadata: gpt-5.5-openai-compact -> openai-response-compact
+```
+
+No production database data, account pool settings, channel priorities, MySQL
+volumes, Redis volumes, or retained Sub2API data services were modified.
 
 ## Channel State
 
