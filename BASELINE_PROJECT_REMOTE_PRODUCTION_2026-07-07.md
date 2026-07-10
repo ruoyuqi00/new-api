@@ -26,6 +26,9 @@ Current canonical follow-up documents:
 - `docs/YUAPI_UPSTREAM_NEWAPI_AUDIT_2026-07-09.md`
   - Audit of recent `QuantumNous/new-api` upstream fixes and features to
     consider for selective backport.
+- `docs/YUCORE_UI_NEXT_WINDOW_HANDOFF_2026-07-10.md`
+  - Current entry point for a separate YuCore UI / Studio / Canvas continuation
+    window. Use only when intentionally returning to UI work.
 
 ## 2026-07-10 Production Work Boundary
 

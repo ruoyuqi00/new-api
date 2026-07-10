@@ -11,6 +11,14 @@ Rule for every phase:
    objective.
 4. Push the phase commit before moving to the next phase.
 
+UI work boundary:
+
+- YuCore UI / Studio / Canvas work is paused for backend production phases.
+- Resume UI work from `docs/YUCORE_UI_NEXT_WINDOW_HANDOFF_2026-07-10.md` in a
+  separate UI-focused window.
+- Do not mix UI polishing with backend protocol, billing, scheduler, account
+  pool, channel-pool, or production deployment phases.
+
 ## Phase 1 - Control-Plane Input Safety
 
 Status: completed.
