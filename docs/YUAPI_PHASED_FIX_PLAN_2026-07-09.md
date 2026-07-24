@@ -2440,3 +2440,40 @@ embedding metadata fix. Decide whether the safe next step is only default
 endpoint metadata, channel-test request construction, or a broader async-video
 smoke harness. Do not change account pools, channel-pool scheduling, live
 channel priorities, production data, or YuCore UI.
+
+## Phase 24 - Mapped Model Response Privacy
+
+Status: completed locally, pending production deployment.
+
+Objective:
+
+Keep channel model mappings private from API consumers. A mapped request must
+return the public model name requested by the caller while preserving the
+actual upstream name for routing, token estimation, billing, and administrator
+diagnostics.
+
+Implementation:
+
+- Added `RelayInfo.ClientResponseModelName`, which returns the origin model
+  only for an active mapping.
+- Added structured normalization for the protocol fields `model` and
+  `response.model`. It leaves non-JSON stream control data and unrelated user
+  fields untouched.
+- Applied that normalization to OpenAI Chat and Responses output, streamed
+  Responses events, and Chat/Responses conversion state.
+
+Verification:
+
+```text
+go test ./relay/helper ./relay/channel/openai -count=1
+go test ./relay/helper ./relay/channel ./relay ./service ./controller ./model ./middleware -count=1
+go build ./...
+git diff --check
+```
+
+Deployment boundary:
+
+- No UI, generated output, production channel configuration, account-pool
+  data, pricing, or database data is part of this phase.
+- Deploy only after a backend image build, compose backup, and production
+  endpoint smoke checks.

@@ -318,7 +318,6 @@ func (info *RelayInfo) ToString() string {
 	return b.String()
 }
 
-// 定义支持流式选项的通道类型
 func (info *RelayInfo) ClientResponseModelName() string {
 	if info == nil || info.ChannelMeta == nil {
 		return ""
@@ -329,6 +328,7 @@ func (info *RelayInfo) ClientResponseModelName() string {
 	return info.UpstreamModelName
 }
 
+// 定义支持流式选项的通道类型
 var streamSupportedChannels = map[int]bool{
 	constant.ChannelTypeOpenAI:         true,
 	constant.ChannelTypeAnthropic:      true,

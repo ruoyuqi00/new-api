@@ -46,6 +46,9 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	if info.IsModelMapped {
+		chatResp.Model = info.ClientResponseModelName()
+	}
 
 	if usage == nil || usage.TotalTokens == 0 {
 		text := service.ExtractOutputTextFromResponses(&responsesResp)
@@ -139,7 +142,7 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 		finalResponse = &dto.OpenAIResponsesResponse{
 			ID:        helper.GetResponseID(c),
 			CreatedAt: int(time.Now().Unix()),
-			Model:     info.UpstreamModelName,
+			Model:     info.ClientResponseModelName(),
 			Status:    []byte(`"completed"`),
 		}
 	}
@@ -149,6 +152,9 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(finalResponse, chatId)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	if info.IsModelMapped {
+		chatResp.Model = info.ClientResponseModelName()
 	}
 	if usage == nil || usage.TotalTokens == 0 {
 		text := service.ExtractOutputTextFromResponses(finalResponse)
@@ -184,7 +190,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 	responseId := helper.GetResponseID(c)
 	createAt := time.Now().Unix()
-	state := relayconvert.NewResponsesToChatStreamState(info.UpstreamModelName, false)
+	state := relayconvert.NewResponsesToChatStreamState(info.ClientResponseModelName(), false)
 	state.ID = responseId
 	state.Created = createAt
 	streamErr := (*types.NewAPIError)(nil)

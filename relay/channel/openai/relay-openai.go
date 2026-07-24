@@ -24,6 +24,11 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	if data == "" {
 		return nil
 	}
+	normalizedData, _, err := helper.NormalizeClientResponseModelJSON(info, []byte(data))
+	if err != nil {
+		return err
+	}
+	data = string(normalizedData)
 
 	if !forceFormat && !thinkToContent {
 		return helper.StringData(c, data)
@@ -266,6 +271,9 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	if info.IsModelMapped {
+		simpleResponse.Model = info.ClientResponseModelName()
+	}
 
 	if !oaiTextResponseHasSignal(simpleResponse) {
 		return nil, types.NewOpenAIError(fmt.Errorf("empty OpenAI-compatible response"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
@@ -336,6 +344,11 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		}
 		responseBody = geminiRespStr
 	}
+	normalizedBody, _, err := helper.NormalizeClientResponseModelJSON(info, responseBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	responseBody = normalizedBody
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 

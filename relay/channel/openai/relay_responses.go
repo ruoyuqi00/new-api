@@ -41,7 +41,11 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 
 	// 写入新的 response body
-	service.IOCopyBytesGracefully(c, resp, responseBody)
+	normalizedBody, _, err := helper.NormalizeClientResponseModelJSON(info, responseBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	service.IOCopyBytesGracefully(c, resp, normalizedBody)
 
 	// compute usage
 	usage := dto.Usage{}
@@ -80,6 +84,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		normalizedData, _, err := helper.NormalizeClientResponseModelJSON(info, []byte(data))
+		if err != nil {
+			sr.Error(err)
+			return
+		}
+		data = string(normalizedData)
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
