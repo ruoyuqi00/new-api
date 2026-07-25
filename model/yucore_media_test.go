@@ -6,7 +6,27 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
+
+func TestYucoreMediaTaskAssetsUsesLongTextOnMySQL(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "user:password@tcp(127.0.0.1:3306)/newapi",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DisableAutomaticPing: true,
+		DryRun:               true,
+	})
+	require.NoError(t, err)
+
+	stmt := &gorm.Statement{DB: db}
+	require.NoError(t, stmt.Parse(&YucoreMediaTask{}))
+	field := stmt.Schema.LookUpField("Assets")
+	require.NotNil(t, field)
+	require.Equal(t, "longtext", db.Migrator().FullDataTypeOf(field).SQL)
+}
 
 func TestParseYucoreMediaUAGAllowlist(t *testing.T) {
 	got := parseYucoreMediaUAGAllowlist(" GPT ;flow\nimg-v3,, ")

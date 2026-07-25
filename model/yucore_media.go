@@ -17,6 +17,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 const (
@@ -64,6 +65,21 @@ type yucoreMediaAdapterConfig struct {
 
 type YucoreMediaUAGProxyHeaders map[string]string
 
+// YucoreMediaTaskAssetPayload keeps potentially large asset URLs or base64 payloads
+// from being truncated by MySQL's 64 KiB TEXT limit.
+type YucoreMediaTaskAssetPayload string
+
+func (YucoreMediaTaskAssetPayload) GormDataType() string {
+	return "text"
+}
+
+func (YucoreMediaTaskAssetPayload) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
+	if db.Dialector.Name() == "mysql" {
+		return "longtext"
+	}
+	return "text"
+}
+
 type YucoreMediaAsset struct {
 	Id         string         `json:"id"`
 	Kind       string         `json:"kind"`
@@ -98,30 +114,30 @@ type openAICompatibleImageResponse struct {
 }
 
 type YucoreMediaTask struct {
-	Id             int            `json:"id" gorm:"primary_key"`
-	TaskId         string         `json:"task_id" gorm:"type:varchar(64);uniqueIndex"`
-	UserId         int            `json:"user_id" gorm:"index"`
-	SessionId      string         `json:"session_id" gorm:"type:varchar(96);index;default:''"`
-	Kind           string         `json:"kind" gorm:"type:varchar(24);index;default:'image'"`
-	Mode           string         `json:"mode" gorm:"type:varchar(48);default:'text-to-image'"`
-	ModelId        string         `json:"model_id" gorm:"type:varchar(96);index;default:'gpt-image-2'"`
-	Prompt         string         `json:"prompt" gorm:"type:text"`
-	NegativePrompt string         `json:"negative_prompt" gorm:"type:text"`
-	AspectRatio    string         `json:"aspect_ratio" gorm:"type:varchar(24);default:'auto'"`
-	Size           string         `json:"size" gorm:"type:varchar(24);default:'1k'"`
-	Quality        string         `json:"quality" gorm:"type:varchar(24);default:'high'"`
-	Format         string         `json:"format" gorm:"type:varchar(24);default:'png'"`
-	Count          int            `json:"count" gorm:"default:1"`
-	Status         string         `json:"status" gorm:"type:varchar(24);index;default:'processing'"`
-	Progress       int            `json:"progress" gorm:"default:0"`
-	Cost           int            `json:"cost" gorm:"default:0"`
-	Assets         string         `json:"assets" gorm:"type:text"`
-	Inputs         string         `json:"inputs" gorm:"type:text"`
-	Metadata       string         `json:"metadata" gorm:"type:text"`
-	Error          string         `json:"error" gorm:"type:varchar(512);default:''"`
-	CreatedTime    int64          `json:"created_time" gorm:"bigint;index"`
-	UpdatedTime    int64          `json:"updated_time" gorm:"bigint;index"`
-	DeletedAt      gorm.DeletedAt `json:"-" gorm:"index"`
+	Id             int                         `json:"id" gorm:"primary_key"`
+	TaskId         string                      `json:"task_id" gorm:"type:varchar(64);uniqueIndex"`
+	UserId         int                         `json:"user_id" gorm:"index"`
+	SessionId      string                      `json:"session_id" gorm:"type:varchar(96);index;default:''"`
+	Kind           string                      `json:"kind" gorm:"type:varchar(24);index;default:'image'"`
+	Mode           string                      `json:"mode" gorm:"type:varchar(48);default:'text-to-image'"`
+	ModelId        string                      `json:"model_id" gorm:"type:varchar(96);index;default:'gpt-image-2'"`
+	Prompt         string                      `json:"prompt" gorm:"type:text"`
+	NegativePrompt string                      `json:"negative_prompt" gorm:"type:text"`
+	AspectRatio    string                      `json:"aspect_ratio" gorm:"type:varchar(24);default:'auto'"`
+	Size           string                      `json:"size" gorm:"type:varchar(24);default:'1k'"`
+	Quality        string                      `json:"quality" gorm:"type:varchar(24);default:'high'"`
+	Format         string                      `json:"format" gorm:"type:varchar(24);default:'png'"`
+	Count          int                         `json:"count" gorm:"default:1"`
+	Status         string                      `json:"status" gorm:"type:varchar(24);index;default:'processing'"`
+	Progress       int                         `json:"progress" gorm:"default:0"`
+	Cost           int                         `json:"cost" gorm:"default:0"`
+	Assets         YucoreMediaTaskAssetPayload `json:"assets"`
+	Inputs         string                      `json:"inputs" gorm:"type:text"`
+	Metadata       string                      `json:"metadata" gorm:"type:text"`
+	Error          string                      `json:"error" gorm:"type:varchar(512);default:''"`
+	CreatedTime    int64                       `json:"created_time" gorm:"bigint;index"`
+	UpdatedTime    int64                       `json:"updated_time" gorm:"bigint;index"`
+	DeletedAt      gorm.DeletedAt              `json:"-" gorm:"index"`
 }
 
 func GenerateYucoreMediaTaskID() string {
@@ -560,7 +576,7 @@ func normalizeYucoreMediaTask(task *YucoreMediaTask) {
 		task.Metadata = "{}"
 	}
 	if task.Assets == "" {
-		task.Assets = "[]"
+		task.Assets = YucoreMediaTaskAssetPayload("[]")
 	}
 	task.Cost = estimateYucoreMediaTaskCost(task)
 }
@@ -722,7 +738,7 @@ func settleYucoreMediaTaskWithAssets(task *YucoreMediaTask, assets []YucoreMedia
 	rawAssets, _ := json.Marshal(assets)
 	task.Status = YucoreMediaTaskStatusCompleted
 	task.Progress = 100
-	task.Assets = string(rawAssets)
+	task.Assets = YucoreMediaTaskAssetPayload(rawAssets)
 	task.Error = ""
 	task.UpdatedTime = now
 	err := DB.Model(task).
@@ -1523,7 +1539,7 @@ func uagProxyHistoryTask(row map[string]any, userId int) (*YucoreMediaTask, bool
 	}
 	assets := buildUAGProxyHistoryAssets(task, row)
 	rawAssets, _ := json.Marshal(assets)
-	task.Assets = string(rawAssets)
+	task.Assets = YucoreMediaTaskAssetPayload(rawAssets)
 	task.Metadata = mergeYucoreMediaMetadata(task.Metadata, map[string]any{
 		"adapter":          YucoreMediaAdapterUAGProxy,
 		"upstream_task_id": taskId,
