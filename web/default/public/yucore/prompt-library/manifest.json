@@ -1,0 +1,86 @@
+{
+  "generated_at": "2026-07-13T00:45:17.575904+00:00",
+  "source": "YuAPI production OpenAI-compatible endpoints through global.yuaiapi.com",
+  "items": [
+    {
+      "id": "direct-flash-editorial",
+      "title": "直闪胶片人像",
+      "model": "grok-imagine-image-quality",
+      "endpoint": "/v1/images/generations",
+      "prompt": "真实直闪胶片质感，室内生活快照，人物自然动作，硬边阴影，轻微颗粒和暗角，保留真实皮肤纹理。",
+      "generation_prompt": "真实直闪胶片质感，室内生活快照，人物自然动作，硬边阴影，轻微颗粒和暗角，保留真实皮肤纹理。 Avoid: 塑料皮肤、畸形手指、多余肢体、过度 HDR、商业棚拍感",
+      "price_cny": 0.032,
+      "width": 1024,
+      "height": 1024,
+      "bytes": 135720,
+      "sha256": "a05bd413417e361cf59abe5e292240d2753ea751101f0bcd2ab448e51be434f9"
+    },
+    {
+      "id": "premium-product-core",
+      "title": "高端产品核心图",
+      "model": "gpt-image-2-adobe",
+      "endpoint": "/v1/images/generations",
+      "prompt": "高级黑色产品主视觉，精确边缘光，玻璃与金属细节，干净背景，商业级构图。",
+      "generation_prompt": "高级黑色产品主视觉，精确边缘光，玻璃与金属细节，干净背景，商业级构图。 Avoid: 低清晰度、文字错误、杂乱背景、廉价塑料质感",
+      "price_cny": 0.1,
+      "width": 1024,
+      "height": 1024,
+      "bytes": 51854,
+      "sha256": "8cddb0594f639378b858b645eff997f8d0d7ce6eb17889cbd623690e0ee7ac2d"
+    },
+    {
+      "id": "social-campaign-poster",
+      "title": "社媒活动海报",
+      "model": "grok-imagine-image-quality",
+      "endpoint": "/v1/images/generations",
+      "prompt": "生成一张适合社媒传播的活动海报，构图有冲击力，画面层次丰富，留出标题和按钮空间，整体高级且易于转化。",
+      "generation_prompt": "生成一张适合社媒传播的活动海报，构图有冲击力，画面层次丰富，留出标题和按钮空间，整体高级且易于转化。 No words, no letters, no numbers, no typography, no logos, no watermark. Leave a clean empty region for a title and button to be added later in the interface. Avoid: 水印、品牌错字、低质量排版、过度拥挤",
+      "price_cny": 0.032,
+      "width": 1024,
+      "height": 1024,
+      "bytes": 96516,
+      "sha256": "78095b1bb96105a30d4a07eac884fc5a8fd4a4ae873eae01e6b025ce4ee0b09e"
+    },
+    {
+      "id": "short-product-video",
+      "title": "产品短视频",
+      "model": "grok-imagine-image-quality",
+      "endpoint": "/v1/images/generations",
+      "prompt": "生成一段产品展示短视频，镜头缓慢推进，光影自然，主体稳定，节奏适合广告素材，画面干净且有高级感。",
+      "generation_prompt": "生成一段产品展示短视频，镜头缓慢推进，光影自然，主体稳定，节奏适合广告素材，画面干净且有高级感。 Create a single cinematic keyframe still representing the opening frame of this video concept. Avoid: 闪烁、断帧、主体漂移、低清晰度、文字错误",
+      "price_cny": 0.032,
+      "width": 1024,
+      "height": 1024,
+      "bytes": 39658,
+      "sha256": "c53254f5e233ab5bbe0490774a5c5b363aef75aa163b4158bd6daee6d80873ba"
+    },
+    {
+      "id": "image-to-video-motion",
+      "title": "图片动态化",
+      "model": "grok-imagine-image-quality",
+      "endpoint": "/v1/images/generations",
+      "prompt": "把参考图延展为自然短视频，保持主体一致，添加轻微镜头运动和真实环境氛围，避免夸张变形。",
+      "generation_prompt": "把参考图延展为自然短视频，保持主体一致，添加轻微镜头运动和真实环境氛围，避免夸张变形。 Create a single stable cinematic keyframe still suitable as the input image for this motion prompt. Avoid: 主体变形、跳切、闪烁、画面撕裂、低质量运动",
+      "price_cny": 0.032,
+      "width": 1024,
+      "height": 1024,
+      "bytes": 198540,
+      "sha256": "9fcf7ce154c9046ed15b8c9d234d36701cd313318d11dcb90a84831fbd4d524b"
+    },
+    {
+      "id": "reference-polish",
+      "title": "参考图精修",
+      "model": "grok-imagine-image-quality",
+      "endpoint": "/v1/images/edits",
+      "prompt": "基于参考图做商业级精修，保留主体结构和核心识别特征，提升光影、材质、清晰度和整体质感，适合对外发布。",
+      "generation_prompt": "基于参考图做商业级精修，保留主体结构和核心识别特征，提升光影、材质、清晰度和整体质感，适合对外发布。 Avoid: 主体变化过大、脸部变形、多余肢体、文字错误",
+      "price_cny": 0.032,
+      "width": 1024,
+      "height": 1024,
+      "bytes": 55038,
+      "sha256": "ec48dab7d3c0f3a152bf630c19b51012ab05df4edafd4aadef2a6be409ce753a",
+      "input": "premium-product-core.webp"
+    }
+  ],
+  "total_price_cny": 0.26
+}

@@ -1,0 +1,90 @@
+# Local-only production-brand preview. Start with:
+# copy .env.local.example .env.local
+# docker compose --env-file .env.local -f docker-compose.local.yml up --build
+# Validate the checked-in template with:
+# docker compose --env-file .env.local.example -f docker-compose.local.yml config --quiet
+
+services:
+  newapi-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${LOCAL_APP_IMAGE}
+    container_name: newapi-local
+    restart: "no"
+    ports:
+      - "127.0.0.1:13000:3000"
+    environment:
+      SQL_DSN: ${LOCAL_MYSQL_USER}:${LOCAL_MYSQL_PASSWORD}@tcp(newapi-local-mysql:3306)/${LOCAL_MYSQL_DATABASE}?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_CONN_STRING: redis://:${LOCAL_REDIS_PASSWORD}@newapi-local-redis:6379/0
+      SESSION_SECRET: ${LOCAL_SESSION_SECRET}
+      SESSION_COOKIE_SECURE: "false"
+      TZ: ${LOCAL_TZ}
+      NODE_NAME: local-production-brand-preview
+      ERROR_LOG_ENABLED: "true"
+      BATCH_UPDATE_ENABLED: "true"
+    depends_on:
+      newapi-local-mysql:
+        condition: service_healthy
+      newapi-local-redis:
+        condition: service_healthy
+    volumes:
+      - newapi_local_data:/data
+    networks:
+      - newapi-local-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -Eq '\"success\":[[:space:]]*true'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  newapi-local-mysql:
+    image: mysql:8.4
+    container_name: newapi-local-mysql
+    restart: "no"
+    environment:
+      MYSQL_DATABASE: ${LOCAL_MYSQL_DATABASE}
+      MYSQL_USER: ${LOCAL_MYSQL_USER}
+      MYSQL_PASSWORD: ${LOCAL_MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${LOCAL_MYSQL_ROOT_PASSWORD}
+    volumes:
+      - newapi_local_mysql_data:/var/lib/mysql
+    networks:
+      - newapi-local-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  newapi-local-redis:
+    image: redis:7-alpine
+    container_name: newapi-local-redis
+    restart: "no"
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${LOCAL_REDIS_PASSWORD}"]
+    volumes:
+      - newapi_local_redis_data:/data
+    networks:
+      - newapi-local-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${LOCAL_REDIS_PASSWORD}
+
+volumes:
+  newapi_local_data:
+    name: newapi_local_preview_data
+  newapi_local_mysql_data:
+    name: newapi_local_preview_mysql_data
+  newapi_local_redis_data:
+    name: newapi_local_preview_redis_data
+
+networks:
+  newapi-local-network:
+    name: newapi_local_preview_network
+    driver: bridge
+    internal: true

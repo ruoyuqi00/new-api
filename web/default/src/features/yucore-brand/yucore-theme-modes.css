@@ -1,0 +1,970 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+/* The original YuCore art direction remains the dark fallback. The root
+ * ThemeProvider's `html.light` class activates the independent light brand
+ * palette without duplicating the production component tree. */
+.yucore-app-shell {
+  color-scheme: dark;
+}
+
+.yucore-background-base {
+  background:
+    radial-gradient(circle at 72% 32%, rgb(244 63 94 / 0.16), transparent 23%),
+    linear-gradient(118deg, rgb(34 211 238 / 0.18) 0%, transparent 28%),
+    linear-gradient(242deg, rgb(250 204 21 / 0.12) 0%, transparent 31%),
+    linear-gradient(135deg, #020304 0%, #06070b 45%, #10120d 100%);
+  transition: background 360ms ease;
+}
+
+.yucore-background-vignette {
+  background: radial-gradient(
+    circle at 50% 45%,
+    transparent 0%,
+    transparent 43%,
+    rgb(0 0 0 / 0.46) 100%
+  );
+}
+
+.yucore-background-horizon {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(34 211 238 / 0.13),
+    rgb(250 204 21 / 0.13),
+    transparent
+  );
+}
+
+.yucore-background-topline {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(103 232 249 / 0.48),
+    rgb(250 204 21 / 0.32),
+    transparent
+  );
+}
+
+.yucore-background-readability {
+  background:
+    radial-gradient(circle at 16% 0%, rgb(103 232 249 / 0.08), transparent 26%),
+    linear-gradient(180deg, rgb(0 0 0 / 0.02), rgb(0 0 0 / 0.22));
+}
+
+.yucore-loader-atmosphere {
+  background:
+    radial-gradient(circle at 50% 40%, rgb(34 211 238 / 0.08), transparent 22%),
+    radial-gradient(circle at 48% 64%, rgb(250 204 21 / 0.06), transparent 30%),
+    linear-gradient(
+      135deg,
+      rgb(1 2 3 / 0.36),
+      rgb(3 4 6 / 0.1) 48%,
+      rgb(8 7 6 / 0.28)
+    );
+}
+
+.dark .yucore-public-header-home nav {
+  border-color: rgb(255 255 255 / 0.1);
+  background-color: rgb(0 0 0 / 0.35);
+}
+
+.light,
+.light .yucore-app-shell {
+  --background: oklch(0.982 0.009 196);
+  --foreground: oklch(0.235 0.028 224);
+  --card: oklch(0.996 0.006 196);
+  --card-foreground: oklch(0.235 0.028 224);
+  --popover: oklch(0.995 0.006 196);
+  --popover-foreground: oklch(0.235 0.028 224);
+  --primary: oklch(0.53 0.13 194);
+  --primary-foreground: oklch(0.99 0.005 196);
+  --secondary: oklch(0.94 0.027 196);
+  --secondary-foreground: oklch(0.28 0.035 220);
+  --muted: oklch(0.95 0.018 196);
+  --muted-foreground: oklch(0.48 0.035 220);
+  --accent: oklch(0.91 0.06 84);
+  --accent-foreground: oklch(0.29 0.04 68);
+  --border: oklch(0.55 0.045 205 / 20%);
+  --input: oklch(0.52 0.05 205 / 24%);
+  --ring: oklch(0.55 0.14 194);
+  --chart-1: oklch(0.56 0.15 194);
+  --chart-2: oklch(0.6 0.14 154);
+  --chart-3: oklch(0.68 0.15 78);
+  --chart-4: oklch(0.62 0.18 20);
+  --chart-5: oklch(0.61 0.14 303);
+  --sidebar: oklch(0.968 0.012 196);
+  --sidebar-foreground: oklch(0.25 0.03 224);
+  --sidebar-primary: oklch(0.53 0.13 194);
+  --sidebar-primary-foreground: oklch(0.99 0.005 196);
+  --sidebar-accent: oklch(0.925 0.035 194);
+  --sidebar-accent-foreground: oklch(0.25 0.03 224);
+  --sidebar-border: oklch(0.55 0.045 205 / 18%);
+  --sidebar-ring: oklch(0.55 0.14 194);
+  color-scheme: light;
+}
+
+.light .yucore-app-shell .yucore-workbench-header {
+  color: var(--foreground);
+  border-bottom-color: rgb(24 78 87 / 0.14);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.9), rgb(244 250 249 / 0.76)),
+    rgb(250 253 252 / 0.78);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.94),
+    0 12px 34px rgb(27 72 80 / 0.1);
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.light .yucore-app-shell .yucore-workbench-header [data-slot='sidebar-trigger'],
+.light .yucore-app-shell .yucore-workbench-actions > button,
+.light .yucore-app-shell .yucore-workbench-actions > [data-slot='button'] {
+  color: color-mix(in srgb, var(--foreground) 82%, transparent);
+  border-color: rgb(24 78 87 / 0.12);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.84), rgb(241 249 248 / 0.64)),
+    rgb(255 255 255 / 0.68);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.94),
+    0 8px 22px rgb(27 72 80 / 0.08);
+}
+
+.light
+  .yucore-app-shell
+  .yucore-workbench-header
+  [data-slot='sidebar-trigger']:hover,
+.light .yucore-app-shell .yucore-workbench-actions > button:hover,
+.light .yucore-app-shell .yucore-workbench-actions > [data-slot='button']:hover,
+.light
+  .yucore-app-shell
+  .yucore-workbench-actions
+  > button[aria-expanded='true'],
+.light
+  .yucore-app-shell
+  .yucore-workbench-actions
+  > [data-slot='button'][aria-expanded='true'],
+.light .yucore-app-shell .yucore-workbench-actions > button[data-open],
+.light
+  .yucore-app-shell
+  .yucore-workbench-actions
+  > [data-slot='button'][data-open] {
+  color: var(--foreground);
+  border-color: rgb(8 145 178 / 0.24);
+  background:
+    radial-gradient(circle at 50% 0%, rgb(8 145 178 / 0.1), transparent 58%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.96), rgb(232 246 244 / 0.86));
+}
+
+.light .yucore-app-shell .yucore-workbench-topnav a {
+  color: color-mix(in srgb, var(--foreground) 72%, transparent);
+  text-shadow: none;
+}
+
+.light .yucore-app-shell .yucore-workbench-topnav a:hover {
+  color: var(--foreground);
+}
+
+.light .yucore-app-shell .yucore-workbench-search {
+  color: color-mix(in srgb, var(--foreground) 74%, transparent);
+  border-color: rgb(24 78 87 / 0.14);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.88), rgb(241 249 248 / 0.68)),
+    rgb(255 255 255 / 0.72);
+}
+
+.light .yucore-app-shell .yucore-workbench-search:hover {
+  color: var(--foreground);
+  border-color: rgb(8 145 178 / 0.22);
+  background: rgb(250 253 252 / 0.96);
+}
+
+.light .yucore-app-shell .yucore-workbench-search kbd {
+  color: color-mix(in srgb, var(--foreground) 66%, transparent);
+  border-color: rgb(24 78 87 / 0.14);
+  background: rgb(24 78 87 / 0.06);
+}
+
+.light .yucore-app-shell .yucore-section-page {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.44), rgb(246 251 250 / 0.3)),
+    rgb(255 255 255 / 0.18);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.7);
+  backdrop-filter: blur(2px);
+}
+
+.light .yucore-app-shell .yucore-dashboard-hero {
+  border-color: rgb(24 78 87 / 0.14);
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 0.94), rgb(237 248 246 / 0.84)),
+    rgb(255 255 255 / 0.86);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.98),
+    0 24px 70px rgb(27 72 80 / 0.12);
+}
+
+.light .yucore-app-shell .yucore-dashboard-hero-wash {
+  background:
+    radial-gradient(circle at 18% 12%, rgb(8 145 178 / 0.12), transparent 32%),
+    radial-gradient(circle at 82% 18%, rgb(124 58 237 / 0.08), transparent 34%),
+    radial-gradient(circle at 70% 86%, rgb(202 138 4 / 0.08), transparent 38%),
+    linear-gradient(135deg, rgb(255 255 255 / 0.4), transparent);
+}
+
+.light .yucore-app-shell .yucore-dashboard-setup-backdrop {
+  background:
+    radial-gradient(
+      ellipse 58% 128% at 78% 0%,
+      rgb(8 145 178 / 0.12),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 42% 90% at 12% 92%,
+      rgb(202 138 4 / 0.08),
+      transparent 58%
+    ),
+    linear-gradient(
+      112deg,
+      rgb(255 255 255 / 0.9),
+      rgb(238 248 246 / 0.84) 48%,
+      rgb(248 250 244 / 0.9)
+    );
+}
+
+.light .yucore-app-shell .yucore-dashboard-setup-vignette {
+  background: linear-gradient(
+    180deg,
+    rgb(24 78 87 / 0.025),
+    transparent 38%,
+    rgb(24 78 87 / 0.08)
+  );
+}
+
+.light .yucore-app-shell .yucore-dashboard-summary .text-foreground {
+  color: var(--foreground);
+}
+
+.light .yucore-app-shell .yucore-dashboard-summary .text-muted-foreground {
+  color: var(--muted-foreground);
+}
+
+.light .yucore-app-shell .yucore-dashboard-summary .text-muted-foreground\/60,
+.light
+  .yucore-app-shell
+  .yucore-dashboard-summary
+  .text-muted-foreground\/60
+  svg,
+.light
+  .yucore-app-shell
+  .yucore-dashboard-summary
+  .text-muted-foreground\/60
+  * {
+  color: color-mix(in srgb, var(--muted-foreground) 72%, transparent);
+}
+
+.light .yucore-app-shell .yucore-canvas-motion-stage {
+  background:
+    radial-gradient(circle at 50% 36%, rgb(8 145 178 / 0.12), transparent 36%),
+    radial-gradient(circle at 78% 34%, rgb(202 138 4 / 0.08), transparent 32%),
+    linear-gradient(135deg, rgb(239 249 248 / 0.96), rgb(249 248 239 / 0.9));
+}
+
+.light .yucore-app-shell .yucore-canvas-motion-stage::before {
+  background:
+    radial-gradient(circle at 72% 26%, rgb(8 145 178 / 0.14), transparent 26%),
+    radial-gradient(circle at 78% 42%, rgb(202 138 4 / 0.1), transparent 34%),
+    radial-gradient(circle at 12% 34%, rgb(8 145 178 / 0.1), transparent 26%),
+    radial-gradient(circle at 28% 78%, rgb(190 24 93 / 0.055), transparent 38%),
+    linear-gradient(
+      110deg,
+      transparent 0 22%,
+      rgb(8 145 178 / 0.08) 29%,
+      transparent 38% 55%,
+      rgb(202 138 4 / 0.07) 64%,
+      transparent 74% 100%
+    );
+  mix-blend-mode: multiply;
+  opacity: 0.72;
+}
+
+.light .yucore-app-shell .yucore-canvas-motion-stage::after {
+  background:
+    linear-gradient(rgb(8 145 178 / 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(202 138 4 / 0.08) 1px, transparent 1px),
+    linear-gradient(
+      118deg,
+      transparent 0 47%,
+      rgb(8 145 178 / 0.09) 49%,
+      transparent 51% 100%
+    ),
+    linear-gradient(
+      63deg,
+      transparent 0 50%,
+      rgb(202 138 4 / 0.07) 51%,
+      transparent 53% 100%
+    ),
+    linear-gradient(180deg, transparent, rgb(24 78 87 / 0.07));
+  mix-blend-mode: multiply;
+  opacity: 0.48;
+}
+
+.light .yucore-app-shell .yucore-canvas-particle-field {
+  background:
+    radial-gradient(circle, rgb(8 112 134 / 0.56) 0 1.1px, transparent 1.85px),
+    radial-gradient(circle, rgb(161 98 7 / 0.48) 0 1.05px, transparent 1.95px),
+    radial-gradient(circle, rgb(190 24 93 / 0.28) 0 0.9px, transparent 1.7px),
+    linear-gradient(
+      112deg,
+      transparent 0 42%,
+      rgb(8 145 178 / 0.13) 45%,
+      transparent 49% 100%
+    ),
+    linear-gradient(
+      64deg,
+      transparent 0 46%,
+      rgb(202 138 4 / 0.11) 49%,
+      transparent 53% 100%
+    );
+  mix-blend-mode: multiply;
+  opacity: 0.72;
+}
+
+.light .yucore-app-shell .yucore-canvas-particle-field::before,
+.light .yucore-app-shell .yucore-canvas-particle-field::after {
+  mix-blend-mode: multiply;
+  opacity: 0.42;
+}
+
+.light .yucore-app-shell .yucore-flow-canvas {
+  color: var(--foreground);
+}
+
+.light .yucore-app-shell .yucore-flow-canvas .react-flow__controls,
+.light .yucore-app-shell .yucore-flow-canvas .react-flow__minimap {
+  border-color: rgb(24 78 87 / 0.16);
+  background: rgb(250 253 252 / 0.9);
+  box-shadow: 0 16px 42px rgb(27 72 80 / 0.12);
+}
+
+.light .yucore-app-shell .yucore-flow-canvas .react-flow__controls-button {
+  color: color-mix(in srgb, var(--foreground) 76%, transparent);
+  border-bottom-color: rgb(24 78 87 / 0.12);
+}
+
+.light
+  .yucore-app-shell
+  .yucore-flow-canvas
+  .react-flow__controls-button:hover {
+  color: var(--foreground);
+  background: rgb(8 145 178 / 0.1);
+}
+
+.light .yucore-app-shell .yucore-flow-canvas .react-flow__attribution {
+  color: var(--muted-foreground);
+  background: rgb(250 253 252 / 0.78);
+}
+
+.light .yucore-app-shell .yucore-studio-full-canvas {
+  background:
+    radial-gradient(circle at 64% 34%, rgb(8 145 178 / 0.08), transparent 36%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.18), rgb(24 78 87 / 0.04));
+}
+
+.light .yucore-app-shell .yucore-studio-full-canvas .react-flow__renderer {
+  background-image:
+    linear-gradient(rgb(8 145 178 / 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(8 145 178 / 0.07) 1px, transparent 1px);
+}
+
+.light .yucore-app-shell .yucore-media-canvas-node {
+  border-color: rgb(8 145 178 / 0.22);
+  background:
+    radial-gradient(circle at 18% 10%, rgb(8 145 178 / 0.1), transparent 36%),
+    linear-gradient(145deg, rgb(255 255 255 / 0.96), rgb(235 247 245 / 0.92));
+  box-shadow:
+    0 20px 54px rgb(27 72 80 / 0.14),
+    inset 0 1px 0 rgb(255 255 255 / 0.96);
+}
+
+.light
+  .yucore-app-shell
+  .yucore-studio-full-canvas
+  .react-flow__node.selected
+  .yucore-media-canvas-node {
+  border-color: rgb(8 145 178 / 0.42);
+  box-shadow:
+    0 0 0 1px rgb(8 145 178 / 0.22),
+    0 0 36px rgb(8 145 178 / 0.16),
+    0 22px 64px rgb(27 72 80 / 0.16),
+    inset 0 1px 0 rgb(255 255 255 / 0.96);
+}
+
+.light .yucore-app-shell .yucore-canvas-agent-panel {
+  border-color: rgb(24 78 87 / 0.16);
+  background:
+    radial-gradient(circle at 50% 34%, rgb(8 145 178 / 0.1), transparent 32%),
+    radial-gradient(circle at 82% 18%, rgb(202 138 4 / 0.08), transparent 32%),
+    radial-gradient(circle at 24% 78%, rgb(190 24 93 / 0.05), transparent 38%),
+    linear-gradient(180deg, rgb(252 254 253 / 0.96), rgb(235 246 244 / 0.94));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.96),
+    inset 0 0 72px rgb(8 145 178 / 0.04),
+    -18px 0 54px rgb(27 72 80 / 0.14);
+}
+
+.light .yucore-app-shell .yucore-canvas-agent-panel::before,
+.light .yucore-app-shell .yucore-canvas-agent-panel::after {
+  mix-blend-mode: multiply;
+  opacity: 0.22;
+}
+
+.light [data-theme-preset] .yucore-app-shell {
+  --primary-foreground: oklch(0.99 0.005 196);
+  --secondary: color-mix(in oklch, var(--primary) 10%, var(--background));
+  --muted: color-mix(in oklch, var(--primary) 6%, var(--background));
+  --muted-foreground: color-mix(
+    in oklch,
+    var(--foreground) 78%,
+    var(--primary)
+  );
+  --accent: color-mix(in oklch, var(--primary) 13%, var(--background));
+  --accent-foreground: var(--foreground);
+  --card: color-mix(in oklch, var(--primary) 3%, var(--background));
+  --popover: color-mix(in oklch, var(--primary) 4%, var(--background));
+  --border: color-mix(in oklch, var(--primary) 22%, var(--background));
+  --input: color-mix(in oklch, var(--primary) 28%, var(--background));
+  --sidebar: color-mix(in oklch, var(--primary) 3%, var(--background));
+  --sidebar-accent: color-mix(in oklch, var(--primary) 11%, var(--sidebar));
+  --sidebar-border: color-mix(in oklch, var(--primary) 18%, var(--sidebar));
+}
+
+.light [data-theme-preset='underground'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.49 0.11 155);
+}
+
+.light [data-theme-preset='rose-garden'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.56 0.2 12);
+}
+
+.light [data-theme-preset='lake-view'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.5 0.15 163);
+}
+
+.light [data-theme-preset='sunset-glow'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.58 0.16 42);
+}
+
+.light [data-theme-preset='forest-whisper'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.48 0.12 180);
+}
+
+.light [data-theme-preset='ocean-breeze'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.52 0.15 260);
+}
+
+.light [data-theme-preset='lavender-dream'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.54 0.15 308);
+}
+
+.light [data-theme-preset='simple-large'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.34 0 0);
+}
+
+.light [data-theme-preset='anthropic'] .yucore-app-shell {
+  --yucore-preset-primary: oklch(0.55 0.13 40);
+}
+
+.light .yucore-app-shell .yucore-background-base {
+  background:
+    radial-gradient(circle at 75% 26%, rgb(244 63 94 / 0.12), transparent 24%),
+    radial-gradient(circle at 22% 18%, rgb(34 211 238 / 0.14), transparent 26%),
+    linear-gradient(118deg, rgb(14 165 233 / 0.12) 0%, transparent 32%),
+    linear-gradient(242deg, rgb(234 179 8 / 0.1) 0%, transparent 35%),
+    linear-gradient(135deg, #fbfdfd 0%, #f0f8f7 48%, #f7f4e9 100%);
+}
+
+.light .yucore-app-shell .yucore-background-vignette {
+  background: radial-gradient(
+    circle at 50% 44%,
+    transparent 0%,
+    transparent 48%,
+    rgb(21 73 84 / 0.08) 100%
+  );
+}
+
+.light .yucore-app-shell .yucore-background-horizon {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(8 145 178 / 0.13),
+    rgb(202 138 4 / 0.11),
+    transparent
+  );
+  opacity: 0.54;
+}
+
+.light .yucore-app-shell .yucore-background-topline {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(8 145 178 / 0.34),
+    rgb(202 138 4 / 0.26),
+    transparent
+  );
+}
+
+.light .yucore-app-shell .yucore-background-readability,
+.light .yucore-background-readability {
+  background:
+    radial-gradient(circle at 16% 0%, rgb(8 145 178 / 0.1), transparent 28%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.03), rgb(42 91 99 / 0.06));
+}
+
+.light .yucore-app-shell .yucore-background-webgl-active canvas {
+  opacity: 0.72;
+  filter: saturate(1.12) contrast(1.08);
+  mix-blend-mode: multiply;
+}
+
+.light .yucore-app-shell .yucore-background-earth-core {
+  opacity: 0.58;
+  filter: saturate(1.08) contrast(1.04) brightness(0.94)
+    drop-shadow(0 16px 42px rgb(8 145 178 / 0.2));
+  mix-blend-mode: multiply;
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .yucore-energy-vortex,
+    .yucore-energy-thread,
+    .yucore-background-power-field,
+    .yucore-grid,
+    .yucore-persistent-core
+  ) {
+  mix-blend-mode: multiply;
+}
+
+.light .yucore-app-shell .yucore-grid {
+  opacity: 0.16;
+}
+
+.light .yucore-app-shell .yucore-scanlines {
+  opacity: 0.035;
+  mix-blend-mode: multiply;
+}
+
+.light .yucore-app-shell .yucore-persistent-core[data-active='true'] {
+  opacity: 0.34;
+}
+
+.light .yucore-app-shell .yucore-panel {
+  border-color: rgb(24 78 87 / 0.14);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.88), rgb(241 249 248 / 0.72)),
+    rgb(255 255 255 / 0.68);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.92),
+    0 24px 70px rgb(27 72 80 / 0.12);
+}
+
+.light .yucore-app-shell .yucore-auth-form-panel {
+  border-color: rgb(8 145 178 / 0.2);
+  background:
+    radial-gradient(circle at 50% 0%, rgb(8 145 178 / 0.1), transparent 36%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.96), rgb(240 248 247 / 0.84));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.98),
+    0 28px 80px rgb(27 72 80 / 0.14),
+    0 0 90px rgb(8 145 178 / 0.08);
+}
+
+.light .yucore-app-shell .yucore-home-gate::before {
+  background:
+    radial-gradient(circle at 50% 30%, rgb(8 145 178 / 0.1), transparent 28%),
+    radial-gradient(circle at 50% 49%, rgb(202 138 4 / 0.07), transparent 38%),
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / 0.2),
+      transparent 34%,
+      rgb(31 83 91 / 0.05)
+    );
+}
+
+.light .yucore-app-shell .yucore-home-gate::after {
+  background: radial-gradient(
+    circle at 50% 42%,
+    transparent 0 40%,
+    rgb(31 83 91 / 0.035) 78%,
+    rgb(31 83 91 / 0.08) 100%
+  );
+}
+
+.light .yucore-app-shell .yucore-home-title {
+  text-shadow:
+    1px 0 rgb(8 145 178 / 0.32),
+    -1px 0 rgb(225 29 72 / 0.2),
+    0 16px 42px rgb(27 72 80 / 0.12);
+}
+
+.light .yucore-app-shell .yucore-intro-word::before,
+.light .yucore-app-shell .yucore-intro-word::after {
+  opacity: 0.16;
+  mix-blend-mode: multiply;
+}
+
+.light .yucore-app-shell .yucore-intro-word::before {
+  color: rgb(8 145 178);
+  transform: translateX(-0.75px);
+}
+
+.light .yucore-app-shell .yucore-intro-word::after {
+  color: rgb(190 24 93);
+  transform: translateX(0.75px);
+}
+
+.light .yucore-public-header-home nav {
+  border-color: rgb(24 78 87 / 0.14);
+  background-color: rgb(251 253 253 / 0.78);
+  box-shadow:
+    0 14px 42px rgb(27 72 80 / 0.1),
+    inset 0 1px 0 rgb(255 255 255 / 0.82);
+}
+
+/* The entrance sequence is rendered before the page shell is visible, so it
+ * needs its own light-mode treatment instead of inheriting from
+ * `.yucore-app-shell`. The 2D boot canvas keeps one render path and receives a
+ * luminance inversion that preserves its cyan, rose, and gold hue families. */
+.light .yucore-entrance-loader[data-theme='light'] .yucore-boot-canvas {
+  filter: invert(1) hue-rotate(180deg) saturate(1.08) contrast(1.04);
+}
+
+.light .yucore-entrance-loader[data-theme='light'] .yucore-loader-atmosphere {
+  background:
+    radial-gradient(circle at 50% 40%, rgb(8 145 178 / 0.1), transparent 24%),
+    radial-gradient(circle at 48% 64%, rgb(202 138 4 / 0.08), transparent 34%),
+    linear-gradient(
+      135deg,
+      rgb(255 255 255 / 0.16),
+      transparent 48%,
+      rgb(31 83 91 / 0.055)
+    );
+}
+
+.light .yucore-entrance-loader[data-theme='light'] .yucore-loader-vignette {
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      transparent 0 10rem,
+      rgb(21 73 84 / 0.045) 23rem
+    ),
+    linear-gradient(
+      180deg,
+      rgb(21 73 84 / 0.06),
+      transparent 34%,
+      rgb(21 73 84 / 0.1)
+    );
+}
+
+.light .yucore-entrance-loader[data-theme='light'] .yucore-loader-noise {
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgb(21 73 84 / 0.035) 0,
+      rgb(21 73 84 / 0.035) 1px,
+      transparent 1px,
+      transparent 8px
+    ),
+    radial-gradient(circle at 36% 44%, rgb(8 145 178 / 0.08), transparent 24%),
+    radial-gradient(circle at 66% 48%, rgb(190 24 93 / 0.05), transparent 28%);
+  mix-blend-mode: multiply;
+}
+
+.light
+  .yucore-entrance-loader[data-theme='light']
+  :where(
+    .yucore-loader-shutter,
+    .yucore-loader-power-field,
+    .yucore-loader-far-particle-field,
+    .yucore-loader-far-particle-field::before,
+    .yucore-loader-far-particle-field::after,
+    .yucore-loader-sphere::before,
+    .yucore-loader-earth-land,
+    .yucore-loader-earth-clouds,
+    .yucore-loader-earth-grid,
+    .yucore-loader-sphere-shard,
+    .yucore-loader-title::before,
+    .yucore-loader-title::after
+  ) {
+  mix-blend-mode: multiply;
+}
+
+.light
+  .yucore-entrance-loader[data-theme='light']
+  .yucore-loader-system-code
+  > div {
+  border-color: rgb(24 78 87 / 0.16);
+  background-color: rgb(255 255 255 / 0.72);
+  color: rgb(8 112 134 / 0.78);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.9),
+    0 16px 42px rgb(27 72 80 / 0.1);
+}
+
+.light
+  .yucore-entrance-loader[data-theme='light']
+  :where(.text-cyan-50\/80, .text-cyan-50\/72, .text-cyan-100\/64) {
+  color: rgb(21 73 84 / 0.82);
+}
+
+.light
+  .yucore-entrance-loader[data-theme='light']
+  :where(.text-white\/38, .text-amber-100\/44) {
+  color: rgb(35 72 79 / 0.58);
+}
+
+.light
+  .yucore-entrance-loader[data-theme='light']
+  .yucore-loader-sphere-wordmark {
+  color: rgb(21 73 84 / 0.88);
+  text-shadow:
+    0 0 18px rgb(8 145 178 / 0.24),
+    0 0 42px rgb(202 138 4 / 0.1);
+}
+
+.light
+  .yucore-entrance-loader[data-theme='light']
+  .yucore-loader-title-cinematic {
+  color: rgb(21 73 84);
+  filter: drop-shadow(0 14px 30px rgb(27 72 80 / 0.16));
+}
+
+.light .yucore-entrance-loader[data-theme='light'] .yucore-loader-line {
+  background-color: rgb(24 78 87 / 0.14);
+}
+
+/* Legacy brand components use translucent white/black utilities. Remap those
+ * surfaces inside the light shell so they remain readable in the new mode. */
+.light .yucore-app-shell :where(.text-white) {
+  color: var(--foreground);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .text-white\/22,
+    .text-white\/25,
+    .text-white\/28,
+    .text-white\/30,
+    .text-white\/32,
+    .text-white\/34,
+    .text-white\/35,
+    .text-white\/38,
+    .text-white\/40
+  ) {
+  color: color-mix(in srgb, var(--foreground) 48%, transparent);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .text-white\/42,
+    .text-white\/44,
+    .text-white\/45,
+    .text-white\/46,
+    .text-white\/48,
+    .text-white\/50,
+    .text-white\/52,
+    .text-white\/54,
+    .text-white\/55,
+    .text-white\/56,
+    .text-white\/58
+  ) {
+  color: color-mix(in srgb, var(--foreground) 66%, transparent);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .text-white\/62,
+    .text-white\/64,
+    .text-white\/68,
+    .text-white\/70,
+    .text-white\/72,
+    .text-white\/74,
+    .text-white\/76,
+    .text-white\/78,
+    .text-white\/86
+  ) {
+  color: color-mix(in srgb, var(--foreground) 80%, transparent);
+}
+
+.light .yucore-app-shell :where(.text-white\/\[0\.06\]) {
+  color: color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .text-cyan-100,
+    .text-cyan-200,
+    .text-cyan-50\/52,
+    .text-cyan-50\/66,
+    .text-cyan-50\/72,
+    .text-cyan-50\/78,
+    .text-cyan-50\/80,
+    .text-cyan-100\/45,
+    .text-cyan-100\/48,
+    .text-cyan-100\/52,
+    .text-cyan-100\/55,
+    .text-cyan-100\/58,
+    .text-cyan-100\/64,
+    .text-cyan-100\/72
+  ) {
+  color: oklch(0.45 0.11 210);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .text-amber-50,
+    .text-amber-50\/78,
+    .text-amber-100,
+    .text-amber-100\/44,
+    .text-amber-100\/58,
+    .text-amber-100\/68,
+    .text-amber-100\/70
+  ) {
+  color: oklch(0.52 0.13 75);
+}
+
+.light .yucore-app-shell :where(.text-emerald-100, .text-emerald-300) {
+  color: oklch(0.47 0.12 155);
+}
+
+.light
+  .yucore-app-shell
+  :where(.text-rose-50, .text-rose-50\/78, .text-rose-100, .text-rose-200) {
+  color: oklch(0.52 0.16 20);
+}
+
+.light .yucore-app-shell .text-violet-100 {
+  color: oklch(0.5 0.14 302);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .border-white\/8,
+    .border-white\/10,
+    .border-white\/12,
+    .border-white\/15,
+    .border-white\/18,
+    .border-white\/25
+  ) {
+  border-color: rgb(24 78 87 / 0.14);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .bg-white\/\[0\.025\],
+    .bg-white\/\[0\.035\],
+    .bg-white\/\[0\.055\],
+    .bg-white\/\[0\.06\],
+    .bg-white\/\[0\.07\],
+    .bg-white\/\[0\.075\],
+    .bg-white\/10,
+    .bg-white\/12,
+    .bg-white\/28
+  ) {
+  background-color: rgb(24 78 87 / 0.055);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .bg-black,
+    .bg-black\/10,
+    .bg-black\/20,
+    .bg-black\/25,
+    .bg-black\/26,
+    .bg-black\/28,
+    .bg-black\/30,
+    .bg-black\/34,
+    .bg-black\/35,
+    .bg-black\/38,
+    .bg-black\/40,
+    .bg-black\/42
+  ) {
+  background-color: rgb(255 255 255 / 0.62);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .bg-black\/45,
+    .bg-black\/46,
+    .bg-black\/48,
+    .bg-black\/50,
+    .bg-black\/55,
+    .bg-black\/56,
+    .bg-black\/60,
+    .bg-black\/62,
+    .bg-black\/64,
+    .bg-black\/72,
+    .bg-\[\#010203\],
+    .bg-\[\#030406\],
+    .bg-\[\#05070c\],
+    .bg-\[\#05070c\]\/80,
+    .bg-\[\#05070c\]\/92,
+    .bg-\[\#050b0e\]\/62,
+    .bg-\[\#071014\]\/86,
+    .bg-\[\#071116\]\/76,
+    .bg-\[\#071116\]\/88,
+    .bg-\[\#071116\]\/92,
+    .bg-\[\#081216\]\/95,
+    .bg-\[\#081216\]\/98
+  ) {
+  background-color: rgb(250 253 252 / 0.88);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .hover\:text-white:hover,
+    .hover\:text-white\/58:hover,
+    .hover\:text-white\/70:hover,
+    .hover\:text-white\/72:hover
+  ) {
+  color: var(--foreground);
+}
+
+.light
+  .yucore-app-shell
+  :where(
+    .hover\:bg-white\/\[0\.06\]:hover,
+    .hover\:bg-white\/\[0\.07\]:hover,
+    .hover\:bg-white\/\[0\.075\]:hover,
+    .hover\:bg-white\/10:hover
+  ) {
+  background-color: rgb(24 78 87 / 0.1);
+}
+
+.light .yucore-app-shell .placeholder\:text-white\/28::placeholder {
+  color: color-mix(in srgb, var(--foreground) 42%, transparent);
+}

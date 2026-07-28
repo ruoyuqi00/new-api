@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en" class="app-booting">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="dns-prefetch" href="//challenges.cloudflare.com" />
+    <link
+      rel="preconnect"
+      href="https://challenges.cloudflare.com"
+      crossorigin="anonymous"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Primary Meta Tags -->
+    <title>YUAPI</title>
+    <meta name="title" content="YUAPI" />
+    <meta
+      name="description"
+      content="YUAPI AI API gateway and account dashboard."
+    />
+
+    <meta name="theme-color" content="#05070c" />
+    <style>
+      html.app-booting,
+      html.app-booting body {
+        overflow: hidden;
+        background: #05070c;
+      }
+
+      #app-boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        background: #05070c;
+        transition:
+          opacity 240ms ease,
+          visibility 240ms ease;
+      }
+
+      html.app-ready #app-boot-loader {
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .app-boot-loader__mark {
+        position: relative;
+        width: 54px;
+        aspect-ratio: 1;
+        border: 1px solid rgb(103 232 249 / 42%);
+        border-top-color: rgb(250 204 21 / 82%);
+        border-right-color: rgb(251 113 133 / 48%);
+        border-radius: 50%;
+        box-shadow:
+          0 0 24px rgb(34 211 238 / 20%),
+          inset 0 0 18px rgb(34 211 238 / 10%);
+        animation: app-boot-spin 1.4s linear infinite;
+      }
+
+      .app-boot-loader__mark::before,
+      .app-boot-loader__mark::after {
+        position: absolute;
+        inset: 50% auto auto 50%;
+        width: 22px;
+        height: 1px;
+        content: '';
+        background: rgb(207 250 254 / 78%);
+        box-shadow: 0 0 12px rgb(34 211 238 / 52%);
+        transform: translate(-50%, -50%);
+      }
+
+      .app-boot-loader__mark::after {
+        width: 1px;
+        height: 22px;
+      }
+
+      @keyframes app-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .app-boot-loader__mark {
+          animation: none;
+        }
+      }
+    </style>
+    <!--umami-->
+    <!--Google Analytics-->
+  </head>
+
+  <body>
+    <div id="app-boot-loader" role="status" aria-label="YuCore">
+      <div class="app-boot-loader__mark" aria-hidden="true"></div>
+    </div>
+    <div id="root"></div>
+  </body>
+</html>
