@@ -16,6 +16,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHandleGroupRatioReconcilesTieredSnapshotAfterAutoGroupSelection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatios))
+	})
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"initial":0.2,"final":0.045}`))
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("auto_group", "final")
+	info := &relaycommon.RelayInfo{
+		UserGroup:  "initial",
+		UsingGroup: "initial",
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			GroupRatio:                0.2,
+			EstimatedQuotaBeforeGroup: 1000,
+			EstimatedQuotaAfterGroup:  200,
+		},
+	}
+
+	groupRatioInfo := HandleGroupRatio(ctx, info)
+
+	require.Equal(t, "final", info.UsingGroup)
+	require.Equal(t, 0.045, groupRatioInfo.GroupRatio)
+	require.Equal(t, 0.045, info.TieredBillingSnapshot.GroupRatio)
+	require.Equal(t, 45, info.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
+}
+
 func TestModelPriceHelperFixedPriceAppliesRequestBillingRatios(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ratio_setting.InitRatioSettings()
