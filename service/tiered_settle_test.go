@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/require"
 )
 
 // Claude Sonnet-style tiered expression: standard vs long-context
@@ -671,6 +672,29 @@ func TestBuildTieredTokenParams_Len_Claude(t *testing.T) {
 	if params.P != 5000 {
 		t.Fatalf("P = %f, want 5000 (no subtraction for Claude)", params.P)
 	}
+}
+
+func TestBuildTieredTokenParams_ClaudeAggregateCacheCreationDefaultsTo5m(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     2,
+		CompletionTokens: 231,
+		UsageSemantic:    "anthropic",
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         192293,
+			CachedCreationTokens: 91091,
+		},
+	}
+	expr := `tier("base", p * 5 + c * 25 + cr * 0.5 + cc * 6.25 + cc1h * 10)`
+	usedVars := billingexpr.UsedVars(expr)
+
+	params := BuildTieredTokenParams(usage, true, usedVars)
+
+	require.Equal(t, 91091.0, params.CC)
+	require.Zero(t, params.CC1h)
+	require.Equal(t, 283386.0, params.Len)
+	cost, _, err := billingexpr.RunExpr(expr, params)
+	require.NoError(t, err)
+	require.InDelta(t, 2*5+231*25+192293*0.5+91091*6.25, cost, 1e-9)
 }
 
 func TestBuildTieredTokenParams_Len_TierCondition(t *testing.T) {
