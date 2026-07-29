@@ -697,6 +697,27 @@ func TestBuildTieredTokenParams_ClaudeAggregateCacheCreationDefaultsTo5m(t *test
 	require.InDelta(t, 2*5+231*25+192293*0.5+91091*6.25, cost, 1e-9)
 }
 
+func TestBuildTieredTokenParams_InferredClaudeSemanticPreservesCacheCreationSplit(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 20,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         40,
+			CachedCreationTokens: 70,
+		},
+		ClaudeCacheCreation5mTokens: 30,
+		ClaudeCacheCreation1hTokens: 20,
+	}
+
+	params := BuildTieredTokenParams(usage, true, map[string]bool{
+		"cr": true, "cc": true, "cc1h": true,
+	})
+
+	require.Equal(t, 50.0, params.CC)
+	require.Equal(t, 20.0, params.CC1h)
+	require.Equal(t, 210.0, params.Len)
+}
+
 func TestBuildTieredTokenParams_Len_TierCondition(t *testing.T) {
 	// Test that len-based tier conditions work correctly when p is reduced by cache
 	usage := &dto.Usage{

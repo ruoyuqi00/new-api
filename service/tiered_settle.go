@@ -26,7 +26,7 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	cc5m := float64(cacheCreationTokens)
 	cc1h := float64(0)
 
-	if usage.UsageSemantic == "anthropic" {
+	if isClaudeUsageSemantic {
 		cacheCreation5m, cacheCreation1h := NormalizeCacheCreationSplit(
 			cacheCreationTokens,
 			usage.ClaudeCacheCreation5mTokens,
