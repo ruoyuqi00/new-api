@@ -133,12 +133,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		meta = fastTokenCountMetaForPricing(request)
 	}
 
+	sensitiveWordsDetected := false
 	if needSensitiveCheck && meta != nil {
 		contains, words := service.CheckSensitiveText(meta.CombineText)
 		if contains {
-			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
-			newAPIError = types.NewError(err, types.ErrorCodeSensitiveWordsDetected)
-			return
+			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %d match(es)", len(words)))
+			sensitiveWordsDetected = true
 		}
 	}
 
@@ -153,6 +153,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
+		return
+	}
+	if sensitiveWordsDetected {
+		newAPIError = types.NewErrorWithStatusCode(
+			errors.New("sensitive words detected"),
+			types.ErrorCodeSensitiveWordsDetected,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+		service.ChargeLocalViolationFee(c, relayInfo, newAPIError)
 		return
 	}
 

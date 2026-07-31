@@ -23,6 +23,13 @@ const (
 	ContentViolatesUsageMarker = "Content violates usage guidelines"
 )
 
+type violationFeeReason string
+
+const (
+	violationFeeReasonLocalSensitiveWord violationFeeReason = "local_sensitive_word"
+	violationFeeReasonGrokCSAM           violationFeeReason = "grok_csam"
+)
+
 func IsViolationFeeCode(code types.ErrorCode) bool {
 	return strings.HasPrefix(string(code), ViolationFeeCodePrefix)
 }
@@ -70,15 +77,21 @@ func NormalizeViolationFeeError(err *types.NewAPIError) *types.NewAPIError {
 	return err
 }
 
-func shouldChargeViolationFee(err *types.NewAPIError) bool {
+func classifyViolationFee(err *types.NewAPIError) (violationFeeReason, bool) {
 	if err == nil {
-		return false
+		return "", false
+	}
+	if err.GetErrorCode() == types.ErrorCodeSensitiveWordsDetected {
+		return violationFeeReasonLocalSensitiveWord, true
 	}
 	if err.GetErrorCode() == types.ErrorCodeViolationFeeGrokCSAM {
-		return true
+		return violationFeeReasonGrokCSAM, true
 	}
 	// In case some callers didn't normalize, keep a safety net.
-	return HasCSAMViolationMarker(err)
+	if HasCSAMViolationMarker(err) {
+		return violationFeeReasonGrokCSAM, true
+	}
+	return "", false
 }
 
 func calcViolationFeeQuota(amount, groupRatio float64) int {
@@ -99,6 +112,42 @@ func calcViolationFeeQuota(amount, groupRatio float64) int {
 	return int(quota)
 }
 
+// ChargeLocalViolationFee charges a request that YuAPI rejected before channel selection.
+// The original sensitive-word error remains the client response even when charging fails.
+func ChargeLocalViolationFee(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, apiErr *types.NewAPIError) bool {
+	if ctx == nil || relayInfo == nil || apiErr == nil {
+		return false
+	}
+	reason, charge := classifyViolationFee(apiErr)
+	if !charge || reason != violationFeeReasonLocalSensitiveWord {
+		return false
+	}
+
+	settings := model_setting.GetGrokSettings()
+	if settings == nil || !settings.ViolationDeductionEnabled {
+		return false
+	}
+
+	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	feeQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, groupRatio)
+	if feeQuota <= 0 {
+		return false
+	}
+
+	if billingErr := PreConsumeBilling(ctx, feeQuota, relayInfo); billingErr != nil {
+		logger.LogError(ctx, fmt.Sprintf("failed to charge local violation fee: %s", billingErr.Error()))
+		return false
+	}
+	if err := SettleBilling(ctx, relayInfo, feeQuota); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("failed to settle local violation fee: %s", err.Error()))
+		return false
+	}
+
+	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
+	recordViolationFee(ctx, relayInfo, apiErr, reason, settings.ViolationDeductionAmount, groupRatio, feeQuota, 0)
+	return true
+}
+
 // ChargeViolationFeeIfNeeded charges an additional fee after the normal flow finishes (including refund).
 // It uses Grok fee settings as the fee policy.
 func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, apiErr *types.NewAPIError) bool {
@@ -108,7 +157,8 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	//if relayInfo.IsPlayground {
 	//	return false
 	//}
-	if !shouldChargeViolationFee(apiErr) {
+	reason, charge := classifyViolationFee(apiErr)
+	if !charge || reason != violationFeeReasonGrokCSAM {
 		return false
 	}
 
@@ -129,26 +179,48 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	}
 
 	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
-	model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
+	if relayInfo.ChannelId > 0 {
+		model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
+	}
+	recordViolationFee(ctx, relayInfo, apiErr, reason, settings.ViolationDeductionAmount, groupRatio, feeQuota, relayInfo.ChannelId)
+	return true
+}
 
+func recordViolationFee(
+	ctx *gin.Context,
+	relayInfo *relaycommon.RelayInfo,
+	apiErr *types.NewAPIError,
+	reason violationFeeReason,
+	baseAmount float64,
+	groupRatio float64,
+	feeQuota int,
+	channelID int,
+) {
 	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
 	tokenName := ctx.GetString("token_name")
-	oai := apiErr.ToOpenAIError()
+	violationCode := apiErr.GetErrorCode()
+	if reason == violationFeeReasonGrokCSAM {
+		violationCode = types.ErrorCodeViolationFeeGrokCSAM
+	}
 
 	other := map[string]any{
 		"violation_fee":        true,
-		"violation_fee_code":   string(types.ErrorCodeViolationFeeGrokCSAM),
+		"violation_fee_code":   string(violationCode),
+		"violation_fee_reason": string(reason),
 		"fee_quota":            feeQuota,
-		"base_amount":          settings.ViolationDeductionAmount,
+		"base_amount":          baseAmount,
 		"group_ratio":          groupRatio,
 		"status_code":          apiErr.StatusCode,
-		"upstream_error_type":  oai.Type,
-		"upstream_error_code":  fmt.Sprintf("%v", oai.Code),
-		"violation_fee_marker": CSAMViolationMarker,
+	}
+	if reason == violationFeeReasonGrokCSAM {
+		oai := apiErr.ToOpenAIError()
+		other["upstream_error_type"] = oai.Type
+		other["upstream_error_code"] = fmt.Sprintf("%v", oai.Code)
+		other["violation_fee_marker"] = CSAMViolationMarker
 	}
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:      relayInfo.ChannelId,
+		ChannelId:      channelID,
 		ModelName:      relayInfo.OriginModelName,
 		TokenName:      tokenName,
 		Quota:          feeQuota,
@@ -159,6 +231,4 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		Group:          relayInfo.UsingGroup,
 		Other:          other,
 	})
-
-	return true
 }
