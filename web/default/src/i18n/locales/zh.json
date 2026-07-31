@@ -5231,5 +5231,10 @@
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放"
-  }
+  },
+  "API Base URL": "API 请求地址",
+  "Copy API Base URL": "复制 API 请求地址",
+  "Do not use global.yuaiapi.com as an API Base URL.": "请勿将 global.yuaiapi.com 用作 API 请求地址。",
+  "For high concurrency and long-running requests": "用于高并发和长时间请求",
+  "For standard API requests": "用于常规 API 请求"
 }

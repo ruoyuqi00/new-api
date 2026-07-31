@@ -5231,5 +5231,10 @@
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
     "Zoom": "ズーム"
-  }
+  },
+  "API Base URL": "API ベース URL",
+  "Copy API Base URL": "API ベース URL をコピー",
+  "Do not use global.yuaiapi.com as an API Base URL.": "global.yuaiapi.com を API ベース URL として使用しないでください。",
+  "For high concurrency and long-running requests": "高同時実行・長時間リクエスト用",
+  "For standard API requests": "標準 API リクエスト用"
 }

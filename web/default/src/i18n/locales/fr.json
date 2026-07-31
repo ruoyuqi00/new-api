@@ -5231,5 +5231,10 @@
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom"
-  }
+  },
+  "API Base URL": "URL de base de l'API",
+  "Copy API Base URL": "Copier l'URL de base de l'API",
+  "Do not use global.yuaiapi.com as an API Base URL.": "N'utilisez pas global.yuaiapi.com comme URL de base de l'API.",
+  "For high concurrency and long-running requests": "Pour les requêtes à forte concurrence et de longue durée",
+  "For standard API requests": "Pour les requêtes API standard"
 }
