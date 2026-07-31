@@ -260,7 +260,11 @@ export function ProviderAccountsView(props: ProviderAccountsViewProps) {
       }),
     onSuccess: async (result) => {
       toast.success(
-        t('{{count}} accounts imported', { count: result.data?.count ?? 0 })
+        t('{{created}} created, {{updated}} refreshed, {{skipped}} skipped', {
+          created: result.data?.created ?? 0,
+          updated: result.data?.updated ?? 0,
+          skipped: result.data?.skipped ?? 0,
+        })
       )
       setImportOpen(false)
       await refreshData()

@@ -41,7 +41,7 @@ func TestImportProviderAccountsNormalizesRawCodexAccessToken(t *testing.T) {
 }
 
 func TestImportProviderAccountsUpdatesStableCodexIdentityAndPreservesRefreshToken(t *testing.T) {
-	require.NoError(t, DB.AutoMigrate(&AccountPool{}, &ProviderAccount{}))
+	require.NoError(t, DB.AutoMigrate(&AccountPool{}, &ProviderAccount{}, &ChannelAccountPoolBinding{}))
 	pool := AccountPool{Name: "codex-update-import", AdapterType: constant.ChannelTypeCodex, Group: "default", Status: AccountPoolStatusEnabled}
 	require.NoError(t, DB.Create(&pool).Error)
 	t.Cleanup(func() { _ = DeleteAccountPool(pool.Id) })
@@ -52,8 +52,18 @@ func TestImportProviderAccountsUpdatesStableCodexIdentityAndPreservesRefreshToke
 	first, err := ImportProviderAccountsWithResult(pool.Id, []ProviderAccount{{Name: "initial", Credential: initial}})
 	require.NoError(t, err)
 	assert.Equal(t, 1, first.Created)
+	require.NoError(t, DB.Model(&ProviderAccount{}).Where("pool_id = ?", pool.Id).Updates(map[string]interface{}{
+		"status": ProviderAccountDisabled, "priority": int64(900), "weight": uint(77),
+		"concurrency_limit": 4, "cooldown_seconds": 45,
+		"base_url": "https://operator.example/v1", "model_mapping": `{"gpt-source":"gpt-target"}`,
+	}).Error)
 
-	second, err := ImportProviderAccountsWithResult(pool.Id, []ProviderAccount{{Name: "updated", Credential: accessToken}})
+	second, err := ImportProviderAccountsWithResult(pool.Id, []ProviderAccount{{
+		Name: "updated", Credential: accessToken, Metadata: `{"source":"refresh"}`,
+		Status: ProviderAccountEnabled, Priority: 1, Weight: 1,
+		ConcurrencyLimit: 1, CooldownSeconds: 1,
+		BaseURL: "https://import.example/v1", ModelMapping: `{"other":"model"}`,
+	}})
 	require.NoError(t, err)
 	assert.Zero(t, second.Created)
 	assert.Equal(t, 1, second.Updated)
@@ -63,9 +73,47 @@ func TestImportProviderAccountsUpdatesStableCodexIdentityAndPreservesRefreshToke
 	require.Len(t, accounts, 1)
 	assert.Equal(t, "updated", accounts[0].Name)
 	assert.Zero(t, accounts[0].ExpiresAt)
+	assert.Equal(t, `{"source":"refresh"}`, accounts[0].Metadata)
+	assert.Equal(t, ProviderAccountDisabled, accounts[0].Status)
+	assert.Equal(t, int64(900), accounts[0].Priority)
+	assert.Equal(t, uint(77), accounts[0].Weight)
+	assert.Equal(t, 4, accounts[0].ConcurrencyLimit)
+	assert.Equal(t, 45, accounts[0].CooldownSeconds)
+	assert.Equal(t, "https://operator.example/v1", accounts[0].BaseURL)
+	assert.Equal(t, `{"gpt-source":"gpt-target"}`, accounts[0].ModelMapping)
 	var credential map[string]interface{}
 	require.NoError(t, common.UnmarshalJsonStr(accounts[0].Credential, &credential))
 	assert.Equal(t, "refresh-old", credential["refresh_token"])
+}
+
+func TestImportProviderAccountsCreatesAccountWithImportedRouting(t *testing.T) {
+	require.NoError(t, DB.AutoMigrate(&AccountPool{}, &ProviderAccount{}, &ChannelAccountPoolBinding{}))
+	pool := AccountPool{Name: "codex-created-routing", AdapterType: constant.ChannelTypeCodex, Group: "default", Status: AccountPoolStatusEnabled}
+	require.NoError(t, DB.Create(&pool).Error)
+	t.Cleanup(func() { _ = DeleteAccountPool(pool.Id) })
+
+	expiresAt := time.Now().Add(24 * time.Hour).Unix()
+	accessToken := providerAccountImportTestJWT(t, "account-created", "user-created", "created@example.com", expiresAt)
+	result, err := ImportProviderAccountsWithResult(pool.Id, []ProviderAccount{{
+		Name: "created", Credential: accessToken,
+		Status: ProviderAccountDisabled, Priority: 800, Weight: 63,
+		ConcurrencyLimit: 6, CooldownSeconds: 30,
+		BaseURL: "https://created.example/v1", ModelMapping: `{"gpt-source":"gpt-target"}`,
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Created)
+	assert.Zero(t, result.Updated)
+
+	_, accounts, _, err := GetAccountPoolDetail(pool.Id)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	assert.Equal(t, ProviderAccountDisabled, accounts[0].Status)
+	assert.Equal(t, int64(800), accounts[0].Priority)
+	assert.Equal(t, uint(63), accounts[0].Weight)
+	assert.Equal(t, 6, accounts[0].ConcurrencyLimit)
+	assert.Equal(t, 30, accounts[0].CooldownSeconds)
+	assert.Equal(t, "https://created.example/v1", accounts[0].BaseURL)
+	assert.Equal(t, `{"gpt-source":"gpt-target"}`, accounts[0].ModelMapping)
 }
 
 func TestImportProviderAccountsSkipsDuplicateCodexIdentityInSameBatch(t *testing.T) {

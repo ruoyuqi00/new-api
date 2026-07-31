@@ -142,7 +142,16 @@ export async function updateProviderAccountRouting(
 export async function importProviderAccounts(
   poolId: number,
   accounts: ImportedAccount[]
-): Promise<{ success: boolean; message?: string; data?: { count: number } }> {
+): Promise<{
+  success: boolean
+  message?: string
+  data?: {
+    count: number
+    created: number
+    updated: number
+    skipped: number
+  }
+}> {
   const response = await api.post('/api/account_pool/accounts/import', {
     pool_id: poolId,
     accounts,

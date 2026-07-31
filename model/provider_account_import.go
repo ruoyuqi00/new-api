@@ -97,11 +97,15 @@ func ImportProviderAccountsWithResult(poolId int, accounts []ProviderAccount) (P
 				account.ExpiresAt = stored.ExpiresAt
 			}
 			account.Credential = merged
+			account.Status = stored.Status
+			account.Priority = stored.Priority
+			account.Weight = stored.Weight
+			account.ConcurrencyLimit = stored.ConcurrencyLimit
+			account.CooldownSeconds = stored.CooldownSeconds
+			account.BaseURL = stored.BaseURL
+			account.ModelMapping = stored.ModelMapping
 			updates := map[string]interface{}{
 				"name": account.Name, "type": account.Type, "credential": account.Credential,
-				"base_url": account.BaseURL, "model_mapping": account.ModelMapping,
-				"status": account.Status, "priority": account.Priority, "weight": account.Weight,
-				"concurrency_limit": account.ConcurrencyLimit, "cooldown_seconds": account.CooldownSeconds,
 				"expires_at": account.ExpiresAt, "metadata": account.Metadata, "updated_time": now,
 			}
 			if err := tx.Model(&ProviderAccount{}).Where("id = ?", stored.Id).Updates(updates).Error; err != nil {

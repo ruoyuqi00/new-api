@@ -62,7 +62,7 @@ export function ProviderAccountImportDialog(
           <DialogTitle>{t('Import Provider Accounts')}</DialogTitle>
           <DialogDescription>
             {t(
-              'Import accounts independently, then route them through a pool that controls groups and channel bindings.'
+              'Matching accounts refresh credentials while keeping their YuAPI status, priority, concurrency, cooldown, endpoint, and model routing.'
             )}
           </DialogDescription>
         </DialogHeader>
