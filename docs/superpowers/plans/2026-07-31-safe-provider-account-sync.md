@@ -157,14 +157,14 @@ git add model/provider_account_import.go model/provider_account_import_test.go w
 git commit -m "fix: preserve account pool routing during imports"
 ```
 
-- [ ] **Step 3: Build a versioned production image**
+- [x] **Step 3: Build a versioned production image**
 
 Archive the committed source, upload it to the production host, extract it under `/opt/yuapi-builds/<commit>`, and build `yuapi:production-20260731-<commit>` with Docker. Do not display environment values.
 
-- [ ] **Step 4: Perform the existing blue/green cutover**
+- [x] **Step 4: Perform the existing blue/green cutover**
 
 Start `newapi-candidate` on `sub2api_sub2api-network` with the current runtime environment and data mount. Verify candidate `/api/status`, switch only the two Caddy upstream references through a validated stdin reload, drain the old app, recreate `newapi` on the new image, switch Caddy back to `newapi:3000`, and remove the candidate.
 
-- [ ] **Step 5: Verify production and scheduling invariants**
+- [x] **Step 5: Verify production and scheduling invariants**
 
 Verify all five domains return HTTP 200 for `/api/status` and HTTP 401 for an unauthenticated `/v1/models`. Confirm `newapi`, MySQL, Redis, and Caddy are healthy with zero restarts. Read only non-sensitive fields to confirm channel 2337 remains disabled, no account-pool channel bindings were added, and channels 2366/2368/2385/2391/2396 retain their prior statuses.
