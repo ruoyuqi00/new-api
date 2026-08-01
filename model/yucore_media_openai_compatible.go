@@ -326,7 +326,9 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 		payload["response_format"] = capability.ResponseFormat
 	}
 	refs := yucoreMediaReferenceAssets(task)
-	if len(refs) == 1 && len(capability.AllowedParameters) > 0 && yucoreMediaCapabilityAllowsParameter(capability, "image_url") {
+	if len(refs) > 0 && len(capability.AllowedParameters) > 0 && yucoreMediaCapabilityAllowsParameter(capability, "image_urls") {
+		payload["image_urls"] = refs
+	} else if len(refs) == 1 && len(capability.AllowedParameters) > 0 && yucoreMediaCapabilityAllowsParameter(capability, "image_url") {
 		payload["image_url"] = refs[0]
 	} else if len(refs) == 1 && yucoreMediaCapabilityAllowsParameter(capability, "image") {
 		payload["image"] = refs[0]

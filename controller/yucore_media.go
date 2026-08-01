@@ -428,13 +428,13 @@ func ListYucoreMediaModels(c *gin.Context) {
 			"name":          "Grok Imagine Video 1.5 Preview",
 			"family":        "grok",
 			"badge":         "xAI 图生视频",
-			"description":   "已验证的 Grok 图生视频模型，使用一张真实首帧图片创建 5 秒短视频任务。",
+			"description":   "Grok 图生视频模型，使用一张真实首帧图片创建最长 15 秒的视频任务，按每次创建固定计费。",
 			"kind":          "video",
 			"modes":         []string{"image-to-video"},
 			"sizes":         []string{"1280x720", "720x1280"},
 			"size_label":    "resolution",
-			"aspect_ratios": []string{"16:9", "9:16"},
-			"durations":     []int{5},
+			"aspect_ratios": []string{"16:9", "9:16", "1:1"},
+			"durations":     []int{4, 5, 6, 8, 10, 12, 15},
 			"stream_modes":  []string{"poll"},
 			"style_presets": []string{"auto", "cinematic", "commercial", "realistic"},
 			"counts":        []int{1},
@@ -443,10 +443,10 @@ func ListYucoreMediaModels(c *gin.Context) {
 				"max_reference_images": 1,
 			},
 			"pricing": gin.H{
-				"unit":     "per_second",
-				"amount":   0.04,
+				"unit":     "per_call",
+				"amount":   0.20,
 				"currency": "CNY",
-				"display":  "¥0.040/秒",
+				"display":  "¥0.20/次",
 			},
 		},
 		{
@@ -493,6 +493,9 @@ func ListYucoreMediaModels(c *gin.Context) {
 		pricing, ok := row["pricing"].(gin.H)
 		if !ok {
 			continue
+		}
+		if model.YucoreMediaModelUsesPerCallPricing(modelId) {
+			pricing["unit"] = "per_call"
 		}
 		unitLabel := "/次"
 		switch pricing["unit"] {
@@ -574,7 +577,7 @@ func ListYucoreMediaTemplates(c *gin.Context) {
 			"prompt":            "生成一段产品展示短视频，镜头缓慢推进，光影自然，主体稳定，节奏适合广告素材，画面干净且有高级感。",
 			"negative_prompt":   "闪烁、断帧、主体漂移、低清晰度、文字错误",
 			"aspect_ratio":      "16:9",
-			"duration":          5,
+			"duration":          10,
 		},
 		{
 			"id":                "image-to-video-motion",
@@ -588,7 +591,7 @@ func ListYucoreMediaTemplates(c *gin.Context) {
 			"prompt":            "把参考图延展为自然短视频，保持主体一致，添加轻微镜头运动和真实环境氛围，避免夸张变形。",
 			"negative_prompt":   "主体变形、跳切、闪烁、画面撕裂、低质量运动",
 			"aspect_ratio":      "16:9",
-			"duration":          5,
+			"duration":          10,
 		},
 	})
 }

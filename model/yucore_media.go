@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -613,7 +614,7 @@ func estimateYucoreMediaTaskCost(task *YucoreMediaTask) int {
 	if config.Adapter == YucoreMediaAdapterYuAPIChannel {
 		if price, ok := YucoreMediaModelUnitPrice(task.ModelId); ok {
 			units := max(task.Count, 1)
-			if task.Kind == "video" {
+			if task.Kind == "video" && !YucoreMediaModelUsesPerCallPricing(task.ModelId) {
 				units = yucoreMediaTaskDuration(task)
 				if units <= 0 {
 					capability := yucoreMediaCapabilityForTask(task, config)
@@ -655,6 +656,11 @@ func estimateYucoreMediaTaskCost(task *YucoreMediaTask) int {
 		multiplier = 1.25
 	}
 	return int(math.Ceil(float64(base*task.Count) * multiplier))
+}
+
+// YucoreMediaModelUsesPerCallPricing reports whether task duration must not multiply the configured model price.
+func YucoreMediaModelUsesPerCallPricing(modelID string) bool {
+	return common.StringsContains(constant.TaskPricePatches, modelID)
 }
 
 func YucoreMediaModelUnitPrice(modelId string) (float64, bool) {

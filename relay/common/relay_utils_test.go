@@ -94,6 +94,10 @@ func TestTaskDurationBounds(t *testing.T) {
 			body: `{"model":"sora-2","prompt":"a cat","seconds":"8"}`,
 		},
 		{
+			name: "numeric seconds is accepted",
+			body: `{"model":"grok-imagine-video-1.5-preview","prompt":"animate","seconds":10,"image_urls":["https://example.com/frame.png"]}`,
+		},
+		{
 			name: "zero duration keeps provider default behavior",
 			body: `{"model":"sora-2","prompt":"a cat","duration":0}`,
 		},

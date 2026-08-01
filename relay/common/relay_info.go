@@ -700,6 +700,7 @@ type TaskSubmitReq struct {
 	Mode           string                 `json:"mode,omitempty"`
 	Image          string                 `json:"image,omitempty"`
 	Images         []string               `json:"images,omitempty"`
+	ImageURLs      []string               `json:"image_urls,omitempty"`
 	Size           string                 `json:"size,omitempty"`
 	Duration       int                    `json:"duration,omitempty"`
 	Seconds        string                 `json:"seconds,omitempty"`
@@ -712,7 +713,7 @@ func (t *TaskSubmitReq) GetPrompt() string {
 }
 
 func (t *TaskSubmitReq) HasImage() bool {
-	return len(t.Images) > 0
+	return len(t.Images) > 0 || len(t.ImageURLs) > 0
 }
 
 func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
@@ -720,6 +721,7 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 		Metadata json.RawMessage `json:"metadata,omitempty"`
 		Duration json.RawMessage `json:"duration,omitempty"`
+		Seconds  json.RawMessage `json:"seconds,omitempty"`
 		*Alias
 	}{
 		Alias: (*Alias)(t),
@@ -746,6 +748,19 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 				}
 				t.Duration = v
 			}
+		}
+	}
+
+	if len(aux.Seconds) > 0 {
+		var secondsInt int
+		if err := common.Unmarshal(aux.Seconds, &secondsInt); err == nil {
+			t.Seconds = strconv.Itoa(secondsInt)
+		} else {
+			var secondsStr string
+			if err := common.Unmarshal(aux.Seconds, &secondsStr); err != nil {
+				return fmt.Errorf("seconds must be an integer")
+			}
+			t.Seconds = strings.TrimSpace(secondsStr)
 		}
 	}
 

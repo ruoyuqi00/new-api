@@ -56,7 +56,7 @@ print([model.id for model in models.data])
 
 - `grok-4.5` 是文本模型，按实际输入与输出 Token 计费，仅由 `grok`、`下游grok` 等文本分组提供。
 - `grok-imagine-image` 与 `grok-imagine-image-quality` 是按张计费的图片模型，由 `生图按次` 和 `多模态创作` 分组提供。
-- `grok-imagine-video-1.5-preview` 是异步视频模型，仅由 `多模态创作` 分组提供。
+- `grok-imagine-video-1.5-preview` 是最长 15 秒、按创建次数固定计费的异步视频模型，仅由 `多模态创作` 分组提供。
 
 文本、图片和视频使用不同的渠道协议。切换分组不会把 `grok-4.5` 自动转换为图片或视频模型，调用时必须填写下表中的准确 API 模型 ID。
 
@@ -151,24 +151,24 @@ GPT Image 2 支持蒙版；GPT Image 2 与 Nano Banana 最多可接收 9 张参�
 
 以下模型仅在“多模态创作”分组提供。固定价格模型按一次成功提交的视频任务计费，不会再按 `duration`、分辨率或参考素材数量重复乘价；标明按秒计费的模型按实际支持时长计费。价格与图片按次模型、IMAGE / `gpt-image-2` 图片池分别独立。
 
-| API 模型 ID                      | 用途                     |           最终价格 |
-| -------------------------------- | ------------------------ | -----------------: |
-| `grok-imagine-video-1.5-preview` | Grok 5 秒图生视频        | 0.06/秒，0.30/5 秒 |
-| `omni-fast`                      | Omni 图生视频            |         0.86112/条 |
-| `omni-fast-no-water`             | Omni 图生视频，无水印    |          1.0530/条 |
-| `omni-v2v`                       | Omni 视频生视频          |         1.15128/条 |
-| `omni-v2v-no-water`              | Omni 视频生视频，无水印  |          1.3455/条 |
-| `sora-2`                         | Sora 视频                |          0.9100/条 |
-| `sora-2-pro`                     | Sora Pro 视频            |          1.1700/条 |
-| `veo-3-1`                        | Veo 3.1                  |          1.1700/条 |
-| `veo-3-1-fast`                   | Veo 3.1 Fast             |          0.9100/条 |
-| `veo-3-1-ref`                    | Veo 3.1 多参考图         |          1.1700/条 |
-| `sd5-seedance-2.0`               | Seedance 2.0 多模态      |          5.0050/条 |
-| `sd5-seedance-2.0-fast`          | Seedance 2.0 多模态 Fast |          3.3800/条 |
-| `seedance-2.0`                   | Seedance 2.0             |          6.3050/条 |
-| `seedance-2.0-fast`              | Seedance 2.0 Fast        |          4.6800/条 |
-| `seedance-2.0-mini`              | Seedance 2.0 Mini        |          3.7700/条 |
-| `seedance-2.0-mini-8s`           | Seedance 2.0 Mini 8s     |          2.5870/条 |
+| API 模型 ID                      | 用途                      |   最终价格 |
+| -------------------------------- | ------------------------- | ---------: |
+| `grok-imagine-video-1.5-preview` | Grok Imagine 1.5 图生视频 |    0.24/次 |
+| `omni-fast`                      | Omni 图生视频             | 0.86112/条 |
+| `omni-fast-no-water`             | Omni 图生视频，无水印     |  1.0530/条 |
+| `omni-v2v`                       | Omni 视频生视频           | 1.15128/条 |
+| `omni-v2v-no-water`              | Omni 视频生视频，无水印   |  1.3455/条 |
+| `sora-2`                         | Sora 视频                 |  0.9100/条 |
+| `sora-2-pro`                     | Sora Pro 视频             |  1.1700/条 |
+| `veo-3-1`                        | Veo 3.1                   |  1.1700/条 |
+| `veo-3-1-fast`                   | Veo 3.1 Fast              |  0.9100/条 |
+| `veo-3-1-ref`                    | Veo 3.1 多参考图          |  1.1700/条 |
+| `sd5-seedance-2.0`               | Seedance 2.0 多模态       |  5.0050/条 |
+| `sd5-seedance-2.0-fast`          | Seedance 2.0 多模态 Fast  |  3.3800/条 |
+| `seedance-2.0`                   | Seedance 2.0              |  6.3050/条 |
+| `seedance-2.0-fast`              | Seedance 2.0 Fast         |  4.6800/条 |
+| `seedance-2.0-mini`              | Seedance 2.0 Mini         |  3.7700/条 |
+| `seedance-2.0-mini-8s`           | Seedance 2.0 Mini 8s      |  2.5870/条 |
 
 ## 7. 视频任务协议
 
@@ -180,7 +180,7 @@ GPT Image 2 支持蒙版；GPT Image 2 与 Nano Banana 最多可接收 9 张参�
 
 创建成功后保存响应中的 `id` 或 `task_id`，每 5-10 秒查询同一个任务。创建接口返回成功只表示任务已经进入队列，不表示视频已经生成。客户端超时也不代表生成失败，不要重新提交同一任务，以免重复扣费。
 
-视频字段不是所有 OpenAI 兼容客户端都能完整配置。模型列表和图片接口可以直接使用 OpenAI SDK；视频任务建议使用原生 HTTP 请求，确保 `duration`、`aspect_ratio`、参考素材等自定义字段不会被客户端删除。
+视频字段不是所有 OpenAI 兼容客户端都能完整配置。模型列表和图片接口可以直接使用 OpenAI SDK；视频任务建议使用原生 HTTP 请求，确保 `duration`、`seconds`、`aspect_ratio`、参考素材等自定义字段不会被客户端删除。
 
 Sora 最小参数示例：
 
@@ -201,7 +201,9 @@ Sora 参考图放在 `images` 数组中，标准版和 Pro 版都最多接收 1 
 
 ### Grok Imagine Video 1.5
 
-`grok-imagine-video-1.5-preview` 只支持 5 秒图生视频，需要一张可公网读取的真实首帧图片。使用 `vip.yuaiapi.com` 提交后保存任务 ID，并按本节开头的查询接口轮询：
+`grok-imagine-video-1.5-preview` 支持最长 15 秒的视频，常用 10 秒或 15 秒；它不是固定 5 秒。这个模型使用 `seconds`，不要使用 `duration`。`seconds` 只决定生成时长，YuAPI 按每次成功创建任务固定收取 0.24，10 秒和 15 秒不会再次乘价。
+
+图生视频需要一张无需 Cookie、Referer 或登录即可访问的 HTTPS 图片。请求体必须是 JSON，参考图放入 `image_urls` 数组。推荐的完整请求如下：
 
 ```bash
 curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
@@ -210,11 +212,25 @@ curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
   -d '{
     "model": "grok-imagine-video-1.5-preview",
     "prompt": "保持主体一致，镜头缓慢向前推进，光影自然，避免闪烁和变形",
-    "duration": 5,
+    "seconds": "10",
     "aspect_ratio": "16:9",
-    "image_url": "https://cdn.example.com/first-frame.jpg"
+    "image_urls": ["https://cdn.example.com/first-frame.jpg"],
+    "response_format": "url"
   }'
 ```
+
+字段格式：
+
+| 字段              | 类型              | 是否必填     | 说明                                                      |
+| ----------------- | ----------------- | ------------ | --------------------------------------------------------- |
+| `model`           | string            | 是           | 固定为 `grok-imagine-video-1.5-preview`。                 |
+| `prompt`          | string            | 是           | 描述主体动作、镜头运动、节奏和需要保持不变的内容。        |
+| `seconds`         | string 或 integer | 是           | 生成秒数，最大 15；推荐 10 或 15。不要同时传 `duration`。 |
+| `image_urls`      | array of string   | 图生视频必填 | 当前模型使用一张公网 HTTPS 首帧图。                       |
+| `aspect_ratio`    | string            | 否           | 常用 `16:9`、`9:16`、`1:1`，应与首帧方向一致。            |
+| `response_format` | string            | 否           | 建议使用 `url`。                                          |
+
+创建接口只调用一次。响应中保存 `id` 或 `task_id`，之后每 5 秒调用 `GET /v1/videos/{task_id}`；状态为 `queued`、`pending`、`processing` 或 `in_progress` 时继续查询。不要把重复 `POST` 当成轮询，否则会创建多个任务并分别计费。
 
 ### 7.1 Omni 图生视频
 
@@ -407,23 +423,23 @@ curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content" \
 
 ## 8. 视频参数范围
 
-| 模型族                           | 时长         | 分辨率             | 参考素材                                                |
-| -------------------------------- | ------------ | ------------------ | ------------------------------------------------------- |
-| `grok-imagine-video-1.5-preview` | 固定 5 秒    | 1280x720、720x1280 | 1 张首帧图，使用 `image_url`                            |
-| `sora-2*`                        | 4、8、12 秒  | 模型默认           | 最多 1 张图，支持 `negative_prompt`                     |
-| `veo-3-1` / `fast`               | 4、6、8 秒   | 720p、1080p        | 首尾帧最多 2 张                                         |
-| `veo-3-1-ref`                    | 4、6、8 秒   | 720p、1080p        | 素材图最多 3 张                                         |
-| `sd5-seedance-*`                 | 4-15 秒      | 480p、720p         | 首尾帧，或最多 9 图/3 视频/3 音频，总数不超过 12        |
-| `seedance-2.0*`                  | 4-15 秒      | 480p、720p         | 最多 4 图/3 视频/1 音频；多模态与首尾帧不能混用         |
-| `seedance-2.0-mini-8s`           | 4-8 秒       | 480p、720p         | 与 Seedance Mini 相同                                   |
-| `omni-fast*`                     | 固定约 10 秒 | 固定 720p          | 单图 `image_url`，多图最多 5 张，或首尾帧               |
-| `omni-v2v*`                      | 固定约 10 秒 | 固定 720p          | `video_url` 或 multipart `input_video`，文件不超过 5 MB |
+| 模型族                           | 时长         | 分辨率      | 参考素材                                                |
+| -------------------------------- | ------------ | ----------- | ------------------------------------------------------- |
+| `grok-imagine-video-1.5-preview` | 最长 15 秒   | 最高 720p   | 1 张公网首帧图，使用 `image_urls` 数组                  |
+| `sora-2*`                        | 4、8、12 秒  | 模型默认    | 最多 1 张图，支持 `negative_prompt`                     |
+| `veo-3-1` / `fast`               | 4、6、8 秒   | 720p、1080p | 首尾帧最多 2 张                                         |
+| `veo-3-1-ref`                    | 4、6、8 秒   | 720p、1080p | 素材图最多 3 张                                         |
+| `sd5-seedance-*`                 | 4-15 秒      | 480p、720p  | 首尾帧，或最多 9 图/3 视频/3 音频，总数不超过 12        |
+| `seedance-2.0*`                  | 4-15 秒      | 480p、720p  | 最多 4 图/3 视频/1 音频；多模态与首尾帧不能混用         |
+| `seedance-2.0-mini-8s`           | 4-8 秒       | 480p、720p  | 与 Seedance Mini 相同                                   |
+| `omni-fast*`                     | 固定约 10 秒 | 固定 720p   | 单图 `image_url`，多图最多 5 张，或首尾帧               |
+| `omni-v2v*`                      | 固定约 10 秒 | 固定 720p   | `video_url` 或 multipart `input_video`，文件不超过 5 MB |
 
 模型族限制：
 
 - Omni 图生视频不要传 `duration` 或 `resolution`；Omni V2V 必须提供视频输入。
 - Sora 与 Veo 使用 `generate_audio`；`seedance-2.0*` 使用 `audio`；`sd5-seedance-*` 使用 `generate_audio`。
-- `duration` 与兼容别名 `seconds` 只传一个。分辨率、时长和模型 ID 不匹配时，请求会在创建任务前返回 `400`。
+- Grok Imagine Video 1.5 只传 `seconds`；其他模型按各自说明选择 `duration` 或 `seconds`。分辨率、时长和模型 ID 不匹配时，请求会在创建任务前返回 `400`。
 - `image_url`、`images`、`reference_image_urls`、`input_reference` 的用途不同，不要在模型族之间照搬字段。
 - data URI 适合小图片；视频和音频参考应使用可由服务端访问的 HTTPS URL。不要使用需要 Cookie、Referer 或临时登录态的地址。
 - 参考视频使用 MP4/MOV、H.264/H.265 和 24-60 FPS。普通 Seedance 参考视频每边建议 720-2160 px。

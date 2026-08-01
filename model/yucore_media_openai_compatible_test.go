@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -143,6 +144,19 @@ func TestBuildOpenAICompatibleAsyncPayloadDurationPolicies(t *testing.T) {
 	assert.Equal(t, "url", videoAliasPayload["response_format"])
 	assert.NotContains(t, videoAliasPayload, "aspect_ratio")
 	assert.NotContains(t, videoAliasPayload, "image")
+
+	grokPayload := buildOpenAICompatibleAsyncPayload(task, YucoreMediaModelCapability{
+		DurationPolicy:    yucoreMediaDurationPolicySeconds,
+		AllowedParameters: []string{"seconds", "size", "aspect_ratio", "image_urls", "response_format"},
+		ResponseFormat:    "url",
+	})
+	assert.Equal(t, "8", grokPayload["seconds"])
+	assert.Equal(t, "1080p", grokPayload["size"])
+	assert.Equal(t, "16:9", grokPayload["aspect_ratio"])
+	assert.Equal(t, []string{"https://cdn.example.com/input.png"}, grokPayload["image_urls"])
+	assert.Equal(t, "url", grokPayload["response_format"])
+	assert.NotContains(t, grokPayload, "ratio")
+	assert.NotContains(t, grokPayload, "image_url")
 }
 
 func TestOpenAICompatibleTaskResponseNormalization(t *testing.T) {
@@ -461,6 +475,38 @@ func TestEstimateYucoreMediaTaskCostUsesVideoDuration(t *testing.T) {
 		Metadata: `{"duration":5}`,
 	})
 	assert.Equal(t, 100000, cost)
+}
+
+func TestEstimateYucoreMediaTaskCostKeepsPatchedVideoPricePerCall(t *testing.T) {
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	originalGroups := ratio_setting.GroupRatio2JSONString()
+	originalPatches := constant.TaskPricePatches
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"managed-video":0.04}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"media-group":1}`))
+	constant.TaskPricePatches = []string{"managed-video"}
+
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":             YucoreMediaAdapterYuAPIChannel,
+		"yucore_media.managed_token_group": "media-group",
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroups))
+		constant.TaskPricePatches = originalPatches
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	cost := estimateYucoreMediaTaskCost(&YucoreMediaTask{
+		Kind:     "video",
+		ModelId:  "managed-video",
+		Metadata: `{"duration":15}`,
+	})
+	assert.Equal(t, 20000, cost)
 }
 
 func TestYucoreMediaModelUnitPriceUsesManagedGroupRatio(t *testing.T) {
