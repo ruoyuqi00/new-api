@@ -1,12 +1,17 @@
 package service
 
 import (
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -113,4 +118,64 @@ func TestIsChannelPoolTemporarilyUnavailableWithContextReportsFull(t *testing.T)
 
 	lease.Release()
 	require.False(t, IsChannelPoolTemporarilyUnavailableWithContext(ctx, channel, "gpt-plus", "gpt-5"))
+}
+
+func TestMaybeCooldownSelectedChannelPoolCoolsTextRequests(t *testing.T) {
+	disableRedisForChannelPoolTest(t)
+	ctx := newChannelPoolTestContext(t)
+	const channelID = 3110
+	common.SetContextKey(ctx, constant.ContextKeyChannelId, channelID)
+	common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		ChannelPoolCooldownSeconds: 10,
+	})
+	ctx.Set("relay_mode", relayconstant.RelayModeResponses)
+
+	upstreamErr := types.NewErrorWithStatusCode(
+		errors.New("upstream unavailable"),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusBadGateway,
+	)
+	MaybeCooldownSelectedChannelPool(ctx, upstreamErr)
+
+	status := model.ChannelPoolCandidateStatusFor(&model.Channel{Id: channelID}, "gpt-plus", "gpt-5")
+	require.True(t, status.CoolingDown)
+}
+
+func TestMaybeCooldownSelectedChannelPoolSkipsMediaRequests(t *testing.T) {
+	disableRedisForChannelPoolTest(t)
+	upstreamErr := types.NewErrorWithStatusCode(
+		errors.New("upstream unavailable"),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusBadGateway,
+	)
+	tests := []struct {
+		name      string
+		relayMode int
+	}{
+		{name: "image generation", relayMode: relayconstant.RelayModeImagesGenerations},
+		{name: "image edit", relayMode: relayconstant.RelayModeImagesEdits},
+		{name: "midjourney imagine", relayMode: relayconstant.RelayModeMidjourneyImagine},
+		{name: "midjourney task fetch", relayMode: relayconstant.RelayModeMidjourneyTaskFetch},
+		{name: "midjourney video", relayMode: relayconstant.RelayModeMidjourneyVideo},
+		{name: "midjourney edit", relayMode: relayconstant.RelayModeMidjourneyEdits},
+		{name: "video submit", relayMode: relayconstant.RelayModeVideoSubmit},
+		{name: "video fetch", relayMode: relayconstant.RelayModeVideoFetchByID},
+	}
+
+	for i, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := newChannelPoolTestContext(t)
+			channelID := 3120 + i
+			common.SetContextKey(ctx, constant.ContextKeyChannelId, channelID)
+			common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+				ChannelPoolCooldownSeconds: 10,
+			})
+			ctx.Set("relay_mode", test.relayMode)
+
+			MaybeCooldownSelectedChannelPool(ctx, upstreamErr)
+
+			status := model.ChannelPoolCandidateStatusFor(&model.Channel{Id: channelID}, "gpt-plus", "gpt-5")
+			require.False(t, status.CoolingDown)
+		})
+	}
 }

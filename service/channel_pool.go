@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -96,6 +97,14 @@ func NewChannelPoolFullError(channel *model.Channel) *types.NewAPIError {
 
 func MaybeCooldownSelectedChannelPool(c *gin.Context, err *types.NewAPIError) {
 	if c == nil || !shouldCooldownSelectedChannelPool(c, err) {
+		return
+	}
+	relayMode := c.GetInt("relay_mode")
+	if relayMode == relayconstant.RelayModeImagesGenerations ||
+		relayMode == relayconstant.RelayModeImagesEdits ||
+		(relayMode >= relayconstant.RelayModeMidjourneyImagine && relayMode <= relayconstant.RelayModeMidjourneyEdits) ||
+		relayMode == relayconstant.RelayModeVideoFetchByID ||
+		relayMode == relayconstant.RelayModeVideoSubmit {
 		return
 	}
 	settings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
