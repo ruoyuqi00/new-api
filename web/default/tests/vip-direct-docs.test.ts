@@ -16,17 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-
-import { describe, expect, it } from 'bun:test'
 
 const docs = readFileSync(
   resolve(import.meta.dir, '../public/developer-docs/yucore-api.md'),
   'utf8'
 )
-const normalMediaEndpointPattern =
-  /\$YUAPI_BASE_URL\/(?:images|videos)\b/
+const normalMediaEndpointPattern = /\$YUAPI_BASE_URL\/(?:images|videos)\b/
 
 describe('VIP direct API documentation', () => {
   it('documents the public and direct endpoints without automatic switching', () => {
@@ -40,9 +38,7 @@ describe('VIP direct API documentation', () => {
   })
 
   it('routes image and video examples through the direct endpoint', () => {
-    expect(docs).toContain(
-      'YUAPI_MEDIA_BASE_URL="https://vip.yuaiapi.com/v1"'
-    )
+    expect(docs).toContain('YUAPI_MEDIA_BASE_URL="https://vip.yuaiapi.com/v1"')
     expect(docs).toContain('base_url = "https://vip.yuaiapi.com/v1"')
     expect(docs).toContain('$YUAPI_MEDIA_BASE_URL/images/generations')
     expect(docs).toContain('$YUAPI_MEDIA_BASE_URL/images/edits')
@@ -66,13 +62,21 @@ describe('VIP direct API documentation', () => {
   it('derives relative Python video results from the selected direct origin', () => {
     expect(docs).toContain('api_origin = base_url.removesuffix("/v1")')
     expect(docs).toContain('urljoin(api_origin, video_url)')
-    expect(docs).not.toContain(
-      'urljoin("https://api.yuaiapi.com", video_url)'
-    )
+    expect(docs).not.toContain('urljoin("https://api.yuaiapi.com", video_url)')
   })
 
   it('keeps normal model discovery on the public endpoint', () => {
     expect(docs).toContain('$YUAPI_BASE_URL/models')
     expect(docs).toContain('YUAPI_BASE_URL="https://api.yuaiapi.com/v1"')
+  })
+
+  it('documents Grok text, image, and video group boundaries', () => {
+    expect(docs).toContain('`grok-4.5`')
+    expect(docs).toContain('`grok-imagine-image`')
+    expect(docs).toContain('`grok-imagine-image-quality`')
+    expect(docs).toContain('`grok-imagine-video-1.5-preview`')
+    expect(docs).toContain('0.072')
+    expect(docs).toContain('0.06/秒')
+    expect(docs).toContain('0.30/5 秒')
   })
 })
