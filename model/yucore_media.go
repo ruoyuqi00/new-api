@@ -660,7 +660,7 @@ func estimateYucoreMediaTaskCost(task *YucoreMediaTask) int {
 
 // YucoreMediaModelUsesPerCallPricing reports whether task duration must not multiply the configured model price.
 func YucoreMediaModelUsesPerCallPricing(modelID string) bool {
-	return common.StringsContains(constant.TaskPricePatches, modelID)
+	return constant.TaskPricePatchApplies(modelID)
 }
 
 func YucoreMediaModelUnitPrice(modelId string) (float64, bool) {

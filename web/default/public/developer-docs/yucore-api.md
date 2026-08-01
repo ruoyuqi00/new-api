@@ -56,7 +56,7 @@ print([model.id for model in models.data])
 
 - `grok-4.5` 是文本模型，按实际输入与输出 Token 计费，仅由 `grok`、`下游grok` 等文本分组提供。
 - `grok-imagine-image` 与 `grok-imagine-image-quality` 是按张计费的图片模型，由 `生图按次` 和 `多模态创作` 分组提供。
-- `grok-imagine-video-1.5-preview` 是最长 15 秒、按创建次数固定计费的异步视频模型，仅由 `多模态创作` 分组提供。
+- `grok-imagine-video-1.5-preview` 是最长 15 秒、按实际生成秒数计费的异步视频模型，仅由 `多模态创作` 分组提供。
 
 文本、图片和视频使用不同的渠道协议。切换分组不会把 `grok-4.5` 自动转换为图片或视频模型，调用时必须填写下表中的准确 API 模型 ID。
 
@@ -153,7 +153,7 @@ GPT Image 2 支持蒙版；GPT Image 2 与 Nano Banana 最多可接收 9 张参�
 
 | API 模型 ID                      | 用途                      |   最终价格 |
 | -------------------------------- | ------------------------- | ---------: |
-| `grok-imagine-video-1.5-preview` | Grok Imagine 1.5 图生视频 |    0.24/次 |
+| `grok-imagine-video-1.5-preview` | Grok Imagine 1.5 图生视频 | 0.78/秒；11.70/15 秒 |
 | `omni-fast`                      | Omni 图生视频             | 0.86112/条 |
 | `omni-fast-no-water`             | Omni 图生视频，无水印     |  1.0530/条 |
 | `omni-v2v`                       | Omni 视频生视频           | 1.15128/条 |
@@ -201,7 +201,7 @@ Sora 参考图放在 `images` 数组中，标准版和 Pro 版都最多接收 1 
 
 ### Grok Imagine Video 1.5
 
-`grok-imagine-video-1.5-preview` 支持最长 15 秒的视频，常用 10 秒或 15 秒；它不是固定 5 秒。这个模型使用 `seconds`，不要使用 `duration`。`seconds` 只决定生成时长，YuAPI 按每次成功创建任务固定收取 0.24，10 秒和 15 秒不会再次乘价。
+`grok-imagine-video-1.5-preview` 支持最长 15 秒的视频，常用 10 秒或 15 秒；它不是固定 5 秒。这个模型使用 `seconds`，不要使用 `duration`。当前基础单价是 0.65/秒，多模态分组倍率保持 1.2，因此用户最终单价是 0.78/秒。任务价格为 `seconds × 0.65 × 1.2`，例如 10 秒收取 7.80，15 秒收取 11.70。
 
 图生视频需要一张无需 Cookie、Referer 或登录即可访问的 HTTPS 图片。请求体必须是 JSON，参考图放入 `image_urls` 数组。推荐的完整请求如下：
 

@@ -195,7 +195,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度
-	if !common.StringsContains(constant.TaskPricePatches, modelName) {
+	if !constant.TaskPricePatchApplies(modelName) {
 		quota, clamp := applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, info.PriceData.OtherRatios)
 		noteTaskQuotaClamp(info, clamp, "task_submit_other_ratios")
 		info.PriceData.Quota = quota

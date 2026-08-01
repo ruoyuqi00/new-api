@@ -428,7 +428,7 @@ func ListYucoreMediaModels(c *gin.Context) {
 			"name":          "Grok Imagine Video 1.5 Preview",
 			"family":        "grok",
 			"badge":         "xAI 图生视频",
-			"description":   "Grok 图生视频模型，使用一张真实首帧图片创建最长 15 秒的视频任务，按每次创建固定计费。",
+			"description":   "Grok 图生视频模型，使用一张真实首帧图片创建最长 15 秒的视频任务，按实际生成秒数计费。",
 			"kind":          "video",
 			"modes":         []string{"image-to-video"},
 			"sizes":         []string{"1280x720", "720x1280"},
@@ -443,10 +443,10 @@ func ListYucoreMediaModels(c *gin.Context) {
 				"max_reference_images": 1,
 			},
 			"pricing": gin.H{
-				"unit":     "per_call",
-				"amount":   0.20,
+				"unit":     "per_second",
+				"amount":   0.65,
 				"currency": "CNY",
-				"display":  "¥0.20/次",
+				"display":  "¥0.65/秒",
 			},
 		},
 		{

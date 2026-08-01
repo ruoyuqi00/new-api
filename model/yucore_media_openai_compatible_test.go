@@ -509,6 +509,38 @@ func TestEstimateYucoreMediaTaskCostKeepsPatchedVideoPricePerCall(t *testing.T) 
 	assert.Equal(t, 20000, cost)
 }
 
+func TestEstimateYucoreMediaTaskCostChargesGrokVideoByDuration(t *testing.T) {
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	originalGroups := ratio_setting.GroupRatio2JSONString()
+	originalPatches := constant.TaskPricePatches
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"grok-imagine-video-1.5-preview":0.65}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"media-group":1.2}`))
+	constant.TaskPricePatches = []string{"grok-imagine-video-1.5-preview"}
+
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":             YucoreMediaAdapterYuAPIChannel,
+		"yucore_media.managed_token_group": "media-group",
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroups))
+		constant.TaskPricePatches = originalPatches
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	cost := estimateYucoreMediaTaskCost(&YucoreMediaTask{
+		Kind:     "video",
+		ModelId:  "grok-imagine-video-1.5-preview",
+		Metadata: `{"duration":15}`,
+	})
+	assert.Equal(t, 5_850_000, cost)
+}
+
 func TestYucoreMediaModelUnitPriceUsesManagedGroupRatio(t *testing.T) {
 	originalPrices := ratio_setting.ModelPrice2JSONString()
 	originalGroups := ratio_setting.GroupRatio2JSONString()

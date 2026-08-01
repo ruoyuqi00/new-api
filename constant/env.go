@@ -1,5 +1,7 @@
 package constant
 
+import "strings"
+
 var StreamingTimeout int
 var DifyDebug bool
 var MaxFileDownloadMB int
@@ -21,6 +23,20 @@ var TaskTimeoutMinutes int
 
 // temporary variable for sora patch, will be removed in future
 var TaskPricePatches []string
+
+// TaskPricePatchApplies reports whether task billing must ignore duration and
+// other request multipliers. Grok Imagine Video is explicitly duration-based.
+func TaskPricePatchApplies(model string) bool {
+	if strings.EqualFold(strings.TrimSpace(model), "grok-imagine-video-1.5-preview") {
+		return false
+	}
+	for _, patchedModel := range TaskPricePatches {
+		if strings.EqualFold(strings.TrimSpace(patchedModel), strings.TrimSpace(model)) {
+			return true
+		}
+	}
+	return false
+}
 
 // TrustedRedirectDomains is a list of trusted domains for redirect URL validation.
 // Domains support subdomain matching (e.g., "example.com" matches "sub.example.com").
