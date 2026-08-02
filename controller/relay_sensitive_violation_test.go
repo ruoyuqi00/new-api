@@ -12,8 +12,9 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -23,30 +24,24 @@ import (
 func TestRelaySensitiveWordViolationChargesBeforeChannelSelection(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Token{}, &model.Log{}))
+	service.InitTokenEncoders()
 
 	previousLogConsumeEnabled := common.LogConsumeEnabled
 	previousBatchUpdateEnabled := common.BatchUpdateEnabled
 	previousSensitiveEnabled := setting.CheckSensitiveEnabled
 	previousPromptSensitiveEnabled := setting.CheckSensitiveOnPromptEnabled
 	previousSensitiveWords := append([]string(nil), setting.SensitiveWords...)
-	settings := model_setting.GetGrokSettings()
-	previousGrokSettings := *settings
 	common.LogConsumeEnabled = true
 	common.BatchUpdateEnabled = false
 	setting.CheckSensitiveEnabled = true
 	setting.CheckSensitiveOnPromptEnabled = true
 	setting.SensitiveWords = []string{"test_sensitive"}
-	*settings = model_setting.GrokSettings{
-		ViolationDeductionEnabled: true,
-		ViolationDeductionAmount:  0.05,
-	}
 	t.Cleanup(func() {
 		common.LogConsumeEnabled = previousLogConsumeEnabled
 		common.BatchUpdateEnabled = previousBatchUpdateEnabled
 		setting.CheckSensitiveEnabled = previousSensitiveEnabled
 		setting.CheckSensitiveOnPromptEnabled = previousPromptSensitiveEnabled
 		setting.SensitiveWords = previousSensitiveWords
-		*settings = previousGrokSettings
 	})
 
 	const (
@@ -74,6 +69,7 @@ func TestRelaySensitiveWordViolationChargesBeforeChannelSelection(t *testing.T) 
 	require.NoError(t, db.Create(user).Error)
 	require.NoError(t, db.Create(token).Error)
 
+	const modelName = "gpt-4.1-mini"
 	body := []byte(`{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"test_sensitive"}]}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -83,7 +79,7 @@ func TestRelaySensitiveWordViolationChargesBeforeChannelSelection(t *testing.T) 
 	c.Set(string(constant.ContextKeyUserQuota), startingQuota)
 	c.Set(string(constant.ContextKeyUserGroup), "default")
 	c.Set(string(constant.ContextKeyUsingGroup), "default")
-	c.Set(string(constant.ContextKeyOriginalModel), "gpt-4.1-mini")
+	c.Set(string(constant.ContextKeyOriginalModel), modelName)
 	c.Set(string(constant.ContextKeyTokenId), tokenID)
 	c.Set(string(constant.ContextKeyTokenKey), "relay-sensitive-token")
 	c.Set(string(constant.ContextKeyTokenUnlimited), false)
@@ -107,7 +103,10 @@ func TestRelaySensitiveWordViolationChargesBeforeChannelSelection(t *testing.T) 
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, string(types.ErrorCodeSensitiveWordsDetected), fmt.Sprint(response.Error.Code))
 
-	feeQuota := int(0.05 * common.QuotaPerUnit)
+	promptTokens := service.CountTextToken("user\ntest_sensitive", modelName) + 6
+	modelRatio, _, _ := ratio_setting.GetModelRatio(modelName)
+	feeQuota, err := common.QuotaFromFloatStrict(float64(promptTokens) * modelRatio)
+	require.NoError(t, err)
 	require.NoError(t, db.First(user, userID).Error)
 	assert.Equal(t, startingQuota-feeQuota, user.Quota)
 	assert.Equal(t, feeQuota, user.UsedQuota)

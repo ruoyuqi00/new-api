@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -78,16 +79,76 @@ func TestCalcViolationFeeQuota(t *testing.T) {
 	assert.Equal(t, 0, calcViolationFeeQuota(0.05, 0))
 }
 
+func TestCalculateLocalSensitiveInputQuota(t *testing.T) {
+	tests := []struct {
+		name         string
+		promptTokens int
+		priceData    types.PriceData
+		snapshot     *billingexpr.BillingSnapshot
+		requestInput *billingexpr.RequestInput
+		wantQuota    int
+	}{
+		{
+			name:         "token pricing applies model and group ratios",
+			promptTokens: 1_250,
+			priceData: types.PriceData{
+				ModelRatio:     1.5,
+				GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 2},
+			},
+			wantQuota: 3_750,
+		},
+		{
+			name:         "per-call pricing is not charged as input tokens",
+			promptTokens: 1_250,
+			priceData: types.PriceData{
+				UsePrice:       true,
+				ModelPrice:     0.25,
+				GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 2},
+			},
+			wantQuota: 0,
+		},
+		{
+			name:         "tiered pricing excludes completion cost",
+			promptTokens: 2_000,
+			priceData: types.PriceData{
+				GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1.5},
+			},
+			snapshot: &billingexpr.BillingSnapshot{
+				ExprString: "tier(\"base\", 500 + p * 3 + c * 15)",
+				GroupRatio: 1.5,
+			},
+			requestInput: &billingexpr.RequestInput{},
+			wantQuota: billingexpr.QuotaRound(
+				2_000 * 3 / 1_000_000.0 * common.QuotaPerUnit * 1.5,
+			),
+		},
+		{
+			name:         "zero input has no charge",
+			promptTokens: 0,
+			priceData: types.PriceData{
+				ModelRatio:     2,
+				GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 2},
+			},
+			wantQuota: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			relayInfo := &relaycommon.RelayInfo{
+				PriceData:             tt.priceData,
+				TieredBillingSnapshot: tt.snapshot,
+				BillingRequestInput:   tt.requestInput,
+			}
+			quota, err := CalculateLocalSensitiveInputQuota(relayInfo, tt.promptTokens)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantQuota, quota)
+		})
+	}
+}
+
 func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.T) {
 	truncate(t)
-
-	settings := model_setting.GetGrokSettings()
-	previousSettings := *settings
-	*settings = model_setting.GrokSettings{
-		ViolationDeductionEnabled: true,
-		ViolationDeductionAmount:  0.05,
-	}
-	t.Cleanup(func() { *settings = previousSettings })
 
 	const (
 		userID        = 901
@@ -116,6 +177,7 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 			BillingPreference: "wallet_only",
 		},
 		PriceData: types.PriceData{
+			ModelRatio:     1.5,
 			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 2},
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channelID},
@@ -127,10 +189,12 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 		types.ErrOptionWithSkipRetry(),
 	)
 
-	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr))
+	const promptTokens = 1_250
+	feeQuota, err := CalculateLocalSensitiveInputQuota(relayInfo, promptTokens)
+	require.NoError(t, err)
+	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, promptTokens))
 	assert.False(t, ChargeViolationFeeIfNeeded(c, relayInfo, apiErr), "local violations must not be charged again by the upstream failure path")
 
-	feeQuota := calcViolationFeeQuota(0.05, 2)
 	var user model.User
 	require.NoError(t, model.DB.First(&user, userID).Error)
 	assert.Equal(t, startingQuota-feeQuota, user.Quota)
@@ -158,21 +222,18 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 	assert.Equal(t, true, other["violation_fee"])
 	assert.Equal(t, string(types.ErrorCodeSensitiveWordsDetected), other["violation_fee_code"])
 	assert.Equal(t, string(violationFeeReasonLocalSensitiveWord), other["violation_fee_reason"])
+	assert.Equal(t, float64(promptTokens), other["prompt_tokens"])
+	assert.Equal(t, float64(feeQuota), other["requested_quota"])
+	assert.Equal(t, float64(feeQuota), other["charged_quota"])
+	assert.Equal(t, true, other["charge_succeeded"])
 	assert.NotContains(t, other, "violation_fee_marker")
+	assert.NotContains(t, other, "base_amount")
 }
 
-func TestChargeLocalViolationFeeInsufficientQuotaKeepsBlockWithoutConsumeLog(t *testing.T) {
+func TestChargeLocalViolationFeeInsufficientQuotaKeepsBlockWithAuditLog(t *testing.T) {
 	truncate(t)
 
-	settings := model_setting.GetGrokSettings()
-	previousSettings := *settings
-	*settings = model_setting.GrokSettings{
-		ViolationDeductionEnabled: true,
-		ViolationDeductionAmount:  0.05,
-	}
-	t.Cleanup(func() { *settings = previousSettings })
-
-	feeQuota := calcViolationFeeQuota(0.05, 1)
+	const feeQuota = 100
 	const (
 		userID  = 911
 		tokenID = 912
@@ -203,7 +264,7 @@ func TestChargeLocalViolationFeeInsufficientQuotaKeepsBlockWithoutConsumeLog(t *
 		types.ErrOptionWithSkipRetry(),
 	)
 
-	assert.False(t, ChargeLocalViolationFee(c, relayInfo, apiErr))
+	assert.False(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100))
 
 	var user model.User
 	require.NoError(t, model.DB.First(&user, userID).Error)
@@ -216,21 +277,20 @@ func TestChargeLocalViolationFeeInsufficientQuotaKeepsBlockWithoutConsumeLog(t *
 	assert.Equal(t, feeQuota*2, token.RemainQuota)
 	assert.Zero(t, token.UsedQuota)
 
-	var logCount int64
-	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ? AND type = ?", userID, model.LogTypeConsume).Count(&logCount).Error)
-	assert.Zero(t, logCount)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", userID, model.LogTypeConsume).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	assert.Zero(t, logs[0].Quota)
+	assert.Zero(t, logs[0].ChannelId)
+	var other map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(logs[0].Other, &other))
+	assert.Equal(t, float64(feeQuota), other["requested_quota"])
+	assert.Equal(t, float64(0), other["charged_quota"])
+	assert.Equal(t, false, other["charge_succeeded"])
 }
 
 func TestChargeLocalViolationFeeHonorsSubscriptionOnlyPreference(t *testing.T) {
 	truncate(t)
-
-	settings := model_setting.GetGrokSettings()
-	previousSettings := *settings
-	*settings = model_setting.GrokSettings{
-		ViolationDeductionEnabled: true,
-		ViolationDeductionAmount:  0.05,
-	}
-	t.Cleanup(func() { *settings = previousSettings })
 
 	const (
 		userID            = 921
@@ -270,6 +330,7 @@ func TestChargeLocalViolationFeeHonorsSubscriptionOnlyPreference(t *testing.T) {
 			BillingPreference: "subscription_only",
 		},
 		PriceData: types.PriceData{
+			ModelRatio:     1,
 			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 		},
 	}
@@ -280,9 +341,9 @@ func TestChargeLocalViolationFeeHonorsSubscriptionOnlyPreference(t *testing.T) {
 		types.ErrOptionWithSkipRetry(),
 	)
 
-	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr))
+	const feeQuota = 100
+	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100))
 
-	feeQuota := calcViolationFeeQuota(0.05, 1)
 	var user model.User
 	require.NoError(t, model.DB.First(&user, userID).Error)
 	assert.Equal(t, walletQuota, user.Quota)

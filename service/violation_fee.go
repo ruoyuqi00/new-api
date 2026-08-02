@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -186,40 +187,135 @@ func calcViolationFeeQuota(amount, groupRatio float64) int {
 	return int(quota)
 }
 
+// CalculateLocalSensitiveInputQuota calculates only the estimated prompt cost.
+// Per-call pricing cannot be split into input and output, so it is not charged.
+func CalculateLocalSensitiveInputQuota(relayInfo *relaycommon.RelayInfo, promptTokens int) (int, error) {
+	if relayInfo == nil || promptTokens <= 0 || relayInfo.PriceData.FreeModel {
+		return 0, nil
+	}
+
+	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	if groupRatio <= 0 {
+		return 0, nil
+	}
+	if relayInfo.TieredBillingSnapshot != nil {
+		snapshot := relayInfo.TieredBillingSnapshot
+		requestInput := billingexpr.RequestInput{}
+		if relayInfo.BillingRequestInput != nil {
+			requestInput = *relayInfo.BillingRequestInput
+		}
+		params := billingexpr.TokenParams{
+			P:   float64(promptTokens),
+			Len: float64(promptTokens),
+		}
+		rawCost, _, err := billingexpr.RunExprWithRequest(snapshot.ExprString, params, requestInput)
+		if err != nil {
+			return 0, fmt.Errorf("calculate sensitive input quota: %w", err)
+		}
+		// Remove any fixed request component while preserving the input-length tier.
+		baselineCost, _, err := billingexpr.RunExprWithRequest(snapshot.ExprString, billingexpr.TokenParams{
+			Len: float64(promptTokens),
+		}, requestInput)
+		if err != nil {
+			return 0, fmt.Errorf("calculate sensitive input quota baseline: %w", err)
+		}
+		inputCost := rawCost - baselineCost
+		if inputCost <= 0 {
+			return 0, nil
+		}
+		quota, err := billingexpr.QuotaRoundStrict(inputCost / 1_000_000 * common.QuotaPerUnit * snapshot.GroupRatio)
+		if err != nil {
+			return 0, fmt.Errorf("calculate sensitive input quota: %w", err)
+		}
+		if quota == 0 {
+			return 1, nil
+		}
+		return quota, nil
+	}
+	if relayInfo.PriceData.UsePrice || relayInfo.PriceData.ModelRatio <= 0 {
+		return 0, nil
+	}
+
+	quota, err := common.QuotaFromFloatStrict(float64(promptTokens) * relayInfo.PriceData.ModelRatio * groupRatio)
+	if err != nil {
+		return 0, fmt.Errorf("calculate sensitive input quota: %w", err)
+	}
+	if quota == 0 {
+		return 1, nil
+	}
+	return quota, nil
+}
+
 // ChargeLocalViolationFee charges a request that YuAPI rejected before channel selection.
 // The original sensitive-word error remains the client response even when charging fails.
-func ChargeLocalViolationFee(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, apiErr *types.NewAPIError) bool {
+func ChargeLocalViolationFee(
+	ctx *gin.Context,
+	relayInfo *relaycommon.RelayInfo,
+	apiErr *types.NewAPIError,
+	expectedQuota int,
+	promptTokens int,
+) bool {
 	if ctx == nil || relayInfo == nil || apiErr == nil {
 		return false
 	}
 	reason, charge := classifyViolationFee(apiErr)
-	if !charge || reason != violationFeeReasonLocalSensitiveWord {
+	if !charge || reason != violationFeeReasonLocalSensitiveWord || expectedQuota < 0 {
 		return false
 	}
 
-	settings := model_setting.GetGrokSettings()
-	if settings == nil || !settings.ViolationDeductionEnabled {
-		return false
+	chargeSucceeded := expectedQuota == 0
+	chargedQuota := 0
+	if expectedQuota > 0 {
+		if billingErr := PreConsumeBilling(ctx, expectedQuota, relayInfo); billingErr != nil {
+			logger.LogError(ctx, fmt.Sprintf("failed to charge local violation fee: %s", billingErr.Error()))
+		} else if err := SettleBilling(ctx, relayInfo, expectedQuota); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("failed to settle local violation fee: %s", err.Error()))
+		} else {
+			chargeSucceeded = true
+			chargedQuota = expectedQuota
+		}
 	}
 
-	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
-	feeQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, groupRatio)
-	if feeQuota <= 0 {
-		return false
+	if chargedQuota > 0 {
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, chargedQuota)
 	}
+	recordLocalSensitiveViolation(ctx, relayInfo, apiErr, promptTokens, expectedQuota, chargedQuota, chargeSucceeded)
+	return chargeSucceeded
+}
 
-	if billingErr := PreConsumeBilling(ctx, feeQuota, relayInfo); billingErr != nil {
-		logger.LogError(ctx, fmt.Sprintf("failed to charge local violation fee: %s", billingErr.Error()))
-		return false
-	}
-	if err := SettleBilling(ctx, relayInfo, feeQuota); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("failed to settle local violation fee: %s", err.Error()))
-		return false
-	}
-
-	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
-	recordViolationFee(ctx, relayInfo, apiErr, reason, settings.ViolationDeductionAmount, groupRatio, feeQuota, 0)
-	return true
+func recordLocalSensitiveViolation(
+	ctx *gin.Context,
+	relayInfo *relaycommon.RelayInfo,
+	apiErr *types.NewAPIError,
+	promptTokens int,
+	requestedQuota int,
+	chargedQuota int,
+	chargeSucceeded bool,
+) {
+	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
+		ChannelId:      0,
+		ModelName:      relayInfo.OriginModelName,
+		TokenName:      ctx.GetString("token_name"),
+		Quota:          chargedQuota,
+		Content:        "Sensitive input blocked",
+		TokenId:        relayInfo.TokenId,
+		UseTimeSeconds: int(time.Now().Unix() - relayInfo.StartTime.Unix()),
+		IsStream:       relayInfo.IsStream,
+		Group:          relayInfo.UsingGroup,
+		Other: map[string]any{
+			"violation_fee":        true,
+			"violation_fee_code":   string(apiErr.GetErrorCode()),
+			"violation_fee_reason": string(violationFeeReasonLocalSensitiveWord),
+			"billing_scope":        "input_tokens_only",
+			"prompt_tokens":        promptTokens,
+			"model_ratio":          relayInfo.PriceData.ModelRatio,
+			"group_ratio":          relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			"requested_quota":      requestedQuota,
+			"charged_quota":        chargedQuota,
+			"charge_succeeded":     chargeSucceeded,
+			"status_code":          apiErr.StatusCode,
+		},
+	})
 }
 
 // ChargeViolationFeeIfNeeded charges an additional fee after the normal flow finishes (including refund).

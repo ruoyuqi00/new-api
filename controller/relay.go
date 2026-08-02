@@ -151,6 +151,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
+	if err == nil && sensitiveWordsDetected && !constant.CountToken {
+		tokens, err = service.EstimateRequestTokenForBilling(c, meta, relayInfo)
+	}
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeCountTokenFailed)
 		return
@@ -170,7 +173,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			http.StatusBadRequest,
 			types.ErrOptionWithSkipRetry(),
 		)
-		service.ChargeLocalViolationFee(c, relayInfo, newAPIError)
+		inputQuota, quotaErr := service.CalculateLocalSensitiveInputQuota(relayInfo, tokens)
+		if quotaErr != nil {
+			logger.LogError(c, fmt.Sprintf("failed to calculate local sensitive input quota: %s", quotaErr.Error()))
+		}
+		service.ChargeLocalViolationFee(c, relayInfo, newAPIError, inputQuota, tokens)
 		return
 	}
 	if needInputModeration && meta != nil && strings.TrimSpace(meta.CombineText) != "" {
