@@ -56,6 +56,25 @@ func TestInputModerationCheckerReturnsAllowedResult(t *testing.T) {
 	assert.Empty(t, result.Categories)
 }
 
+func TestInputModerationCheckerSkipsEmptyInput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("empty input must not call the moderation provider")
+	}))
+	t.Cleanup(server.Close)
+
+	checker := inputModerationChecker{
+		endpoint:   server.URL,
+		apiKey:     "test-moderation-key",
+		model:      "omni-moderation-latest",
+		timeout:    time.Second,
+		httpClient: server.Client(),
+	}
+	result, err := checker.Check(context.Background(), "   ")
+
+	require.NoError(t, err)
+	assert.Equal(t, InputModerationResult{}, result)
+}
+
 func TestInputModerationCheckerReturnsSortedFlaggedCategories(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

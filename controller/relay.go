@@ -32,6 +32,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var (
+	inputModerationEnabled = service.InputModerationEnabled
+	checkInputModeration   = service.CheckInputModeration
+)
+
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
 	switch info.RelayMode {
@@ -124,10 +129,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	needInputModeration := relayFormat != types.RelayFormatOpenAIRealtime &&
+		relayInfo.RelayMode != relayconstant.RelayModeModerations &&
+		inputModerationEnabled()
 	needCountToken := constant.CountToken
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
 	var meta *types.TokenCountMeta
-	if needSensitiveCheck || needCountToken {
+	if needSensitiveCheck || needInputModeration || needCountToken {
 		meta = request.GetTokenCountMeta()
 	} else {
 		meta = fastTokenCountMetaForPricing(request)
@@ -164,6 +172,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		)
 		service.ChargeLocalViolationFee(c, relayInfo, newAPIError)
 		return
+	}
+	if needInputModeration && meta != nil && strings.TrimSpace(meta.CombineText) != "" {
+		moderationResult, moderationErr := checkInputModeration(c.Request.Context(), meta.CombineText)
+		if moderationErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("input moderation unavailable, failing open: %s", common.LocalLogPreview(moderationErr.Error())))
+		} else if moderationResult.Flagged {
+			newAPIError = types.NewErrorWithStatusCode(
+				errors.New("input blocked by content policy"),
+				types.ErrorCodeViolationFeeInputModeration,
+				http.StatusBadRequest,
+				types.ErrOptionWithSkipRetry(),
+			)
+			service.ChargeInputModerationViolation(c, relayInfo, newAPIError, priceData.QuotaToPreConsume, moderationResult)
+			return
+		}
 	}
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
