@@ -28,6 +28,7 @@ type violationFeeReason string
 const (
 	violationFeeReasonLocalSensitiveWord violationFeeReason = "local_sensitive_word"
 	violationFeeReasonGrokCSAM           violationFeeReason = "grok_csam"
+	violationFeeReasonInputModeration    violationFeeReason = "input_moderation"
 )
 
 func IsViolationFeeCode(code types.ErrorCode) bool {
@@ -87,11 +88,84 @@ func classifyViolationFee(err *types.NewAPIError) (violationFeeReason, bool) {
 	if err.GetErrorCode() == types.ErrorCodeViolationFeeGrokCSAM {
 		return violationFeeReasonGrokCSAM, true
 	}
+	if err.GetErrorCode() == types.ErrorCodeViolationFeeInputModeration {
+		return violationFeeReasonInputModeration, true
+	}
 	// In case some callers didn't normalize, keep a safety net.
 	if HasCSAMViolationMarker(err) {
 		return violationFeeReasonGrokCSAM, true
 	}
 	return "", false
+}
+
+// ChargeInputModerationViolation charges the quota already estimated for the
+// original request. The request remains blocked when billing cannot complete.
+func ChargeInputModerationViolation(
+	ctx *gin.Context,
+	relayInfo *relaycommon.RelayInfo,
+	apiErr *types.NewAPIError,
+	expectedQuota int,
+	result InputModerationResult,
+) bool {
+	if ctx == nil || relayInfo == nil || apiErr == nil || expectedQuota < 0 {
+		return false
+	}
+	reason, charge := classifyViolationFee(apiErr)
+	if !charge || reason != violationFeeReasonInputModeration {
+		return false
+	}
+
+	chargeSucceeded := expectedQuota == 0
+	chargedQuota := 0
+	if expectedQuota > 0 {
+		if billingErr := PreConsumeBilling(ctx, expectedQuota, relayInfo); billingErr != nil {
+			logger.LogError(ctx, fmt.Sprintf("failed to charge input moderation violation: %s", billingErr.Error()))
+		} else if err := SettleBilling(ctx, relayInfo, expectedQuota); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("failed to settle input moderation violation: %s", err.Error()))
+		} else {
+			chargeSucceeded = true
+			chargedQuota = expectedQuota
+		}
+	}
+
+	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, chargedQuota)
+	recordInputModerationViolation(ctx, relayInfo, apiErr, result, expectedQuota, chargedQuota, chargeSucceeded)
+	return chargeSucceeded
+}
+
+func recordInputModerationViolation(
+	ctx *gin.Context,
+	relayInfo *relaycommon.RelayInfo,
+	apiErr *types.NewAPIError,
+	result InputModerationResult,
+	requestedQuota int,
+	chargedQuota int,
+	chargeSucceeded bool,
+) {
+	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
+	categories := append([]string(nil), result.Categories...)
+	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
+		ChannelId:      0,
+		ModelName:      relayInfo.OriginModelName,
+		TokenName:      ctx.GetString("token_name"),
+		Quota:          chargedQuota,
+		Content:        "Input moderation blocked",
+		TokenId:        relayInfo.TokenId,
+		UseTimeSeconds: int(useTimeSeconds),
+		IsStream:       relayInfo.IsStream,
+		Group:          relayInfo.UsingGroup,
+		Other: map[string]any{
+			"violation_fee":         true,
+			"violation_fee_code":    string(apiErr.GetErrorCode()),
+			"violation_fee_reason":  string(violationFeeReasonInputModeration),
+			"moderation_model":      result.Model,
+			"moderation_categories": categories,
+			"requested_quota":       requestedQuota,
+			"charged_quota":         chargedQuota,
+			"charge_succeeded":      chargeSucceeded,
+			"status_code":           apiErr.StatusCode,
+		},
+	})
 }
 
 func calcViolationFeeQuota(amount, groupRatio float64) int {

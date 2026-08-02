@@ -360,3 +360,153 @@ func TestChargeViolationFeeIfNeededPreservesGrokFallbackMetadata(t *testing.T) {
 	assert.Equal(t, string(violationFeeReasonGrokCSAM), other["violation_fee_reason"])
 	assert.Equal(t, CSAMViolationMarker, other["violation_fee_marker"])
 }
+
+func TestChargeInputModerationViolationChargesExactRequestQuota(t *testing.T) {
+	truncate(t)
+
+	const (
+		userID        = 941
+		tokenID       = 942
+		channelID     = 943
+		startingQuota = 100_000
+		expectedQuota = 1234
+	)
+	seedUser(t, userID, startingQuota)
+	seedToken(t, tokenID, userID, "moderation-token", startingQuota)
+	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("used_quota", 17).Error)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set("token_name", "moderation-token")
+	c.Set("username", "moderation-user")
+	c.Set(common.RequestIdKey, "moderation-request")
+	relayInfo := &relaycommon.RelayInfo{
+		TokenId:         tokenID,
+		TokenKey:        "moderation-token",
+		UserId:          userID,
+		UsingGroup:      "premium",
+		StartTime:       time.Now(),
+		OriginModelName: "claude-test",
+		RequestId:       "moderation-request",
+		ForcePreConsume: true,
+		UserSetting: dto.UserSetting{
+			BillingPreference: "wallet_only",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channelID},
+	}
+	apiErr := types.NewErrorWithStatusCode(
+		errors.New("input blocked by content policy"),
+		types.ErrorCodeViolationFeeInputModeration,
+		http.StatusBadRequest,
+		types.ErrOptionWithSkipRetry(),
+	)
+	result := InputModerationResult{
+		Flagged:    true,
+		Model:      "omni-moderation-2024-09-26",
+		Categories: []string{"illicit", "violence"},
+	}
+
+	require.True(t, ChargeInputModerationViolation(c, relayInfo, apiErr, expectedQuota, result))
+
+	var user model.User
+	require.NoError(t, model.DB.First(&user, userID).Error)
+	assert.Equal(t, startingQuota-expectedQuota, user.Quota)
+	assert.Equal(t, expectedQuota, user.UsedQuota)
+	assert.Equal(t, 1, user.RequestCount)
+
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, tokenID).Error)
+	assert.Equal(t, startingQuota-expectedQuota, token.RemainQuota)
+	assert.Equal(t, expectedQuota, token.UsedQuota)
+
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, channelID).Error)
+	assert.Equal(t, int64(17), channel.UsedQuota)
+
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", userID, model.LogTypeConsume).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	assert.Equal(t, expectedQuota, logs[0].Quota)
+	assert.Zero(t, logs[0].ChannelId)
+	assert.NotContains(t, logs[0].Other, "input blocked by content policy")
+	assert.NotContains(t, logs[0].Other, "moderation-token")
+
+	var other map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(logs[0].Other, &other))
+	assert.Equal(t, true, other["violation_fee"])
+	assert.Equal(t, string(types.ErrorCodeViolationFeeInputModeration), other["violation_fee_code"])
+	assert.Equal(t, string(violationFeeReasonInputModeration), other["violation_fee_reason"])
+	assert.Equal(t, float64(expectedQuota), other["requested_quota"])
+	assert.Equal(t, float64(expectedQuota), other["charged_quota"])
+	assert.Equal(t, true, other["charge_succeeded"])
+	assert.Equal(t, "omni-moderation-2024-09-26", other["moderation_model"])
+	assert.ElementsMatch(t, []any{"illicit", "violence"}, other["moderation_categories"])
+}
+
+func TestChargeInputModerationViolationRecordsFailedCharge(t *testing.T) {
+	truncate(t)
+
+	const (
+		userID        = 951
+		tokenID       = 952
+		startingQuota = 100
+		expectedQuota = 1234
+	)
+	seedUser(t, userID, startingQuota)
+	seedToken(t, tokenID, userID, "insufficient-moderation-token", expectedQuota*2)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set("token_name", "moderation-token")
+	c.Set("username", "moderation-user")
+	relayInfo := &relaycommon.RelayInfo{
+		TokenId:         tokenID,
+		TokenKey:        "insufficient-moderation-token",
+		UserId:          userID,
+		UsingGroup:      "default",
+		StartTime:       time.Now(),
+		OriginModelName: "gpt-test",
+		RequestId:       "failed-moderation-charge",
+		ForcePreConsume: true,
+		UserSetting: dto.UserSetting{
+			BillingPreference: "wallet_only",
+		},
+	}
+	apiErr := types.NewErrorWithStatusCode(
+		errors.New("input blocked by content policy"),
+		types.ErrorCodeViolationFeeInputModeration,
+		http.StatusBadRequest,
+		types.ErrOptionWithSkipRetry(),
+	)
+	result := InputModerationResult{
+		Flagged:    true,
+		Model:      "omni-moderation-latest",
+		Categories: []string{"illicit"},
+	}
+
+	reason, charge := classifyViolationFee(apiErr)
+	require.True(t, charge)
+	assert.Equal(t, violationFeeReasonInputModeration, reason)
+	assert.False(t, ChargeInputModerationViolation(c, relayInfo, apiErr, expectedQuota, result))
+
+	var user model.User
+	require.NoError(t, model.DB.First(&user, userID).Error)
+	assert.Equal(t, startingQuota, user.Quota)
+	assert.Zero(t, user.UsedQuota)
+	assert.Equal(t, 1, user.RequestCount)
+
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, tokenID).Error)
+	assert.Equal(t, expectedQuota*2, token.RemainQuota)
+	assert.Zero(t, token.UsedQuota)
+
+	var log model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", userID, model.LogTypeConsume).First(&log).Error)
+	assert.Zero(t, log.Quota)
+	assert.Zero(t, log.ChannelId)
+
+	var other map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, float64(expectedQuota), other["requested_quota"])
+	assert.Equal(t, float64(0), other["charged_quota"])
+	assert.Equal(t, false, other["charge_succeeded"])
+}
