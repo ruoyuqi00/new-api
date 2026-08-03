@@ -262,6 +262,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			return nil, types.NewOpenAIError(fmt.Errorf("openrouter response success=false"), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 	}
+	helper.CaptureActualResponseModelJSON(info, responseBody)
 
 	err = common.Unmarshal(responseBody, &simpleResponse)
 	if err != nil {

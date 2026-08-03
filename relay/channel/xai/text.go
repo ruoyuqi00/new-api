@@ -138,6 +138,7 @@ func xAIHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
+	helper.CaptureActualResponseModelJSON(info, responseBody)
 	var xaiResponse ChatCompletionResponse
 	err = common.Unmarshal(responseBody, &xaiResponse)
 	if err != nil {

@@ -158,7 +158,8 @@ export function getResponseTimeColor(
 export function formatModelName(log: UsageLog): {
   name: string
   isMapped: boolean
-  actualModel?: string
+  forwardedModel?: string
+  actualResponseModel?: string
 } {
   const other = parseLogOther(log.other)
   const isMapped = !!(
@@ -170,7 +171,8 @@ export function formatModelName(log: UsageLog): {
   return {
     name: log.model_name,
     isMapped,
-    actualModel: isMapped ? other.upstream_model_name : undefined,
+    forwardedModel: isMapped ? other.upstream_model_name : undefined,
+    actualResponseModel: log.actual_response_model?.trim() || undefined,
   }
 }
 

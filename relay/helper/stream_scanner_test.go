@@ -115,6 +115,18 @@ func TestStreamScannerHandler_EmptyBody(t *testing.T) {
 	assert.False(t, called.Load(), "handler should not be called for empty body")
 }
 
+func TestStreamScannerHandlerCapturesRawUpstreamModel(t *testing.T) {
+	body := "data: {\"type\":\"response.created\",\"response\":{\"model\":\"upstream-model\"}}\n" +
+		"data: [DONE]\n"
+	c, resp, info := setupStreamTest(t, strings.NewReader(body))
+	info.UpstreamModelName = "forwarded-model"
+
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
+
+	assert.Equal(t, "forwarded-model", info.ForwardedModelName)
+	assert.Equal(t, "upstream-model", info.ActualResponseModel)
+}
+
 func TestStreamScannerHandler_1000Chunks(t *testing.T) {
 	t.Parallel()
 

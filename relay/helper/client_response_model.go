@@ -8,6 +8,37 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+const actualResponseModelMaxLength = 100
+
+func CaptureActualResponseModelJSON(info *relaycommon.RelayInfo, data []byte) {
+	if info == nil {
+		return
+	}
+	if info.ForwardedModelName == "" && info.ChannelMeta != nil {
+		info.ForwardedModelName = strings.TrimSpace(info.UpstreamModelName)
+	}
+	if info.ActualResponseModel != "" || !gjson.ValidBytes(data) {
+		return
+	}
+
+	for _, path := range []string{"response.model", "model", "message.model", "session.model"} {
+		value := gjson.GetBytes(data, path)
+		if !value.Exists() || value.Type != gjson.String {
+			continue
+		}
+		modelName := strings.TrimSpace(value.String())
+		if modelName == "" {
+			continue
+		}
+		runes := []rune(modelName)
+		if len(runes) > actualResponseModelMaxLength {
+			modelName = string(runes[:actualResponseModelMaxLength])
+		}
+		info.ActualResponseModel = modelName
+		return
+	}
+}
+
 func NormalizeClientResponseModelJSON(info *relaycommon.RelayInfo, data []byte) ([]byte, bool, error) {
 	if info == nil || info.ChannelMeta == nil || !info.IsModelMapped || strings.TrimSpace(info.OriginModelName) == "" || !gjson.ValidBytes(data) {
 		return data, false, nil

@@ -30,7 +30,8 @@ import { cn } from '@/lib/utils'
 
 interface ModelBadgeProps {
   modelName: string
-  actualModel?: string
+  forwardedModel?: string
+  actualResponseModel?: string
   className?: string
 }
 
@@ -156,7 +157,7 @@ function ModelBadgeContent(props: ModelBadgeProps) {
 export function ModelBadge(props: ModelBadgeProps) {
   const { t } = useTranslation()
 
-  if (!props.actualModel) {
+  if (!props.forwardedModel && !props.actualResponseModel) {
     return <ModelBadgeContent {...props} />
   }
 
@@ -174,20 +175,32 @@ export function ModelBadge(props: ModelBadgeProps) {
         <div className='space-y-2'>
           <div className='flex items-start justify-between gap-3'>
             <span className='text-muted-foreground text-xs'>
-              {t('Request Model:')}
+              {t('Request Model')}:
             </span>
             <span className='truncate font-mono text-xs font-medium'>
               {props.modelName}
             </span>
           </div>
-          <div className='flex items-start justify-between gap-3'>
-            <span className='text-muted-foreground text-xs'>
-              {t('Actual Model:')}
-            </span>
-            <span className='truncate font-mono text-xs font-medium'>
-              {props.actualModel}
-            </span>
-          </div>
+          {props.forwardedModel && (
+            <div className='flex items-start justify-between gap-3'>
+              <span className='text-muted-foreground text-xs'>
+                {t('Forwarded Model')}:
+              </span>
+              <span className='truncate font-mono text-xs font-medium'>
+                {props.forwardedModel}
+              </span>
+            </div>
+          )}
+          {props.actualResponseModel && (
+            <div className='flex items-start justify-between gap-3'>
+              <span className='text-muted-foreground text-xs'>
+                {t('Upstream Response Model')}:
+              </span>
+              <span className='truncate font-mono text-xs font-medium'>
+                {props.actualResponseModel}
+              </span>
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

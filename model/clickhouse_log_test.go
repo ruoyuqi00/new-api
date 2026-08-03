@@ -80,6 +80,7 @@ func TestClickHouseLogTTLClause(t *testing.T) {
 func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	withoutTTL := clickHouseLogCreateTableSQL(0)
 	assert.Contains(t, withoutTTL, "CREATE TABLE IF NOT EXISTS logs")
+	assert.Contains(t, withoutTTL, "actual_response_model Nullable(String)")
 	assert.Contains(t, withoutTTL, "ENGINE = MergeTree()")
 	assert.Contains(t, withoutTTL, "PARTITION BY toYYYYMM(toDateTime(created_at))")
 	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id)")
@@ -88,6 +89,13 @@ func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	withTTL := clickHouseLogCreateTableSQL(30)
 	assert.Contains(t, withTTL, "ORDER BY (created_at, request_id)")
 	assert.Contains(t, withTTL, "TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE")
+}
+
+func TestClickHouseActualResponseModelMigrationSQL(t *testing.T) {
+	assert.Equal(t,
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS actual_response_model Nullable(String)",
+		clickHouseActualResponseModelMigrationSQL(),
+	)
 }
 
 func TestClickHouseCreateTableHasTTL(t *testing.T) {

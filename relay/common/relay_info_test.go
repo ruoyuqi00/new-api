@@ -1,11 +1,26 @@
 package common
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestInitChannelMetaResetsResponseModelAuditForRetry(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &RelayInfo{
+		ForwardedModelName:  "failed-forwarded-model",
+		ActualResponseModel: "failed-response-model",
+	}
+
+	info.InitChannelMeta(c)
+
+	require.Empty(t, info.ForwardedModelName)
+	require.Empty(t, info.ActualResponseModel)
+}
 
 func TestRelayInfoGetFinalRequestRelayFormatPrefersExplicitFinal(t *testing.T) {
 	info := &RelayInfo{
