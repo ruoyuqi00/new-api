@@ -195,6 +195,7 @@ export function ModelMutateDrawer({
       TopupGroupRatio: '',
       GroupRatio: '',
       UserUsableGroups: '',
+      SensitiveInputCheckGroups: '{}',
       GroupGroupRatio: '',
       AutoGroups: '',
       DefaultUseAutoGroup: false,

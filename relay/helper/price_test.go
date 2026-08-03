@@ -13,8 +13,29 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestResolveEffectiveGroupPrefersAutoGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("auto_group", "final")
+	info := &relaycommon.RelayInfo{UsingGroup: "initial"}
+
+	assert.Equal(t, "final", ResolveEffectiveGroup(ctx, info))
+	assert.Equal(t, "initial", info.UsingGroup)
+}
+
+func TestResolveEffectiveGroupFallsBackToUsingGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{UsingGroup: "initial"}
+
+	assert.Equal(t, "initial", ResolveEffectiveGroup(ctx, info))
+}
 
 func TestHandleGroupRatioReconcilesTieredSnapshotAfterAutoGroupSelection(t *testing.T) {
 	gin.SetMode(gin.TestMode)

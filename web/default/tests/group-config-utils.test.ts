@@ -51,7 +51,8 @@ describe('group pricing configuration', () => {
   test('builds public and private rows from existing JSON settings', () => {
     const rows = buildGroupPricingRows(
       '{"public":1,"private":0.2}',
-      '{"public":"Public description"}'
+      '{"public":"Public description"}',
+      '{}'
     )
 
     expect(rows).toHaveLength(2)
@@ -59,11 +60,13 @@ describe('group pricing configuration', () => {
       ratio: 1,
       public: true,
       description: 'Public description',
+      sensitiveCheckEnabled: true,
     })
     expect(rows.find((row) => row.name === 'private')).toMatchObject({
       ratio: 0.2,
       public: false,
       description: '',
+      sensitiveCheckEnabled: true,
     })
   })
 
@@ -75,6 +78,7 @@ describe('group pricing configuration', () => {
         ratio: 0.2,
         public: false,
         description: 'Must not leak',
+        sensitiveCheckEnabled: true,
       },
       {
         _id: 'public-row',
@@ -82,6 +86,7 @@ describe('group pricing configuration', () => {
         ratio: 1,
         public: true,
         description: 'Public description',
+        sensitiveCheckEnabled: false,
       },
     ]
 
@@ -90,6 +95,10 @@ describe('group pricing configuration', () => {
     expect(JSON.parse(result.GroupRatio)).toEqual({ private: 0.2, public: 1 })
     expect(JSON.parse(result.UserUsableGroups)).toEqual({
       public: 'Public description',
+    })
+    expect(JSON.parse(result.SensitiveInputCheckGroups)).toEqual({
+      private: true,
+      public: false,
     })
   })
 
@@ -112,5 +121,47 @@ describe('group pricing configuration', () => {
     )
 
     expect(sources).toEqual(['blocked', 'partner'])
+  })
+})
+
+test('defaults a missing sensitive input policy to enabled', () => {
+  const [row] = buildGroupPricingRows('{"default":1}', '{}', '{}')
+
+  expect(row.sensitiveCheckEnabled).toBe(true)
+})
+
+test('preserves an explicitly disabled sensitive input policy', () => {
+  const rows = buildGroupPricingRows('{"open":1}', '{}', '{"open":false}')
+
+  const serialized = serializeGroupPricingRows(rows)
+
+  expect(JSON.parse(serialized.SensitiveInputCheckGroups)).toEqual({
+    open: false,
+  })
+})
+
+test('moves the sensitive input policy when a group is renamed', () => {
+  const rows = buildGroupPricingRows('{"old":1}', '{}', '{"old":false}').map(
+    (row) => ({ ...row, name: 'new' })
+  )
+
+  const serialized = serializeGroupPricingRows(rows)
+
+  expect(JSON.parse(serialized.SensitiveInputCheckGroups)).toEqual({
+    new: false,
+  })
+})
+
+test('removes the sensitive input policy when a group is deleted', () => {
+  const rows = buildGroupPricingRows(
+    '{"keep":1,"remove":1}',
+    '{}',
+    '{"keep":true,"remove":false}'
+  ).filter((row) => row.name !== 'remove')
+
+  const serialized = serializeGroupPricingRows(rows)
+
+  expect(JSON.parse(serialized.SensitiveInputCheckGroups)).toEqual({
+    keep: true,
   })
 })

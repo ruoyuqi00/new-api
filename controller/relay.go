@@ -128,7 +128,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	effectiveGroup := helper.ResolveEffectiveGroup(c, relayInfo)
+	needSensitiveCheck := setting.ShouldCheckPromptSensitiveForGroup(effectiveGroup)
 	needInputModeration := relayFormat != types.RelayFormatOpenAIRealtime &&
 		relayInfo.RelayMode != relayconstant.RelayModeModerations &&
 		inputModerationEnabled()

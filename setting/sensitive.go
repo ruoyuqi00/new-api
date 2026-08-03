@@ -1,6 +1,10 @@
 package setting
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/QuantumNous/new-api/types"
+)
 
 var CheckSensitiveEnabled = true
 var CheckSensitiveOnPromptEnabled = true
@@ -19,6 +23,8 @@ var SensitiveWords = []string{
 	"test_sensitive",
 }
 
+var sensitiveInputCheckGroups = types.NewRWMap[string, bool]()
+
 func SensitiveWordsToString() string {
 	return strings.Join(SensitiveWords, "\n")
 }
@@ -36,6 +42,22 @@ func SensitiveWordsFromString(s string) {
 
 func ShouldCheckPromptSensitive() bool {
 	return CheckSensitiveEnabled && CheckSensitiveOnPromptEnabled
+}
+
+func SensitiveInputCheckGroups2JSONString() string {
+	return sensitiveInputCheckGroups.MarshalJSONString()
+}
+
+func UpdateSensitiveInputCheckGroupsByJSONString(value string) error {
+	return types.LoadFromJsonString(sensitiveInputCheckGroups, value)
+}
+
+func ShouldCheckPromptSensitiveForGroup(group string) bool {
+	if !ShouldCheckPromptSensitive() {
+		return false
+	}
+	enabled, exists := sensitiveInputCheckGroups.Get(group)
+	return !exists || enabled
 }
 
 //func ShouldCheckCompletionSensitive() bool {

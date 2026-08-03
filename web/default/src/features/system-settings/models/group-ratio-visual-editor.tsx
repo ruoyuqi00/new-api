@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 
 import type { GroupCatalogItem } from '../types'
 import { safeJsonParse } from '../utils/json-parser'
@@ -59,6 +60,7 @@ type GroupRatioVisualEditorProps = {
   groupRatio: string
   topupGroupRatio: string
   userUsableGroups: string
+  sensitiveInputCheckGroups: string
   groupGroupRatio: string
   autoGroups: string
   specialUsableGroups: string
@@ -87,6 +89,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupRatio,
   topupGroupRatio,
   userUsableGroups,
+  sensitiveInputCheckGroups,
   groupGroupRatio,
   autoGroups,
   specialUsableGroups,
@@ -337,6 +340,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
       <GroupPricingTable
         groupRatio={groupRatio}
         userUsableGroups={userUsableGroups}
+        sensitiveInputCheckGroups={sensitiveInputCheckGroups}
         specialUsableGroups={specialUsableGroups}
         catalog={catalog}
         catalogLoading={catalogLoading}
@@ -668,6 +672,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 type GroupPricingTableProps = {
   groupRatio: string
   userUsableGroups: string
+  sensitiveInputCheckGroups: string
   specialUsableGroups: string
   catalog: GroupCatalogItem[]
   catalogLoading: boolean
@@ -679,6 +684,7 @@ type GroupPricingTableProps = {
 function GroupPricingTable({
   groupRatio,
   userUsableGroups,
+  sensitiveInputCheckGroups,
   specialUsableGroups,
   catalog,
   catalogLoading,
@@ -692,21 +698,30 @@ function GroupPricingTable({
     description: string
   } | null>(null)
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups)
+    buildGroupPricingRows(
+      groupRatio,
+      userUsableGroups,
+      sensitiveInputCheckGroups
+    )
   )
 
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
-      userUsableGroups
+      userUsableGroups,
+      sensitiveInputCheckGroups
     )
     setRows((currentRows) => {
       if (groupPricingSignature(currentRows) === incomingSignature) {
         return currentRows
       }
-      return buildGroupPricingRows(groupRatio, userUsableGroups)
+      return buildGroupPricingRows(
+        groupRatio,
+        userUsableGroups,
+        sensitiveInputCheckGroups
+      )
     })
-  }, [groupRatio, userUsableGroups])
+  }, [groupRatio, sensitiveInputCheckGroups, userUsableGroups])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
@@ -714,6 +729,10 @@ function GroupPricingTable({
       const serialized = serializeGroupPricingRows(nextRows)
       onChange('GroupRatio', serialized.GroupRatio)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
+      onChange(
+        'SensitiveInputCheckGroups',
+        serialized.SensitiveInputCheckGroups
+      )
     },
     [onChange]
   )
@@ -747,6 +766,7 @@ function GroupPricingTable({
         ratio: 1,
         public: true,
         description: '',
+        sensitiveCheckEnabled: true,
       },
     ])
   }, [emitRows, rows])
@@ -817,6 +837,9 @@ function GroupPricingTable({
             <CardDescription>
               {t(
                 'Public groups are visible to everyone. Private groups require user-group authorization and active routing coverage.'
+              )}{' '}
+              {t(
+                'Exempt groups skip local sensitive-word matching but continue normal usage billing.'
               )}
             </CardDescription>
           </div>
@@ -887,6 +910,33 @@ function GroupPricingTable({
                     <StatusBadge
                       label={row.public ? t('Public') : t('Private')}
                       variant={row.public ? 'success' : 'warning'}
+                      copyable={false}
+                    />
+                  </div>
+                ),
+              },
+              {
+                id: 'sensitive-check',
+                header: t('Sensitive input check'),
+                className: 'min-w-40',
+                cell: (row) => (
+                  <div className='flex items-center gap-2'>
+                    <Switch
+                      checked={row.sensitiveCheckEnabled}
+                      onCheckedChange={(checked) =>
+                        updateRow(row._id, 'sensitiveCheckEnabled', checked)
+                      }
+                      aria-label={t('Sensitive input check for {{group}}', {
+                        group: row.name,
+                      })}
+                    />
+                    <StatusBadge
+                      label={
+                        row.sensitiveCheckEnabled ? t('Enabled') : t('Exempt')
+                      }
+                      variant={
+                        row.sensitiveCheckEnabled ? 'success' : 'neutral'
+                      }
                       copyable={false}
                     />
                   </div>

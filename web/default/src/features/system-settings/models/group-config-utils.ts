@@ -25,6 +25,7 @@ export type GroupPricingRow = {
   ratio: number
   public: boolean
   description: string
+  sensitiveCheckEnabled: boolean
 }
 
 export type GroupCoverageState = 'ready' | 'missing' | 'unsaved'
@@ -43,7 +44,8 @@ export function normalizeGroupRatio(value: unknown): number {
 
 export function buildGroupPricingRows(
   groupRatio: string,
-  userUsableGroups: string
+  userUsableGroups: string,
+  sensitiveInputCheckGroups: string
 ): GroupPricingRow[] {
   const ratioMap = safeJsonParse<Record<string, number>>(groupRatio, {
     fallback: {},
@@ -53,6 +55,13 @@ export function buildGroupPricingRows(
     fallback: {},
     context: 'user usable groups',
   })
+  const sensitiveCheckMap = safeJsonParse<Record<string, boolean>>(
+    sensitiveInputCheckGroups,
+    {
+      fallback: {},
+      context: 'sensitive input check groups',
+    }
+  )
   const names = new Set([...Object.keys(ratioMap), ...Object.keys(usableMap)])
 
   return [...names].map((name) => ({
@@ -61,17 +70,23 @@ export function buildGroupPricingRows(
     ratio: normalizeGroupRatio(ratioMap[name]),
     public: Object.hasOwn(usableMap, name),
     description: String(usableMap[name] ?? ''),
+    sensitiveCheckEnabled:
+      typeof sensitiveCheckMap[name] === 'boolean'
+        ? sensitiveCheckMap[name]
+        : true,
   }))
 }
 
 export function serializeGroupPricingRows(rows: GroupPricingRow[]) {
   const groupRatio: Record<string, number> = {}
   const userUsableGroups: Record<string, string> = {}
+  const sensitiveInputCheckGroups: Record<string, boolean> = {}
 
   for (const row of rows) {
     const name = row.name.trim()
     if (!name) continue
     groupRatio[name] = normalizeGroupRatio(row.ratio)
+    sensitiveInputCheckGroups[name] = row.sensitiveCheckEnabled
     if (row.public) {
       userUsableGroups[name] = row.description
     }
@@ -80,6 +95,11 @@ export function serializeGroupPricingRows(rows: GroupPricingRow[]) {
   return {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
+    SensitiveInputCheckGroups: JSON.stringify(
+      sensitiveInputCheckGroups,
+      null,
+      2
+    ),
   }
 }
 
@@ -94,16 +114,28 @@ export function groupPricingSignature(rows: GroupPricingRow[]): string {
       fallback: {},
       silent: true,
     }),
+    sensitiveInputCheckGroups: safeJsonParse(
+      serialized.SensitiveInputCheckGroups,
+      {
+        fallback: {},
+        silent: true,
+      }
+    ),
   })
 }
 
 export function sourceGroupPricingSignature(
   groupRatio: string,
-  userUsableGroups: string
+  userUsableGroups: string,
+  sensitiveInputCheckGroups: string
 ): string {
   return JSON.stringify({
     groupRatio: safeJsonParse(groupRatio, { fallback: {}, silent: true }),
     userUsableGroups: safeJsonParse(userUsableGroups, {
+      fallback: {},
+      silent: true,
+    }),
+    sensitiveInputCheckGroups: safeJsonParse(sensitiveInputCheckGroups, {
       fallback: {},
       silent: true,
     }),

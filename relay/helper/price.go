@@ -39,6 +39,15 @@ const claudeCacheCreation1hMultiplier = 6 / 3.75
 // used for tiered expression pre-consume when the client omits max_tokens.
 const defaultTieredPreConsumeMaxTokens = 8192
 
+func ResolveEffectiveGroup(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) string {
+	if value, exists := ctx.Get("auto_group"); exists {
+		if group, ok := value.(string); ok && group != "" {
+			return group
+		}
+	}
+	return relayInfo.UsingGroup
+}
+
 // HandleGroupRatio checks for "auto_group" in the context and updates the group ratio and relayInfo.UsingGroup if present
 func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {
 	groupRatioInfo := types.GroupRatioInfo{
@@ -46,11 +55,10 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		GroupSpecialRatio: -1,
 	}
 
-	// check auto group
-	autoGroup, exists := ctx.Get("auto_group")
-	if exists {
-		logger.LogDebug(ctx, "final group: %s", autoGroup)
-		relayInfo.UsingGroup = autoGroup.(string)
+	effectiveGroup := ResolveEffectiveGroup(ctx, relayInfo)
+	if effectiveGroup != relayInfo.UsingGroup {
+		logger.LogDebug(ctx, "final group: %s", effectiveGroup)
+		relayInfo.UsingGroup = effectiveGroup
 	}
 
 	// check user group special ratio
