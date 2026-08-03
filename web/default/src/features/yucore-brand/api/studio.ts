@@ -38,6 +38,7 @@ export interface YucoreMediaTask {
   task_id: string
   user_id: number
   session_id: string
+  group: string
   kind: 'image' | 'video'
   mode: string
   model_id: string
@@ -136,7 +137,7 @@ export interface YucoreMediaModel {
   source?: string
   kind: 'image' | 'video'
   modes: string[]
-  sizes: string[]
+  sizes?: string[]
   size_label?: string
   aspect_ratios?: string[]
   qualities?: string[]
@@ -161,6 +162,19 @@ export interface YucoreMediaModel {
     display?: string
     [key: string]: unknown
   }
+  async?: boolean
+}
+
+export interface YucoreMediaCatalogGroup {
+  id: string
+  description: string
+  ratio: number
+  models: YucoreMediaModel[]
+}
+
+export interface YucoreMediaCatalog {
+  default_group: string
+  groups: YucoreMediaCatalogGroup[]
 }
 
 export interface YucorePromptTemplate {
@@ -320,6 +334,14 @@ export async function listYucoreMediaModels() {
   return unwrap(res.data)
 }
 
+export async function getYucoreMediaCatalog() {
+  const res = await api.get<ApiEnvelope<YucoreMediaCatalog>>(
+    '/api/yucore/media/catalog',
+    getYucoreMediaRequestConfig()
+  )
+  return unwrap(res.data)
+}
+
 export async function listYucorePromptTemplates() {
   const res = await api.get<ApiEnvelope<YucorePromptTemplate[]>>(
     '/api/yucore/media/templates',
@@ -401,6 +423,7 @@ export async function listYucoreMediaGallery(
 }
 
 export async function createYucoreMediaTask(payload: {
+  group: string
   kind: 'image' | 'video'
   mode: string
   model_id: string
@@ -559,6 +582,7 @@ export async function executeYucoreCanvasAgentRun(
   payload: {
     mode: 'site' | 'local'
     prompt: string
+    group: string
     kind: 'image' | 'video'
     media_mode: string
     model_id: string
