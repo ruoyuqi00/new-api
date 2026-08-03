@@ -273,7 +273,7 @@ func ResolveYucoreMediaSelection(userID int, group string, modelID string, kind 
 			continue
 		}
 		for _, catalogModel := range catalogGroup.Models {
-			if catalogModel.Id == modelID && catalogModel.Kind == kind {
+			if (modelID == "" || catalogModel.Id == modelID) && catalogModel.Kind == kind {
 				return group, catalogModel, nil
 			}
 		}

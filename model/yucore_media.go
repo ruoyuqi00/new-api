@@ -117,6 +117,7 @@ type YucoreMediaTask struct {
 	TaskId         string            `json:"task_id" gorm:"type:varchar(64);uniqueIndex"`
 	UserId         int               `json:"user_id" gorm:"index"`
 	SessionId      string            `json:"session_id" gorm:"type:varchar(96);index;default:''"`
+	BillingGroup   string            `json:"group" gorm:"column:billing_group;type:varchar(64);index;default:''"`
 	Kind           string            `json:"kind" gorm:"type:varchar(24);index;default:'image'"`
 	Mode           string            `json:"mode" gorm:"type:varchar(48);default:'text-to-image'"`
 	ModelId        string            `json:"model_id" gorm:"type:varchar(96);index;default:'gpt-image-2'"`
@@ -551,6 +552,7 @@ func cloneYucoreMediaUAGProxyHeaders(headers YucoreMediaUAGProxyHeaders) YucoreM
 
 func normalizeYucoreMediaTask(task *YucoreMediaTask) {
 	task.SessionId = strings.TrimSpace(task.SessionId)
+	task.BillingGroup = strings.TrimSpace(task.BillingGroup)
 	task.Kind = strings.TrimSpace(task.Kind)
 	if task.Kind != "video" {
 		task.Kind = "image"

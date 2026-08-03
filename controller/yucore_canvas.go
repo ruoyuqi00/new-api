@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -88,6 +89,7 @@ type yucoreCanvasAgentRunResponse struct {
 type yucoreCanvasAgentExecuteRequest struct {
 	Mode              string          `json:"mode"`
 	Prompt            string          `json:"prompt"`
+	Group             string          `json:"group"`
 	Kind              string          `json:"kind"`
 	MediaMode         string          `json:"media_mode"`
 	ModelId           string          `json:"model_id"`
@@ -322,6 +324,7 @@ func buildYucoreCanvasAgentExecuteMediaRequest(req yucoreCanvasAgentExecuteReque
 		}
 	}
 	return yucoreMediaTaskRequest{
+		Group:          req.Group,
 		Kind:           kind,
 		Mode:           mediaMode,
 		ModelId:        req.ModelId,
@@ -627,6 +630,18 @@ func ExecuteYucoreCanvasAgentRun(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(task.Kind), service.YucoreMediaKindVideo) {
+		task.Kind = service.YucoreMediaKindVideo
+	} else {
+		task.Kind = service.YucoreMediaKindImage
+	}
+	var selectedModel service.YucoreMediaCatalogModel
+	task.BillingGroup, selectedModel, err = service.ResolveYucoreMediaSelection(userId, task.BillingGroup, task.ModelId, task.Kind)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	task.ModelId = selectedModel.Id
 	task.TaskId = model.GenerateYucoreMediaTaskID()
 	runId := model.GenerateYucoreCanvasAgentRunID()
 

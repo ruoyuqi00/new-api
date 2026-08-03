@@ -166,3 +166,31 @@ func TestBuildYucoreMediaCatalogExpandsAutoGroupsInConfiguredOrder(t *testing.T)
 	assert.Equal(t, "gpt-image-1", catalog.Groups[0].Models[0].Id)
 	assert.Equal(t, "sora-2", catalog.Groups[0].Models[1].Id)
 }
+
+func TestResolveYucoreMediaSelectionValidatesGroupModelAndKind(t *testing.T) {
+	db := setupYucoreMediaCatalogTest(t)
+	createYucoreMediaCatalogUser(t, db, 9103)
+
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 21, Type: constant.ChannelTypeOpenAI, Name: "images", Key: "key-21", Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "multimodal", Model: "gpt-image-1", ChannelId: 21, Enabled: true,
+	}).Error)
+
+	group, selected, err := ResolveYucoreMediaSelection(9103, "", "gpt-image-1", YucoreMediaKindImage)
+	require.NoError(t, err)
+	assert.Equal(t, "multimodal", group)
+	assert.Equal(t, "gpt-image-1", selected.Id)
+
+	group, selected, err = ResolveYucoreMediaSelection(9103, "", "", YucoreMediaKindImage)
+	require.NoError(t, err)
+	assert.Equal(t, "multimodal", group)
+	assert.Equal(t, "gpt-image-1", selected.Id)
+
+	_, _, err = ResolveYucoreMediaSelection(9103, "unavailable", "gpt-image-1", YucoreMediaKindImage)
+	require.ErrorContains(t, err, "group unavailable is not available")
+
+	_, _, err = ResolveYucoreMediaSelection(9103, "multimodal", "gpt-image-1", YucoreMediaKindVideo)
+	require.ErrorContains(t, err, "not available for video generation")
+}

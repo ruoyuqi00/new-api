@@ -258,6 +258,7 @@ func SetApiRouter(router *gin.Engine) {
 
 			mediaRoute := yucoreRoute.Group("/media")
 			{
+				mediaRoute.GET("/catalog", controller.GetYucoreMediaCatalog)
 				mediaRoute.GET("/models", controller.ListYucoreMediaModels)
 				mediaRoute.GET("/templates", controller.ListYucoreMediaTemplates)
 				mediaRoute.GET("/billing", controller.GetYucoreMediaBilling)

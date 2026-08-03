@@ -20,6 +20,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,6 +34,7 @@ const (
 )
 
 type yucoreMediaTaskRequest struct {
+	Group          string          `json:"group"`
 	Kind           string          `json:"kind"`
 	Mode           string          `json:"mode"`
 	ModelId        string          `json:"model_id"`
@@ -54,6 +56,7 @@ type yucoreMediaTaskResponse struct {
 	TaskId         string                   `json:"task_id"`
 	UserId         int                      `json:"user_id"`
 	SessionId      string                   `json:"session_id"`
+	Group          string                   `json:"group"`
 	Kind           string                   `json:"kind"`
 	Mode           string                   `json:"mode"`
 	ModelId        string                   `json:"model_id"`
@@ -118,6 +121,7 @@ func buildYucoreMediaTaskFromRequest(req yucoreMediaTaskRequest, userId int) (*m
 	return &model.YucoreMediaTask{
 		UserId:         userId,
 		SessionId:      sessionId,
+		BillingGroup:   strings.TrimSpace(req.Group),
 		Kind:           req.Kind,
 		Mode:           req.Mode,
 		ModelId:        req.ModelId,
@@ -139,6 +143,7 @@ func buildYucoreMediaTaskResponse(task *model.YucoreMediaTask) yucoreMediaTaskRe
 		TaskId:         task.TaskId,
 		UserId:         task.UserId,
 		SessionId:      task.SessionId,
+		Group:          task.BillingGroup,
 		Kind:           task.Kind,
 		Mode:           task.Mode,
 		ModelId:        task.ModelId,
@@ -240,6 +245,20 @@ func ListYucoreMediaModels(c *gin.Context) {
 			common.SysError("YuCore UAG model list fallback: " + err.Error())
 		}
 	}
+	catalog, err := service.BuildYucoreMediaCatalog(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for _, group := range catalog.Groups {
+		if group.Id == catalog.DefaultGroup {
+			common.ApiSuccess(c, group.Models)
+			return
+		}
+	}
+	common.ApiSuccess(c, []service.YucoreMediaCatalogModel{})
+	return
+
 	models := []gin.H{
 		{
 			"id":             "gpt-image-2",
@@ -509,6 +528,15 @@ func ListYucoreMediaModels(c *gin.Context) {
 		pricing["display"] = "¥" + strconv.FormatFloat(unitPrice, 'f', -1, 64) + unitLabel
 	}
 	common.ApiSuccess(c, models)
+}
+
+func GetYucoreMediaCatalog(c *gin.Context) {
+	catalog, err := service.BuildYucoreMediaCatalog(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, catalog)
 }
 
 func ListYucoreMediaTemplates(c *gin.Context) {
@@ -872,6 +900,18 @@ func CreateYucoreMediaTask(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(task.Kind), service.YucoreMediaKindVideo) {
+		task.Kind = service.YucoreMediaKindVideo
+	} else {
+		task.Kind = service.YucoreMediaKindImage
+	}
+	var selectedModel service.YucoreMediaCatalogModel
+	task.BillingGroup, selectedModel, err = service.ResolveYucoreMediaSelection(task.UserId, task.BillingGroup, task.ModelId, task.Kind)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	task.ModelId = selectedModel.Id
 	if err := model.CreateYucoreMediaTaskWithHeaders(task, yucoreMediaUAGProxyHeadersFromRequest(c)); err != nil {
 		common.ApiError(c, err)
 		return

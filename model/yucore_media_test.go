@@ -6,12 +6,31 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/utils/tests"
 )
+
+func TestYucoreMediaTaskPersistsBillingGroup(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:yucore_media_billing_group?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&YucoreMediaTask{}))
+
+	task := &YucoreMediaTask{
+		TaskId:       "yu_billing_group",
+		UserId:       1,
+		BillingGroup: "multimodal",
+		Prompt:       "test prompt",
+	}
+	require.NoError(t, db.Create(task).Error)
+
+	var stored YucoreMediaTask
+	require.NoError(t, db.First(&stored, task.Id).Error)
+	assert.Equal(t, "multimodal", stored.BillingGroup)
+}
 
 func TestYucoreMediaTaskAssetsMigrationType(t *testing.T) {
 	mysqlDB, err := gorm.Open(mysql.New(mysql.Config{
