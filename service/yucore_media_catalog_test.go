@@ -194,3 +194,29 @@ func TestResolveYucoreMediaSelectionValidatesGroupModelAndKind(t *testing.T) {
 	_, _, err = ResolveYucoreMediaSelection(9103, "multimodal", "gpt-image-1", YucoreMediaKindVideo)
 	require.ErrorContains(t, err, "not available for video generation")
 }
+
+func TestValidateYucoreMediaRequestUsesReportedCapabilities(t *testing.T) {
+	selected := YucoreMediaCatalogModel{
+		Id:     "image-live",
+		Kind:   YucoreMediaKindImage,
+		Modes:  []string{"text-to-image", "image-to-image"},
+		Counts: []int{1, 2},
+		InputLimits: YucoreMediaCatalogInputLimits{
+			MaxReferenceImages: 1,
+		},
+	}
+
+	mode, count, err := ValidateYucoreMediaRequest(selected, "", 0, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "text-to-image", mode)
+	assert.Equal(t, 1, count)
+
+	_, _, err = ValidateYucoreMediaRequest(selected, "text-to-video", 1, 0)
+	require.ErrorContains(t, err, "does not support mode")
+
+	_, _, err = ValidateYucoreMediaRequest(selected, "text-to-image", 3, 0)
+	require.ErrorContains(t, err, "does not support count")
+
+	_, _, err = ValidateYucoreMediaRequest(selected, "image-to-image", 1, 2)
+	require.ErrorContains(t, err, "supports at most 1 reference image")
+}

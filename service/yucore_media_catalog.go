@@ -284,3 +284,39 @@ func ResolveYucoreMediaSelection(userID int, group string, modelID string, kind 
 	}
 	return "", YucoreMediaCatalogModel{}, fmt.Errorf("group %s is not available for media generation", group)
 }
+
+func ValidateYucoreMediaRequest(selected YucoreMediaCatalogModel, mode string, count int, referenceCount int) (string, int, error) {
+	mode = strings.TrimSpace(mode)
+	if mode == "" && len(selected.Modes) > 0 {
+		mode = selected.Modes[0]
+	}
+	modeAllowed := false
+	for _, allowedMode := range selected.Modes {
+		if mode == allowedMode {
+			modeAllowed = true
+			break
+		}
+	}
+	if !modeAllowed {
+		return "", 0, fmt.Errorf("model %s does not support mode %s", selected.Id, mode)
+	}
+
+	if count <= 0 {
+		count = 1
+	}
+	countAllowed := len(selected.Counts) == 0 && count == 1
+	for _, allowedCount := range selected.Counts {
+		if count == allowedCount {
+			countAllowed = true
+			break
+		}
+	}
+	if !countAllowed {
+		return "", 0, fmt.Errorf("model %s does not support count %d", selected.Id, count)
+	}
+
+	if referenceCount > selected.InputLimits.MaxReferenceImages {
+		return "", 0, fmt.Errorf("model %s supports at most %d reference image(s)", selected.Id, selected.InputLimits.MaxReferenceImages)
+	}
+	return mode, count, nil
+}

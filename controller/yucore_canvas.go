@@ -12,7 +12,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -630,18 +629,10 @@ func ExecuteYucoreCanvasAgentRun(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if strings.EqualFold(strings.TrimSpace(task.Kind), service.YucoreMediaKindVideo) {
-		task.Kind = service.YucoreMediaKindVideo
-	} else {
-		task.Kind = service.YucoreMediaKindImage
-	}
-	var selectedModel service.YucoreMediaCatalogModel
-	task.BillingGroup, selectedModel, err = service.ResolveYucoreMediaSelection(userId, task.BillingGroup, task.ModelId, task.Kind)
-	if err != nil {
+	if err := resolveYucoreMediaTaskRequest(task); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	task.ModelId = selectedModel.Id
 	task.TaskId = model.GenerateYucoreMediaTaskID()
 	runId := model.GenerateYucoreCanvasAgentRunID()
 

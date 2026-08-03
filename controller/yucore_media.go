@@ -174,6 +174,41 @@ func buildYucoreMediaTaskResponses(tasks []*model.YucoreMediaTask) []yucoreMedia
 	return responses
 }
 
+func resolveYucoreMediaTaskRequest(task *model.YucoreMediaTask) error {
+	if strings.EqualFold(strings.TrimSpace(task.Kind), service.YucoreMediaKindVideo) {
+		task.Kind = service.YucoreMediaKindVideo
+	} else {
+		task.Kind = service.YucoreMediaKindImage
+	}
+	resolvedGroup, selectedModel, err := service.ResolveYucoreMediaSelection(
+		task.UserId,
+		task.BillingGroup,
+		task.ModelId,
+		task.Kind,
+	)
+	if err != nil {
+		return err
+	}
+	var inputs []any
+	if err := common.Unmarshal([]byte(task.Inputs), &inputs); err != nil {
+		return errors.New("media inputs must be a JSON array")
+	}
+	resolvedMode, resolvedCount, err := service.ValidateYucoreMediaRequest(
+		selectedModel,
+		task.Mode,
+		task.Count,
+		len(inputs),
+	)
+	if err != nil {
+		return err
+	}
+	task.BillingGroup = resolvedGroup
+	task.ModelId = selectedModel.Id
+	task.Mode = resolvedMode
+	task.Count = resolvedCount
+	return nil
+}
+
 func normalizeYucoreMediaUAGAuthorization(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -900,18 +935,10 @@ func CreateYucoreMediaTask(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if strings.EqualFold(strings.TrimSpace(task.Kind), service.YucoreMediaKindVideo) {
-		task.Kind = service.YucoreMediaKindVideo
-	} else {
-		task.Kind = service.YucoreMediaKindImage
-	}
-	var selectedModel service.YucoreMediaCatalogModel
-	task.BillingGroup, selectedModel, err = service.ResolveYucoreMediaSelection(task.UserId, task.BillingGroup, task.ModelId, task.Kind)
-	if err != nil {
+	if err := resolveYucoreMediaTaskRequest(task); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	task.ModelId = selectedModel.Id
 	if err := model.CreateYucoreMediaTaskWithHeaders(task, yucoreMediaUAGProxyHeadersFromRequest(c)); err != nil {
 		common.ApiError(c, err)
 		return
