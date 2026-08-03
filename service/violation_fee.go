@@ -2,6 +2,8 @@ package service
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,9 +21,10 @@ import (
 )
 
 const (
-	ViolationFeeCodePrefix     = "violation_fee."
-	CSAMViolationMarker        = "Failed check: SAFETY_CHECK_TYPE"
-	ContentViolatesUsageMarker = "Content violates usage guidelines"
+	ViolationFeeCodePrefix              = "violation_fee."
+	CSAMViolationMarker                 = "Failed check: SAFETY_CHECK_TYPE"
+	ContentViolatesUsageMarker          = "Content violates usage guidelines"
+	defaultSensitiveViolationMultiplier = 1.0
 )
 
 type violationFeeReason string
@@ -187,6 +190,15 @@ func calcViolationFeeQuota(amount, groupRatio float64) int {
 	return int(quota)
 }
 
+func sensitiveViolationMultiplier() float64 {
+	raw := strings.TrimSpace(common.GetEnvOrDefaultString("SENSITIVE_VIOLATION_MULTIPLIER", "1"))
+	multiplier, err := strconv.ParseFloat(raw, 64)
+	if err != nil || multiplier < 1 || math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
+		return defaultSensitiveViolationMultiplier
+	}
+	return multiplier
+}
+
 // CalculateLocalSensitiveInputQuota calculates only the estimated prompt cost.
 // Per-call pricing cannot be split into input and output, so it is not charged.
 func CalculateLocalSensitiveInputQuota(relayInfo *relaycommon.RelayInfo, promptTokens int) (int, error) {
@@ -198,6 +210,7 @@ func CalculateLocalSensitiveInputQuota(relayInfo *relaycommon.RelayInfo, promptT
 	if groupRatio <= 0 {
 		return 0, nil
 	}
+	violationMultiplier := sensitiveViolationMultiplier()
 	if relayInfo.TieredBillingSnapshot != nil {
 		snapshot := relayInfo.TieredBillingSnapshot
 		requestInput := billingexpr.RequestInput{}
@@ -223,7 +236,7 @@ func CalculateLocalSensitiveInputQuota(relayInfo *relaycommon.RelayInfo, promptT
 		if inputCost <= 0 {
 			return 0, nil
 		}
-		quota, err := billingexpr.QuotaRoundStrict(inputCost / 1_000_000 * common.QuotaPerUnit * snapshot.GroupRatio)
+		quota, err := billingexpr.QuotaRoundStrict(inputCost / 1_000_000 * common.QuotaPerUnit * snapshot.GroupRatio * violationMultiplier)
 		if err != nil {
 			return 0, fmt.Errorf("calculate sensitive input quota: %w", err)
 		}
@@ -236,7 +249,7 @@ func CalculateLocalSensitiveInputQuota(relayInfo *relaycommon.RelayInfo, promptT
 		return 0, nil
 	}
 
-	quota, err := common.QuotaFromFloatStrict(float64(promptTokens) * relayInfo.PriceData.ModelRatio * groupRatio)
+	quota, err := common.QuotaFromFloatStrict(float64(promptTokens) * relayInfo.PriceData.ModelRatio * groupRatio * violationMultiplier)
 	if err != nil {
 		return 0, fmt.Errorf("calculate sensitive input quota: %w", err)
 	}
@@ -306,6 +319,7 @@ func recordLocalSensitiveViolation(
 			"violation_fee":        true,
 			"violation_fee_code":   string(apiErr.GetErrorCode()),
 			"violation_fee_reason": string(violationFeeReasonLocalSensitiveWord),
+			"violation_multiplier": sensitiveViolationMultiplier(),
 			"billing_scope":        "input_tokens_only",
 			"prompt_tokens":        promptTokens,
 			"model_ratio":          relayInfo.PriceData.ModelRatio,

@@ -147,6 +147,33 @@ func TestCalculateLocalSensitiveInputQuota(t *testing.T) {
 	}
 }
 
+func TestCalculateLocalSensitiveInputQuotaAppliesConfiguredViolationMultiplier(t *testing.T) {
+	t.Setenv("SENSITIVE_VIOLATION_MULTIPLIER", "10")
+
+	tokenPricedInfo := &relaycommon.RelayInfo{
+		PriceData: types.PriceData{
+			ModelRatio:     1.5,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 2},
+		},
+	}
+	quota, err := CalculateLocalSensitiveInputQuota(tokenPricedInfo, 1_250)
+	require.NoError(t, err)
+	assert.Equal(t, 37_500, quota)
+
+	tieredInfo := &relaycommon.RelayInfo{
+		PriceData: types.PriceData{
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1.5},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			ExprString: "tier(\"base\", p * 3 + c * 15)",
+			GroupRatio: 1.5,
+		},
+	}
+	quota, err = CalculateLocalSensitiveInputQuota(tieredInfo, 2_000)
+	require.NoError(t, err)
+	assert.Equal(t, 45_000, quota)
+}
+
 func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.T) {
 	truncate(t)
 
@@ -223,6 +250,7 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 	assert.Equal(t, string(types.ErrorCodeSensitiveWordsDetected), other["violation_fee_code"])
 	assert.Equal(t, string(violationFeeReasonLocalSensitiveWord), other["violation_fee_reason"])
 	assert.Equal(t, float64(promptTokens), other["prompt_tokens"])
+	assert.Equal(t, defaultSensitiveViolationMultiplier, other["violation_multiplier"])
 	assert.Equal(t, float64(feeQuota), other["requested_quota"])
 	assert.Equal(t, float64(feeQuota), other["charged_quota"])
 	assert.Equal(t, true, other["charge_succeeded"])
