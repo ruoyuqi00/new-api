@@ -274,6 +274,15 @@ func TestYucoreMediaManagedTokenIsStablePerUserAndGroup(t *testing.T) {
 	config, err := yucoreMediaOpenAIConfigForTask(task, yucoreMediaAdapterConfig{ManagedTokenGroup: "image-group"})
 	require.NoError(t, err)
 	assert.Equal(t, first.Key, config.APIKey)
+	assert.Equal(t, "image-group", config.ManagedTokenGroup)
+
+	selected, err := getOrCreateYucoreMediaManagedToken(42, "selected-group")
+	require.NoError(t, err)
+	task.BillingGroup = "selected-group"
+	config, err = yucoreMediaOpenAIConfigForTask(task, yucoreMediaAdapterConfig{ManagedTokenGroup: "image-group"})
+	require.NoError(t, err)
+	assert.Equal(t, selected.Key, config.APIKey)
+	assert.Equal(t, "selected-group", config.ManagedTokenGroup)
 }
 
 func TestYucoreMediaRoutedTaskIDUsesPublicTaskID(t *testing.T) {
@@ -446,6 +455,36 @@ func TestEstimateYucoreMediaTaskCostUsesYuAPIChannelPrice(t *testing.T) {
 		Count:   1,
 	})
 	assert.Equal(t, 16000, cost)
+}
+
+func TestEstimateYucoreMediaTaskCostUsesSelectedGroupRatio(t *testing.T) {
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	originalGroups := ratio_setting.GroupRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"managed-image":0.032}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"image-group":1,"premium-media":2}`))
+
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":             YucoreMediaAdapterYuAPIChannel,
+		"yucore_media.managed_token_group": "image-group",
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroups))
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	cost := estimateYucoreMediaTaskCost(&YucoreMediaTask{
+		BillingGroup: "premium-media",
+		Kind:         "image",
+		ModelId:      "managed-image",
+		Count:        1,
+	})
+	assert.Equal(t, 32000, cost)
 }
 
 func TestEstimateYucoreMediaTaskCostUsesVideoDuration(t *testing.T) {

@@ -624,7 +624,7 @@ func normalizeYucoreMediaTask(task *YucoreMediaTask) {
 func estimateYucoreMediaTaskCost(task *YucoreMediaTask) int {
 	config := getYucoreMediaAdapterConfig()
 	if config.Adapter == YucoreMediaAdapterYuAPIChannel {
-		if price, ok := YucoreMediaModelUnitPrice(task.ModelId); ok {
+		if price, ok := yucoreMediaModelUnitPriceForGroup(task.ModelId, yucoreMediaTaskBillingGroup(task, config)); ok {
 			units := max(task.Count, 1)
 			if task.Kind == "video" && !YucoreMediaModelUsesPerCallPricing(task.ModelId) {
 				units = yucoreMediaTaskDuration(task)
@@ -676,15 +676,29 @@ func YucoreMediaModelUsesPerCallPricing(modelID string) bool {
 }
 
 func YucoreMediaModelUnitPrice(modelId string) (float64, bool) {
+	config := getYucoreMediaAdapterConfig()
+	return yucoreMediaModelUnitPriceForGroup(modelId, config.ManagedTokenGroup)
+}
+
+func yucoreMediaModelUnitPriceForGroup(modelId string, group string) (float64, bool) {
 	price, ok := ratio_setting.GetModelPrice(modelId, false)
 	if !ok {
 		return 0, false
 	}
 	config := getYucoreMediaAdapterConfig()
 	if config.Adapter == YucoreMediaAdapterYuAPIChannel {
-		price *= ratio_setting.GetGroupRatio(config.ManagedTokenGroup)
+		price *= ratio_setting.GetGroupRatio(strings.TrimSpace(group))
 	}
 	return price, true
+}
+
+func yucoreMediaTaskBillingGroup(task *YucoreMediaTask, config yucoreMediaAdapterConfig) string {
+	if task != nil {
+		if group := strings.TrimSpace(task.BillingGroup); group != "" {
+			return group
+		}
+	}
+	return strings.TrimSpace(config.ManagedTokenGroup)
 }
 
 func buildYucoreMediaAssets(task *YucoreMediaTask) []YucoreMediaAsset {

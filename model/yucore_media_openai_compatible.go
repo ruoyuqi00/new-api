@@ -247,6 +247,7 @@ func yucoreMediaOpenAIConfigForTask(task *YucoreMediaTask, config yucoreMediaAda
 	if yucoreMediaTaskAdapter(task) != YucoreMediaAdapterYuAPIChannel {
 		return config, nil
 	}
+	config.ManagedTokenGroup = yucoreMediaTaskBillingGroup(task, config)
 	token, err := getOrCreateYucoreMediaManagedToken(task.UserId, config.ManagedTokenGroup)
 	if err != nil {
 		return config, err
