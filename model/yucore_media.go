@@ -222,6 +222,16 @@ func getYucoreMediaAdapterConfig() yucoreMediaAdapterConfig {
 	}
 }
 
+func GetYucoreMediaCatalogSettings() (string, map[string]YucoreMediaModelCapability) {
+	config := getYucoreMediaAdapterConfig()
+	capabilities := make(map[string]YucoreMediaModelCapability, len(config.ModelCapabilities))
+	for modelID, capability := range config.ModelCapabilities {
+		capability.AllowedParameters = append([]string(nil), capability.AllowedParameters...)
+		capabilities[modelID] = capability
+	}
+	return config.ManagedTokenGroup, capabilities
+}
+
 func YucoreMediaConfiguredModelIDs() map[string]struct{} {
 	config := getYucoreMediaAdapterConfig()
 	if config.Adapter != YucoreMediaAdapterOpenAICompatible && config.Adapter != YucoreMediaAdapterYuAPIChannel {

@@ -41,6 +41,21 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 	return abilities, err
 }
 
+func GetActiveAbilitiesForGroups(groups []string) ([]AbilityWithChannel, error) {
+	abilities := make([]AbilityWithChannel, 0)
+	if len(groups) == 0 {
+		return abilities, nil
+	}
+	err := DB.Table("abilities").
+		Select("abilities.*, channels.type as channel_type").
+		Joins("join channels on abilities.channel_id = channels.id").
+		Where("abilities.enabled = ? and channels.status = ?", true, common.ChannelStatusEnabled).
+		Where("abilities."+commonGroupCol+" IN ?", groups).
+		Order("abilities." + commonGroupCol + " asc, abilities.model asc, abilities.channel_id asc").
+		Scan(&abilities).Error
+	return abilities, err
+}
+
 func GetGroupEnabledModels(group string) []string {
 	var models []string
 	// Find distinct models
