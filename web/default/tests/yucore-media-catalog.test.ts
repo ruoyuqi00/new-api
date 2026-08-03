@@ -18,11 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, test } from 'bun:test'
 
+import type { YucoreMediaCatalog } from '../src/features/yucore-brand/api/studio'
 import {
   modelsForKind,
   resolveMediaSelection,
 } from '../src/features/yucore-brand/lib/media-catalog'
-import type { YucoreMediaCatalog } from '../src/features/yucore-brand/api/studio'
 
 const catalog: YucoreMediaCatalog = {
   default_group: 'multimodal',

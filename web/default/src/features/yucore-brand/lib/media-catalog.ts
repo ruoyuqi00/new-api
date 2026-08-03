@@ -16,10 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type {
-  YucoreMediaCatalog,
-  YucoreMediaModel,
-} from '../api/studio'
+import type { YucoreMediaCatalog, YucoreMediaModel } from '../api/studio'
 
 export type YucoreMediaKind = 'image' | 'video'
 

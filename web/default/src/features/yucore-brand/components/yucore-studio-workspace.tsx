@@ -91,6 +91,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -104,6 +105,7 @@ import {
   executeYucoreCanvasAgentRun,
   getYucoreCanvas,
   getYucoreCanvasIdentity,
+  getYucoreMediaCatalog,
   getYucoreMediaBilling,
   getYucoreMediaHealth,
   getYucoreMediaTask,
@@ -111,7 +113,6 @@ import {
   listYucoreCanvasVersions,
   listYucoreCanvases,
   listYucoreMediaGallery,
-  listYucoreMediaModels,
   listYucoreMediaTasks,
   listYucorePromptTemplates,
   updateYucoreCanvasAgentRun,
@@ -123,12 +124,14 @@ import {
   type YucoreCanvasVersionRecord,
   type YucoreMediaAsset,
   type YucoreMediaBilling,
+  type YucoreMediaCatalog,
   type YucoreMediaHealth,
   type YucoreMediaModel,
   type YucoreMediaTask,
   type YucorePromptTemplate,
 } from '../api/studio'
 import { YUCORE_STUDIO_NAME } from '../data/content'
+import { modelsForKind, resolveMediaSelection } from '../lib/media-catalog'
 import { YucoreBrandMark } from './yucore-brand-mark'
 import { YucorePageShell } from './yucore-page-shell'
 
@@ -267,12 +270,6 @@ const moderationLabels: Record<string, string> = {
   low: '低限制',
 }
 
-const safetyLevelLabels: Record<string, string> = {
-  standard: '标准',
-  strict: '严格',
-  relaxed: '宽松',
-}
-
 const visibilityLabels: Record<string, string> = {
   private: '仅自己可见',
   link: '链接可见',
@@ -286,21 +283,6 @@ const studioNavItems: StudioNavItem[] = [
   { id: 'prompts', label: '提示词库', icon: FileText },
   { id: 'assets', label: '我的素材', icon: LibraryBig },
 ]
-
-const aspectRatios = ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16']
-const imageSizes = ['1k', '2k', '4k', 'custom']
-const formats = ['png', 'jpeg', 'webp']
-const safetyModes = ['auto', 'low']
-const retryCounts = [0, 1, 2, 3]
-const defaultQualities = ['high']
-const defaultStyles = ['auto']
-const defaultStreamModes = ['final']
-const defaultBackgrounds = ['auto']
-const defaultModerations = ['auto']
-const defaultDurations = [8]
-const defaultCounts = [1]
-const defaultImageModes = ['text-to-image']
-const defaultVideoModes = ['text-to-video']
 
 const defaultTemplates: YucorePromptTemplate[] = [
   {
@@ -477,13 +459,6 @@ function keepOption<T>(current: T, items: T[] | undefined, fallback: T): T {
   return items?.includes(current) ? current : firstOption(items, fallback)
 }
 
-function modelForKind(models: YucoreMediaModel[], kind: 'image' | 'video') {
-  return (
-    models.find((model) => model.kind === kind)?.id ??
-    (kind === 'image' ? 'gpt-image-2' : 'veo-3.1-generate-preview')
-  )
-}
-
 function getModelById(
   models: YucoreMediaModel[],
   modelId: string,
@@ -496,18 +471,25 @@ function getModelById(
 }
 
 function getAspectRatios(model?: YucoreMediaModel) {
-  return model?.aspect_ratios?.length ? model.aspect_ratios : aspectRatios
+  return model?.aspect_ratios ?? emptyStringOptions
 }
 
 function getSizes(model?: YucoreMediaModel) {
-  return model?.sizes?.length ? model.sizes : imageSizes
+  return model?.sizes ?? emptyStringOptions
 }
 
 function getFormats(model?: YucoreMediaModel) {
   if (model?.output_formats?.length) return model.output_formats
   if (model?.formats?.length) return model.formats
-  return formats
+  return emptyStringOptions
 }
+
+const emptyMediaCatalog: YucoreMediaCatalog = {
+  default_group: '',
+  groups: [],
+}
+const emptyStringOptions: string[] = []
+const emptyNumberOptions: number[] = []
 
 function inferMediaHealthFromModels(
   modelRows: YucoreMediaModel[]
@@ -806,6 +788,10 @@ function isTerminalMediaTask(task: YucoreMediaTask) {
 
 function isActiveMediaTask(task: YucoreMediaTask) {
   return !isTerminalMediaTask(task)
+}
+
+function mediaTaskRouteLabel(task: YucoreMediaTask) {
+  return task.group ? `${task.group} / ${task.model_id}` : task.model_id
 }
 
 function compactTaskError(error: string) {
@@ -1191,9 +1177,13 @@ export function YucoreStudioWorkspace({
 }: {
   initialView?: StudioView
 }) {
+  const { t } = useTranslation()
   const [view, setView] = useState<StudioView>(initialView)
   const [sessionId] = useState(getStudioSessionId)
-  const [models, setModels] = useState<YucoreMediaModel[]>([])
+  const [mediaCatalog, setMediaCatalog] =
+    useState<YucoreMediaCatalog>(emptyMediaCatalog)
+  const [selectedGroup, setSelectedGroup] = useState('')
+  const [isMediaCatalogLoading, setIsMediaCatalogLoading] = useState(true)
   const [templates, setTemplates] =
     useState<YucorePromptTemplate[]>(defaultTemplates)
   const [billing, setBilling] = useState<YucoreMediaBilling | null>(null)
@@ -1231,8 +1221,8 @@ export function YucoreStudioWorkspace({
     '塑料皮肤，畸形手指，多余肢体，过度 HDR，商业棚拍感'
   )
   const [kind, setKind] = useState<'image' | 'video'>('image')
-  const [imageModelId, setImageModelId] = useState('gpt-image-2')
-  const [videoModelId, setVideoModelId] = useState('veo-3.1-generate-preview')
+  const [imageModelId, setImageModelId] = useState('')
+  const [videoModelId, setVideoModelId] = useState('')
   const [mode, setMode] = useState('text-to-image')
   const [aspectRatio, setAspectRatio] = useState('auto')
   const [size, setSize] = useState('1k')
@@ -1245,9 +1235,6 @@ export function YucoreStudioWorkspace({
   const [partialImages, setPartialImages] = useState(0)
   const [duration, setDuration] = useState(8)
   const [visibility, setVisibility] = useState('private')
-  const [safetyLevel, setSafetyLevel] = useState('standard')
-  const [safetyMode, setSafetyMode] = useState('auto')
-  const [retryCount, setRetryCount] = useState(0)
   const [count, setCount] = useState(3)
   const [referenceFiles, setReferenceFiles] = useState<ReferenceAssetDraft[]>(
     []
@@ -1285,13 +1272,19 @@ export function YucoreStudioWorkspace({
     Edge
   > | null>(null)
 
+  const models = useMemo(
+    () =>
+      mediaCatalog.groups.find((group) => group.id === selectedGroup)?.models ??
+      [],
+    [mediaCatalog.groups, selectedGroup]
+  )
   const imageModels = useMemo(
-    () => models.filter((model) => model.kind === 'image'),
-    [models]
+    () => modelsForKind(mediaCatalog, selectedGroup, 'image'),
+    [mediaCatalog, selectedGroup]
   )
   const videoModels = useMemo(
-    () => models.filter((model) => model.kind === 'video'),
-    [models]
+    () => modelsForKind(mediaCatalog, selectedGroup, 'video'),
+    [mediaCatalog, selectedGroup]
   )
   const imageModel = useMemo(
     () => getModelById(models, imageModelId, 'image'),
@@ -1303,44 +1296,33 @@ export function YucoreStudioWorkspace({
   )
   const activeModel =
     view === 'video' || kind === 'video' ? videoModel : imageModel
-  const activeModelId =
-    activeModel?.id ??
-    (view === 'video' || kind === 'video' ? videoModelId : imageModelId)
+  const activeModelId = activeModel?.id ?? ''
   const availableModels =
     view === 'video' || kind === 'video' ? videoModels : imageModels
-  let activeModes = defaultImageModes
-  if (view === 'video' || kind === 'video') {
-    activeModes = defaultVideoModes
+  const activeMediaKind =
+    view === 'video' || kind === 'video' ? 'video' : 'image'
+  let mediaModelsEmptyMessage = t(
+    'No image models are available in this group.'
+  )
+  if (activeMediaKind === 'video') {
+    mediaModelsEmptyMessage = t('No video models are available in this group.')
   }
-  if (activeModel?.modes?.length) {
-    activeModes = activeModel.modes
+  if (isMediaCatalogLoading) {
+    mediaModelsEmptyMessage = t('Loading media catalog')
   }
+  const activeModes = activeModel?.modes ?? emptyStringOptions
   const activeAspectRatios = getAspectRatios(activeModel)
   const activeSizes = getSizes(activeModel)
   const activeFormats = getFormats(activeModel)
-  const activeQualities = activeModel?.qualities?.length
-    ? activeModel.qualities
-    : defaultQualities
-  const activeStylePresets = activeModel?.style_presets?.length
-    ? activeModel.style_presets
-    : defaultStyles
-  const activeStreamModes = activeModel?.stream_modes?.length
-    ? activeModel.stream_modes
-    : defaultStreamModes
-  const activeBackgrounds = activeModel?.backgrounds?.length
-    ? activeModel.backgrounds
-    : defaultBackgrounds
-  const activeModerations = activeModel?.moderations?.length
-    ? activeModel.moderations
-    : defaultModerations
-  const activeDurations = activeModel?.durations?.length
-    ? activeModel.durations
-    : defaultDurations
-  const activeCounts = activeModel?.counts?.length
-    ? activeModel.counts
-    : defaultCounts
+  const activeQualities = activeModel?.qualities ?? emptyStringOptions
+  const activeStylePresets = activeModel?.style_presets ?? emptyStringOptions
+  const activeStreamModes = activeModel?.stream_modes ?? emptyStringOptions
+  const activeBackgrounds = activeModel?.backgrounds ?? emptyStringOptions
+  const activeModerations = activeModel?.moderations ?? emptyStringOptions
+  const activeDurations = activeModel?.durations ?? emptyNumberOptions
+  const activeCounts = activeModel?.counts ?? emptyNumberOptions
   const maxReferenceImages =
-    activeModel?.input_limits?.max_reference_images ?? 4
+    activeModel?.input_limits?.max_reference_images ?? 0
   const isReferenceUploading = referenceFiles.some((file) => file.isUploading)
   const referenceUploadErrors = referenceFiles.filter(
     (file) => file.uploadError
@@ -1349,7 +1331,9 @@ export function YucoreStudioWorkspace({
     isSubmitting ||
     isReferenceUploading ||
     referenceUploadErrors.length > 0 ||
-    !prompt.trim()
+    !prompt.trim() ||
+    !selectedGroup ||
+    !activeModel
   const visibleTasks = useMemo(
     () =>
       tasks.filter((task) =>
@@ -1747,13 +1731,13 @@ export function YucoreStudioWorkspace({
 
     async function load() {
       const [
-        modelsResult,
+        catalogResult,
         templatesResult,
         billingResult,
         healthResult,
         identityResult,
       ] = await Promise.allSettled([
-        listYucoreMediaModels(),
+        getYucoreMediaCatalog(),
         listYucorePromptTemplates(),
         getYucoreMediaBilling(),
         getYucoreMediaHealth(),
@@ -1762,19 +1746,35 @@ export function YucoreStudioWorkspace({
       if (!mounted) return
       let loadedModels: YucoreMediaModel[] = []
 
-      if (modelsResult.status === 'fulfilled') {
-        const modelRows = modelsResult.value
-        loadedModels = modelRows
-        setModels(modelRows)
-        setImageModelId(modelForKind(modelRows, 'image'))
-        setVideoModelId(modelForKind(modelRows, 'video'))
+      if (catalogResult.status === 'fulfilled') {
+        const catalog = catalogResult.value
+        const nextGroup = catalog.default_group || catalog.groups[0]?.id || ''
+        const imageSelection = resolveMediaSelection(
+          catalog,
+          nextGroup,
+          '',
+          'image'
+        )
+        const videoSelection = resolveMediaSelection(
+          catalog,
+          nextGroup,
+          '',
+          'video'
+        )
+        loadedModels =
+          catalog.groups.find((group) => group.id === nextGroup)?.models ?? []
+        setMediaCatalog(catalog)
+        setSelectedGroup(nextGroup)
+        setImageModelId(imageSelection.modelId)
+        setVideoModelId(videoSelection.modelId)
       } else {
         toast.error(
-          modelsResult.reason instanceof Error
-            ? modelsResult.reason.message
-            : '加载模型列表失败'
+          catalogResult.reason instanceof Error
+            ? catalogResult.reason.message
+            : t('Failed to load media catalog')
         )
       }
+      setIsMediaCatalogLoading(false)
 
       if (templatesResult.status === 'fulfilled') {
         setTemplates(
@@ -1837,35 +1837,59 @@ export function YucoreStudioWorkspace({
     return () => {
       mounted = false
     }
-  }, [refreshCanvases, refreshGallery, refreshTasks])
+  }, [refreshCanvases, refreshGallery, refreshTasks, t])
 
   useEffect(() => {
     if (!activeModel) return
-    setMode((current) => keepOption(current, activeModes, activeModes[0]))
-    setAspectRatio((current) =>
-      keepOption(current, activeAspectRatios, activeAspectRatios[0])
-    )
-    setSize((current) => keepOption(current, activeSizes, activeSizes[0]))
-    setFormat((current) => keepOption(current, activeFormats, activeFormats[0]))
-    setQuality((current) =>
-      keepOption(current, activeQualities, activeQualities[0])
-    )
-    setStylePreset((current) =>
-      keepOption(current, activeStylePresets, activeStylePresets[0])
-    )
-    setBackground((current) =>
-      keepOption(current, activeBackgrounds, activeBackgrounds[0])
-    )
-    setModeration((current) =>
-      keepOption(current, activeModerations, activeModerations[0])
-    )
-    setStreamMode((current) =>
-      keepOption(current, activeStreamModes, activeStreamModes[0])
-    )
-    setDuration((current) =>
-      keepOption(current, activeDurations, activeDurations[0])
-    )
-    setCount((current) => keepOption(current, activeCounts, activeCounts[0]))
+    if (activeModes.length > 0) {
+      setMode((current) => keepOption(current, activeModes, activeModes[0]))
+    }
+    if (activeAspectRatios.length > 0) {
+      setAspectRatio((current) =>
+        keepOption(current, activeAspectRatios, activeAspectRatios[0])
+      )
+    }
+    if (activeSizes.length > 0) {
+      setSize((current) => keepOption(current, activeSizes, activeSizes[0]))
+    }
+    if (activeFormats.length > 0) {
+      setFormat((current) =>
+        keepOption(current, activeFormats, activeFormats[0])
+      )
+    }
+    if (activeQualities.length > 0) {
+      setQuality((current) =>
+        keepOption(current, activeQualities, activeQualities[0])
+      )
+    }
+    if (activeStylePresets.length > 0) {
+      setStylePreset((current) =>
+        keepOption(current, activeStylePresets, activeStylePresets[0])
+      )
+    }
+    if (activeBackgrounds.length > 0) {
+      setBackground((current) =>
+        keepOption(current, activeBackgrounds, activeBackgrounds[0])
+      )
+    }
+    if (activeModerations.length > 0) {
+      setModeration((current) =>
+        keepOption(current, activeModerations, activeModerations[0])
+      )
+    }
+    if (activeStreamModes.length > 0) {
+      setStreamMode((current) =>
+        keepOption(current, activeStreamModes, activeStreamModes[0])
+      )
+    }
+    if (activeDurations.length > 0) {
+      setDuration((current) =>
+        keepOption(current, activeDurations, activeDurations[0])
+      )
+    }
+    if (activeCounts.length > 0) {
+      setCount((current) => keepOption(current, activeCounts, activeCounts[0]))
+    }
     setReferenceFiles((items) => items.slice(0, maxReferenceImages))
   }, [
     activeAspectRatios,
@@ -2295,7 +2319,7 @@ export function YucoreStudioWorkspace({
             data: {
               ...node.data,
               kind: task.kind,
-              sublabel: task.model_id,
+              sublabel: mediaTaskRouteLabel(task),
               prompt: task.prompt,
               status: `${task.task_id} / ${task.status}`,
               resultTaskId: task.task_id,
@@ -2396,25 +2420,33 @@ export function YucoreStudioWorkspace({
     setIsSubmitting(true)
     try {
       const currentModel = nextKind === 'video' ? videoModel : imageModel
-      let submitModes = currentModel?.modes
-      if (!submitModes?.length) {
-        submitModes =
-          nextKind === 'video' ? defaultVideoModes : defaultImageModes
+      if (!selectedGroup || !currentModel) {
+        toast.error(t('Select a media model before submitting.'))
+        return null
       }
+      const submitModes = currentModel.modes
       const submitMode = submitModes.includes(mode) ? mode : submitModes[0]
       const task = await createYucoreMediaTask({
+        group: selectedGroup,
         kind: nextKind,
         mode: submitMode,
-        model_id:
-          currentModel?.id ??
-          (nextKind === 'video' ? videoModelId : imageModelId),
+        model_id: currentModel.id,
         prompt: taskPrompt,
         negative_prompt: negativePrompt,
-        aspect_ratio: aspectRatio,
-        size,
-        quality,
-        format,
-        count: nextKind === 'video' ? 1 : count,
+        ...(currentModel.aspect_ratios?.includes(aspectRatio)
+          ? { aspect_ratio: aspectRatio }
+          : {}),
+        ...(currentModel.sizes?.includes(size) ? { size } : {}),
+        ...(currentModel.qualities?.includes(quality) ? { quality } : {}),
+        ...((currentModel.output_formats ?? currentModel.formats)?.includes(
+          format
+        )
+          ? { format }
+          : {}),
+        count:
+          nextKind === 'video' || !currentModel.counts?.includes(count)
+            ? 1
+            : count,
         session_id: sessionId,
         inputs: referenceFiles.map((file) => ({
           id: file.id,
@@ -2427,18 +2459,25 @@ export function YucoreStudioWorkspace({
           url: file.url || file.sourceUrl || file.cachedUrl || file.dataUrl,
         })),
         metadata: {
-          model_name: currentModel?.name,
-          model_family: currentModel?.family,
-          style_preset: stylePreset,
-          background,
-          moderation,
-          stream_mode: streamMode,
-          partial_images: partialImages,
-          duration,
+          model_name: currentModel.name,
+          model_family: currentModel.family,
+          ...(currentModel.style_presets?.includes(stylePreset)
+            ? { style_preset: stylePreset }
+            : {}),
+          ...(currentModel.backgrounds?.includes(background)
+            ? { background }
+            : {}),
+          ...(currentModel.moderations?.includes(moderation)
+            ? { moderation }
+            : {}),
+          ...(currentModel.stream_modes?.includes(streamMode)
+            ? { stream_mode: streamMode }
+            : {}),
+          ...(currentModel.partial_images?.includes(partialImages)
+            ? { partial_images: partialImages }
+            : {}),
+          ...(currentModel.durations?.includes(duration) ? { duration } : {}),
           visibility,
-          safety_mode: safetyMode,
-          safety_level: safetyLevel,
-          retry_count: retryCount,
           reference_count: referenceFiles.length,
           surface: 'yucore-studio',
           canvas_identity_session: canvasIdentity?.identity_session,
@@ -2449,6 +2488,9 @@ export function YucoreStudioWorkspace({
       setKind(nextKind)
       setActiveTask(task)
       setTasks((items) => [task, ...items])
+      void getYucoreMediaBilling()
+        .then(setBilling)
+        .catch(() => undefined)
       if (!options.stayOnCanvas) {
         setView(nextKind === 'video' ? 'video' : 'image')
       }
@@ -2634,7 +2676,7 @@ export function YucoreStudioWorkspace({
                       node.data.label ||
                       'Generation result'
                     : node.data.label,
-                sublabel: task.model_id,
+                sublabel: mediaTaskRouteLabel(task),
                 prompt: task.prompt,
                 status: buildCanvasTaskStatus(task),
                 resultTaskId: task.task_id,
@@ -2740,6 +2782,9 @@ export function YucoreStudioWorkspace({
   useEffect(() => {
     if (!activeTask || !isTerminalMediaTask(activeTask)) return
     void handleMediaTaskBackflow(activeTask)
+    void getYucoreMediaBilling()
+      .then(setBilling)
+      .catch(() => undefined)
   }, [activeTask, handleMediaTaskBackflow])
 
   const handleSaveCanvas = useCallback(async () => {
@@ -2849,7 +2894,7 @@ export function YucoreStudioWorkspace({
       data: {
         kind: asset.kind,
         label: asset.label,
-        sublabel: task.model_id,
+        sublabel: mediaTaskRouteLabel(task),
         assetUrl: asset.url,
         thumbUrl: asset.thumb_url,
         prompt: task.prompt,
@@ -3088,9 +3133,13 @@ export function YucoreStudioWorkspace({
     setNegativePrompt(template.negative_prompt ?? '')
     setKind(template.kind)
     if (template.model_id) {
-      if (template.kind === 'video') {
+      const modelIsAvailable = models.some(
+        (model) =>
+          model.id === template.model_id && model.kind === template.kind
+      )
+      if (modelIsAvailable && template.kind === 'video') {
         setVideoModelId(template.model_id)
-      } else {
+      } else if (modelIsAvailable) {
         setImageModelId(template.model_id)
       }
     }
@@ -3130,6 +3179,24 @@ export function YucoreStudioWorkspace({
     setIsCanvasMenuOpen(false)
   }
 
+  function handleMediaGroupChange(nextGroup: string) {
+    const imageSelection = resolveMediaSelection(
+      mediaCatalog,
+      nextGroup,
+      imageModelId,
+      'image'
+    )
+    const videoSelection = resolveMediaSelection(
+      mediaCatalog,
+      nextGroup,
+      videoModelId,
+      'video'
+    )
+    setSelectedGroup(nextGroup)
+    setImageModelId(imageSelection.modelId)
+    setVideoModelId(videoSelection.modelId)
+  }
+
   async function handleAgentSubmit() {
     const nextPrompt = agentPrompt.trim()
     if (!nextPrompt) return
@@ -3165,24 +3232,27 @@ export function YucoreStudioWorkspace({
       sourceUrl: file.sourceUrl,
       url: file.url || file.sourceUrl || file.cachedUrl || file.dataUrl,
     }))
-    const agentMediaModel = imageModel
-    const agentMediaModes = agentMediaModel?.modes?.length
-      ? agentMediaModel.modes
-      : defaultImageModes
+    const agentMediaKind = kind
+    const agentMediaModel = agentMediaKind === 'video' ? videoModel : imageModel
+    if (!selectedGroup || !agentMediaModel) {
+      toast.error(t('Select a media model before submitting.'))
+      return
+    }
+    const agentMediaModes = agentMediaModel.modes
     let agentMediaMode = agentMediaModes[0]
-    if (agentMediaModes.includes('text-to-image')) {
-      agentMediaMode = 'text-to-image'
+    const textMode =
+      agentMediaKind === 'video' ? 'text-to-video' : 'text-to-image'
+    const referenceMode =
+      agentMediaKind === 'video' ? 'image-to-video' : 'image-to-image'
+    if (agentMediaModes.includes(textMode)) {
+      agentMediaMode = textMode
     }
-    if (
-      referenceFiles.length > 0 &&
-      agentMediaModes.includes('image-to-image')
-    ) {
-      agentMediaMode = 'image-to-image'
+    if (referenceFiles.length > 0 && agentMediaModes.includes(referenceMode)) {
+      agentMediaMode = referenceMode
     }
-    const agentMediaModelId = agentMediaModel?.id ?? imageModelId
+    const agentMediaModelId = agentMediaModel.id
     setPrompt(nextPrompt)
     setAgentPrompt('')
-    setKind('image')
     setMode(agentMediaMode)
     const seed = Date.now().toString(36)
     const agentNodeId = `agent_prompt_${seed}`
@@ -3216,9 +3286,9 @@ export function YucoreStudioWorkspace({
       type: 'media',
       position: { x: agentNode.position.x + 300, y: agentNode.position.y + 24 },
       data: {
-        kind: 'image',
+        kind: agentMediaKind,
         label: '生成任务',
-        sublabel: agentMediaModel?.name ?? agentMediaModelId,
+        sublabel: `${selectedGroup} / ${agentMediaModel.name}`,
         prompt: nextPrompt,
         status: 'waiting for media task',
       },
@@ -3270,30 +3340,49 @@ export function YucoreStudioWorkspace({
       const result = await executeYucoreCanvasAgentRun(canvasForRun.id, {
         mode: agentMode,
         prompt: nextPrompt,
-        kind: 'image',
+        group: selectedGroup,
+        kind: agentMediaKind,
         media_mode: agentMediaMode,
         model_id: agentMediaModelId,
         negative_prompt: negativePrompt,
-        aspect_ratio: aspectRatio,
-        size,
-        quality,
-        format,
-        count,
+        ...(agentMediaModel.aspect_ratios?.includes(aspectRatio)
+          ? { aspect_ratio: aspectRatio }
+          : {}),
+        ...(agentMediaModel.sizes?.includes(size) ? { size } : {}),
+        ...(agentMediaModel.qualities?.includes(quality) ? { quality } : {}),
+        ...((
+          agentMediaModel.output_formats ?? agentMediaModel.formats
+        )?.includes(format)
+          ? { format }
+          : {}),
+        count:
+          agentMediaKind === 'video' || !agentMediaModel.counts?.includes(count)
+            ? 1
+            : count,
         session_id: sessionId,
         inputs: agentTaskInputs,
         metadata: {
-          model_name: agentMediaModel?.name,
-          model_family: agentMediaModel?.family,
-          style_preset: stylePreset,
-          background,
-          moderation,
-          stream_mode: streamMode,
-          partial_images: partialImages,
-          duration,
+          model_name: agentMediaModel.name,
+          model_family: agentMediaModel.family,
+          ...(agentMediaModel.style_presets?.includes(stylePreset)
+            ? { style_preset: stylePreset }
+            : {}),
+          ...(agentMediaModel.backgrounds?.includes(background)
+            ? { background }
+            : {}),
+          ...(agentMediaModel.moderations?.includes(moderation)
+            ? { moderation }
+            : {}),
+          ...(agentMediaModel.stream_modes?.includes(streamMode)
+            ? { stream_mode: streamMode }
+            : {}),
+          ...(agentMediaModel.partial_images?.includes(partialImages)
+            ? { partial_images: partialImages }
+            : {}),
+          ...(agentMediaModel.durations?.includes(duration)
+            ? { duration }
+            : {}),
           visibility,
-          safety_mode: safetyMode,
-          safety_level: safetyLevel,
-          retry_count: retryCount,
           reference_count: referenceFiles.length,
           surface: 'yucore-studio',
           canvas_identity_session: canvasIdentity?.identity_session,
@@ -3308,6 +3397,9 @@ export function YucoreStudioWorkspace({
         result.task,
         ...items.filter((item) => item.task_id !== result.task.task_id),
       ])
+      void getYucoreMediaBilling()
+        .then(setBilling)
+        .catch(() => undefined)
       setAgentRuns((items) => [
         result.run,
         ...items.filter((item) => item.run_id !== result.run.run_id),
@@ -3318,7 +3410,7 @@ export function YucoreStudioWorkspace({
               ...node,
               data: {
                 ...node.data,
-                sublabel: result.task.model_id,
+                sublabel: `${result.task.group} / ${result.task.model_id}`,
                 status: `${result.task.task_id} / ${result.task.status}`,
                 resultTaskId: result.task.task_id,
               },
@@ -4772,6 +4864,68 @@ export function YucoreStudioWorkspace({
 
                     <div className='shrink-0 border-t border-white/10 p-4'>
                       <div className='rounded-2xl border border-white/10 bg-black/38 p-3'>
+                        <div className='mb-3 grid gap-2 sm:grid-cols-3'>
+                          <label className='grid gap-1 text-[11px] text-white/48'>
+                            <span>{t('Billing group')}</span>
+                            <select
+                              value={selectedGroup}
+                              onChange={(event) =>
+                                handleMediaGroupChange(event.target.value)
+                              }
+                              disabled={mediaCatalog.groups.length === 0}
+                              className='h-9 min-w-0 rounded-md border border-white/12 bg-black/45 px-2 text-xs text-white outline-none focus:border-cyan-200/35'
+                            >
+                              {mediaCatalog.groups.map((group) => (
+                                <option key={group.id} value={group.id}>
+                                  {group.description || group.id} ({group.id})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className='grid gap-1 text-[11px] text-white/48'>
+                            <span>{t('Media type')}</span>
+                            <select
+                              value={kind}
+                              onChange={(event) =>
+                                setKind(event.target.value as 'image' | 'video')
+                              }
+                              className='h-9 min-w-0 rounded-md border border-white/12 bg-black/45 px-2 text-xs text-white outline-none focus:border-cyan-200/35'
+                            >
+                              <option value='image'>{t('Image')}</option>
+                              <option value='video'>{t('Video')}</option>
+                            </select>
+                          </label>
+                          <label className='grid gap-1 text-[11px] text-white/48'>
+                            <span>
+                              {kind === 'video'
+                                ? t('Video model')
+                                : t('Image model')}
+                            </span>
+                            <select
+                              value={activeModelId}
+                              onChange={(event) => {
+                                if (kind === 'video') {
+                                  setVideoModelId(event.target.value)
+                                } else {
+                                  setImageModelId(event.target.value)
+                                }
+                              }}
+                              disabled={availableModels.length === 0}
+                              className='h-9 min-w-0 rounded-md border border-white/12 bg-black/45 px-2 text-xs text-white outline-none focus:border-cyan-200/35'
+                            >
+                              {availableModels.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.id}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        {availableModels.length === 0 && (
+                          <p className='mb-3 text-xs text-amber-100/72'>
+                            {mediaModelsEmptyMessage}
+                          </p>
+                        )}
                         <textarea
                           value={agentPrompt}
                           onChange={(event) =>
@@ -4784,7 +4938,9 @@ export function YucoreStudioWorkspace({
                           <div className='flex items-center gap-2 text-xs text-white/42'>
                             <LibraryBig className='size-4' />
                             <span>
-                              {activeModel?.name ?? 'gpt-image-2'} · 光合像素
+                              {activeModel
+                                ? `${selectedGroup} / ${activeModel.id}`
+                                : t('Select a media model before submitting.')}
                             </span>
                           </div>
                           <Button
@@ -4993,113 +5149,141 @@ export function YucoreStudioWorkspace({
                       />
                     </div>
 
-                    <div className='rounded-xl border border-dashed border-white/12 bg-white/[0.025] p-4'>
-                      <div className='mb-3 flex items-center justify-between gap-2'>
-                        <div>
-                          <div className='text-sm font-semibold text-white'>
-                            参考图
+                    {maxReferenceImages > 0 && (
+                      <div className='rounded-xl border border-dashed border-white/12 bg-white/[0.025] p-4'>
+                        <div className='mb-3 flex items-center justify-between gap-2'>
+                          <div>
+                            <div className='text-sm font-semibold text-white'>
+                              参考图
+                            </div>
+                            <div className='mt-1 text-[11px] text-white/34'>
+                              最多 {maxReferenceImages} 张，当前{' '}
+                              {referenceFiles.length} 张
+                            </div>
                           </div>
-                          <div className='mt-1 text-[11px] text-white/34'>
-                            最多 {maxReferenceImages} 张，当前{' '}
-                            {referenceFiles.length} 张
-                          </div>
-                        </div>
-                        <div className='flex gap-2'>
-                          {referenceFiles.length > 0 && (
+                          <div className='flex gap-2'>
+                            {referenceFiles.length > 0 && (
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                className='h-8 rounded-lg border-white/10 bg-white/[0.035] text-white hover:bg-white/10'
+                                onClick={clearReferenceFiles}
+                              >
+                                清空
+                              </Button>
+                            )}
                             <Button
                               size='sm'
                               variant='outline'
                               className='h-8 rounded-lg border-white/10 bg-white/[0.035] text-white hover:bg-white/10'
-                              onClick={clearReferenceFiles}
+                              disabled={isReferenceUploading}
+                              onClick={() => fileInputRef.current?.click()}
                             >
-                              清空
+                              <Upload data-icon='inline-start' />
+                              上传
                             </Button>
-                          )}
-                          <Button
-                            size='sm'
-                            variant='outline'
-                            className='h-8 rounded-lg border-white/10 bg-white/[0.035] text-white hover:bg-white/10'
-                            disabled={isReferenceUploading}
+                          </div>
+                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type='file'
+                          accept='image/*'
+                          multiple
+                          className='hidden'
+                          onChange={handleReferenceChange}
+                        />
+                        {referenceFiles.length > 0 ? (
+                          <div className='grid grid-cols-3 gap-2'>
+                            {referenceFiles.map((file) => (
+                              <div
+                                key={file.id}
+                                className={cn(
+                                  'overflow-hidden rounded-xl border bg-black/35',
+                                  file.uploadError && 'border-rose-300/35',
+                                  !file.uploadError &&
+                                    file.isUploading &&
+                                    'border-cyan-200/30',
+                                  !file.uploadError &&
+                                    !file.isUploading &&
+                                    'border-white/10'
+                                )}
+                              >
+                                <div className='relative'>
+                                  <img
+                                    src={file.previewUrl}
+                                    alt={file.name}
+                                    className='aspect-square w-full object-cover'
+                                  />
+                                  {file.isUploading && (
+                                    <div className='absolute inset-0 grid place-items-center bg-black/62 text-[11px] font-medium text-white'>
+                                      <span className='inline-flex items-center gap-1.5'>
+                                        <Loader2 className='size-3 animate-spin' />
+                                        上传中
+                                      </span>
+                                    </div>
+                                  )}
+                                  {file.uploadError && (
+                                    <div className='absolute inset-0 grid place-items-center bg-rose-950/62 px-2 text-center text-[11px] font-medium text-rose-100'>
+                                      上传失败
+                                    </div>
+                                  )}
+                                </div>
+                                <div className='truncate px-2 py-1.5 text-[11px] text-white/45'>
+                                  {file.name}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <button
+                            type='button'
                             onClick={() => fileInputRef.current?.click()}
+                            className='grid h-24 w-full place-items-center rounded-xl border border-dashed border-white/12 text-white/38 hover:border-cyan-200/24 hover:text-white'
                           >
-                            <Upload data-icon='inline-start' />
-                            上传
-                          </Button>
-                        </div>
+                            <span>
+                              <CirclePlus className='mx-auto mb-1 size-6' />
+                              添加参考图
+                            </span>
+                          </button>
+                        )}
                       </div>
-                      <input
-                        ref={fileInputRef}
-                        type='file'
-                        accept='image/*'
-                        multiple
-                        className='hidden'
-                        onChange={handleReferenceChange}
-                      />
-                      {referenceFiles.length > 0 ? (
-                        <div className='grid grid-cols-3 gap-2'>
-                          {referenceFiles.map((file) => (
-                            <div
-                              key={file.id}
-                              className={cn(
-                                'overflow-hidden rounded-xl border bg-black/35',
-                                file.uploadError && 'border-rose-300/35',
-                                !file.uploadError &&
-                                  file.isUploading &&
-                                  'border-cyan-200/30',
-                                !file.uploadError &&
-                                  !file.isUploading &&
-                                  'border-white/10'
-                              )}
-                            >
-                              <div className='relative'>
-                                <img
-                                  src={file.previewUrl}
-                                  alt={file.name}
-                                  className='aspect-square w-full object-cover'
-                                />
-                                {file.isUploading && (
-                                  <div className='absolute inset-0 grid place-items-center bg-black/62 text-[11px] font-medium text-white'>
-                                    <span className='inline-flex items-center gap-1.5'>
-                                      <Loader2 className='size-3 animate-spin' />
-                                      上传中
-                                    </span>
-                                  </div>
-                                )}
-                                {file.uploadError && (
-                                  <div className='absolute inset-0 grid place-items-center bg-rose-950/62 px-2 text-center text-[11px] font-medium text-rose-100'>
-                                    上传失败
-                                  </div>
-                                )}
-                              </div>
-                              <div className='truncate px-2 py-1.5 text-[11px] text-white/45'>
-                                {file.name}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <button
-                          type='button'
-                          onClick={() => fileInputRef.current?.click()}
-                          className='grid h-24 w-full place-items-center rounded-xl border border-dashed border-white/12 text-white/38 hover:border-cyan-200/24 hover:text-white'
-                        >
-                          <span>
-                            <CirclePlus className='mx-auto mb-1 size-6' />
-                            添加参考图
-                          </span>
-                        </button>
-                      )}
-                    </div>
+                    )}
 
                     <div className='grid gap-3'>
+                      <label className='grid gap-2 text-sm font-semibold text-white'>
+                        <span>{t('Billing group')}</span>
+                        <select
+                          value={selectedGroup}
+                          onChange={(event) =>
+                            handleMediaGroupChange(event.target.value)
+                          }
+                          disabled={mediaCatalog.groups.length === 0}
+                          className='h-10 min-w-0 rounded-md border border-white/12 bg-black/45 px-3 text-sm font-normal text-white outline-none focus:border-cyan-200/35'
+                        >
+                          {mediaCatalog.groups.map((group) => (
+                            <option key={group.id} value={group.id}>
+                              {group.description || group.id} ({group.id})
+                            </option>
+                          ))}
+                        </select>
+                        {!isMediaCatalogLoading &&
+                          mediaCatalog.groups.length === 0 && (
+                            <span className='text-xs font-normal text-amber-100/72'>
+                              {t('No media groups are available.')}
+                            </span>
+                          )}
+                      </label>
+
                       <div>
                         <div className='mb-2 text-sm font-semibold text-white'>
-                          模型
+                          {view === 'video'
+                            ? t('Video model')
+                            : t('Image model')}
                         </div>
                         <div className='grid gap-2'>
                           {availableModels.length === 0 ? (
                             <div className='rounded-xl border border-white/10 bg-white/[0.035] p-3 text-sm text-white/58'>
-                              正在加载模型
+                              {mediaModelsEmptyMessage}
                             </div>
                           ) : (
                             availableModels.map((model) => (
@@ -5167,41 +5351,45 @@ export function YucoreStudioWorkspace({
                         </div>
                       </div>
 
-                      <div>
-                        <div className='mb-2 text-sm font-semibold text-white'>
-                          宽高比
+                      {activeAspectRatios.length > 0 && (
+                        <div>
+                          <div className='mb-2 text-sm font-semibold text-white'>
+                            宽高比
+                          </div>
+                          <div className='flex flex-wrap gap-2'>
+                            {activeAspectRatios.map((item) => (
+                              <SegmentedButton
+                                key={item}
+                                active={aspectRatio === item}
+                                onClick={() => setAspectRatio(item)}
+                              >
+                                {item === 'auto' ? '自动' : item}
+                              </SegmentedButton>
+                            ))}
+                          </div>
                         </div>
-                        <div className='flex flex-wrap gap-2'>
-                          {activeAspectRatios.map((item) => (
-                            <SegmentedButton
-                              key={item}
-                              active={aspectRatio === item}
-                              onClick={() => setAspectRatio(item)}
-                            >
-                              {item === 'auto' ? '自动' : item}
-                            </SegmentedButton>
-                          ))}
-                        </div>
-                      </div>
+                      )}
 
-                      <div>
-                        <div className='mb-2 text-sm font-semibold text-white'>
-                          {activeModel?.size_label ?? '尺寸'}
+                      {activeSizes.length > 0 && (
+                        <div>
+                          <div className='mb-2 text-sm font-semibold text-white'>
+                            {activeModel?.size_label ?? '尺寸'}
+                          </div>
+                          <div className='flex flex-wrap gap-2'>
+                            {activeSizes.map((item) => (
+                              <SegmentedButton
+                                key={item}
+                                active={size === item}
+                                onClick={() => setSize(item)}
+                              >
+                                {item === 'custom' ? '自定义' : item}
+                              </SegmentedButton>
+                            ))}
+                          </div>
                         </div>
-                        <div className='flex flex-wrap gap-2'>
-                          {activeSizes.map((item) => (
-                            <SegmentedButton
-                              key={item}
-                              active={size === item}
-                              onClick={() => setSize(item)}
-                            >
-                              {item === 'custom' ? '自定义' : item}
-                            </SegmentedButton>
-                          ))}
-                        </div>
-                      </div>
+                      )}
 
-                      {view === 'image' && (
+                      {view === 'image' && activeFormats.length > 0 && (
                         <div>
                           <div className='mb-2 text-sm font-semibold text-white'>
                             格式
@@ -5220,39 +5408,43 @@ export function YucoreStudioWorkspace({
                         </div>
                       )}
 
-                      <div>
-                        <div className='mb-2 text-sm font-semibold text-white'>
-                          质量
+                      {activeQualities.length > 0 && (
+                        <div>
+                          <div className='mb-2 text-sm font-semibold text-white'>
+                            质量
+                          </div>
+                          <div className='flex flex-wrap gap-2'>
+                            {activeQualities.map((item) => (
+                              <SegmentedButton
+                                key={item}
+                                active={quality === item}
+                                onClick={() => setQuality(item)}
+                              >
+                                {item === 'auto' ? '自动' : item}
+                              </SegmentedButton>
+                            ))}
+                          </div>
                         </div>
-                        <div className='flex flex-wrap gap-2'>
-                          {activeQualities.map((item) => (
-                            <SegmentedButton
-                              key={item}
-                              active={quality === item}
-                              onClick={() => setQuality(item)}
-                            >
-                              {item === 'auto' ? '自动' : item}
-                            </SegmentedButton>
-                          ))}
-                        </div>
-                      </div>
+                      )}
 
-                      <div>
-                        <div className='mb-2 text-sm font-semibold text-white'>
-                          风格预设
+                      {activeStylePresets.length > 0 && (
+                        <div>
+                          <div className='mb-2 text-sm font-semibold text-white'>
+                            风格预设
+                          </div>
+                          <div className='flex flex-wrap gap-2'>
+                            {activeStylePresets.map((item) => (
+                              <SegmentedButton
+                                key={item}
+                                active={stylePreset === item}
+                                onClick={() => setStylePreset(item)}
+                              >
+                                {styleLabels[item] ?? item}
+                              </SegmentedButton>
+                            ))}
+                          </div>
                         </div>
-                        <div className='flex flex-wrap gap-2'>
-                          {activeStylePresets.map((item) => (
-                            <SegmentedButton
-                              key={item}
-                              active={stylePreset === item}
-                              onClick={() => setStylePreset(item)}
-                            >
-                              {styleLabels[item] ?? item}
-                            </SegmentedButton>
-                          ))}
-                        </div>
-                      </div>
+                      )}
 
                       {view === 'image' && activeBackgrounds.length > 0 && (
                         <div>
@@ -5292,46 +5484,47 @@ export function YucoreStudioWorkspace({
                         </div>
                       )}
 
-                      <div>
-                        <div className='mb-2 text-sm font-semibold text-white'>
-                          执行方式
-                        </div>
-                        <div className='flex flex-wrap gap-2'>
-                          {activeStreamModes.map((item) => (
-                            <SegmentedButton
-                              key={item}
-                              active={streamMode === item}
-                              onClick={() => setStreamMode(item)}
-                            >
-                              {streamModeLabels[item] ?? item}
-                            </SegmentedButton>
-                          ))}
-                        </div>
-                      </div>
-
-                      {view === 'image' && streamMode === 'partial' && (
+                      {activeStreamModes.length > 0 && (
                         <div>
                           <div className='mb-2 text-sm font-semibold text-white'>
-                            预览阶段
+                            执行方式
                           </div>
                           <div className='flex flex-wrap gap-2'>
-                            {(activeModel?.partial_images?.length
-                              ? activeModel.partial_images
-                              : [0, 1, 2, 3]
-                            ).map((item) => (
+                            {activeStreamModes.map((item) => (
                               <SegmentedButton
                                 key={item}
-                                active={partialImages === item}
-                                onClick={() => setPartialImages(item)}
+                                active={streamMode === item}
+                                onClick={() => setStreamMode(item)}
                               >
-                                {item === 0 ? '关闭' : `${item} 段`}
+                                {streamModeLabels[item] ?? item}
                               </SegmentedButton>
                             ))}
                           </div>
                         </div>
                       )}
 
-                      {view === 'video' && (
+                      {view === 'image' &&
+                        streamMode === 'partial' &&
+                        Boolean(activeModel?.partial_images?.length) && (
+                          <div>
+                            <div className='mb-2 text-sm font-semibold text-white'>
+                              预览阶段
+                            </div>
+                            <div className='flex flex-wrap gap-2'>
+                              {activeModel?.partial_images?.map((item) => (
+                                <SegmentedButton
+                                  key={item}
+                                  active={partialImages === item}
+                                  onClick={() => setPartialImages(item)}
+                                >
+                                  {item === 0 ? '关闭' : `${item} 段`}
+                                </SegmentedButton>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                      {view === 'video' && activeDurations.length > 0 && (
                         <div>
                           <div className='mb-2 text-sm font-semibold text-white'>
                             时长
@@ -5352,40 +5545,6 @@ export function YucoreStudioWorkspace({
 
                       <div>
                         <div className='mb-2 text-sm font-semibold text-white'>
-                          审核
-                        </div>
-                        <div className='flex flex-wrap gap-2'>
-                          {safetyModes.map((item) => (
-                            <SegmentedButton
-                              key={item}
-                              active={safetyMode === item}
-                              onClick={() => setSafetyMode(item)}
-                            >
-                              {moderationLabels[item] ?? item}
-                            </SegmentedButton>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className='mb-2 text-sm font-semibold text-white'>
-                          安全等级
-                        </div>
-                        <div className='flex flex-wrap gap-2'>
-                          {Object.keys(safetyLevelLabels).map((item) => (
-                            <SegmentedButton
-                              key={item}
-                              active={safetyLevel === item}
-                              onClick={() => setSafetyLevel(item)}
-                            >
-                              {safetyLevelLabels[item]}
-                            </SegmentedButton>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className='mb-2 text-sm font-semibold text-white'>
                           可见性
                         </div>
                         <div className='flex flex-wrap gap-2'>
@@ -5401,24 +5560,7 @@ export function YucoreStudioWorkspace({
                         </div>
                       </div>
 
-                      <div>
-                        <div className='mb-2 text-sm font-semibold text-white'>
-                          失败重试
-                        </div>
-                        <div className='flex flex-wrap gap-2'>
-                          {retryCounts.map((item) => (
-                            <SegmentedButton
-                              key={item}
-                              active={retryCount === item}
-                              onClick={() => setRetryCount(item)}
-                            >
-                              {item}
-                            </SegmentedButton>
-                          ))}
-                        </div>
-                      </div>
-
-                      {view === 'image' && (
+                      {view === 'image' && activeCounts.length > 0 && (
                         <div>
                           <div className='mb-2 text-sm font-semibold text-white'>
                             生成张数
@@ -5539,7 +5681,7 @@ export function YucoreStudioWorkspace({
                             </span>
                             <span className='min-w-0'>
                               <span className='block truncate text-sm font-medium text-white'>
-                                {task.model_id}
+                                {mediaTaskRouteLabel(task)}
                               </span>
                               <span className='mt-1 block truncate text-xs text-white/38'>
                                 {task.prompt}
