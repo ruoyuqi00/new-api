@@ -16,6 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  getYucoreMotionBudget,
+  readYucoreMotionProfile,
+  type YucoreMotionBudget,
+} from './yucore-motion-performance'
+
 type BootShard = {
   angle: number
   depth: number
@@ -53,9 +59,6 @@ type BootParticle = {
   tone: number
 }
 
-const BOOT_SHARD_COUNT = 320
-const BOOT_PARTICLE_COUNT = 1500
-const BOOT_SPHERE_POINT_COUNT = 480
 const DEFAULT_BOOT_DURATION_MS = 5200
 const BOOT_SPHERE_CENTER_Y_RATIO = 0.4
 const BOOT_SPHERE_RADIUS_START = 0.2
@@ -208,8 +211,8 @@ function getBootParticleSizeScale(farField: boolean, lowerGrid: boolean) {
   return 0.92
 }
 
-function createBootShards() {
-  return Array.from({ length: BOOT_SHARD_COUNT }, (_, index): BootShard => {
+function createBootShards(count: number) {
+  return Array.from({ length: count }, (_, index): BootShard => {
     const lane = (index % 9) / 8
     const seed = ((index * 47) % 113) / 113
 
@@ -225,66 +228,58 @@ function createBootShards() {
   })
 }
 
-function createSpherePoints() {
+function createSpherePoints(count: number) {
   const goldenAngle = Math.PI * (3 - Math.sqrt(5))
 
-  return Array.from(
-    { length: BOOT_SPHERE_POINT_COUNT },
-    (_, index): SpherePoint => {
-      const y = 1 - (index / (BOOT_SPHERE_POINT_COUNT - 1)) * 2
-      const radius = Math.sqrt(1 - y * y)
-      const theta = index * goldenAngle
+  return Array.from({ length: count }, (_, index): SpherePoint => {
+    const y = 1 - (index / Math.max(1, count - 1)) * 2
+    const radius = Math.sqrt(1 - y * y)
+    const theta = index * goldenAngle
 
-      return {
-        phase: index * 0.071,
-        size: 0.9 + ((index * 13) % 7) * 0.18,
-        tone: getBootTone(index, 13, 5),
-        x: Math.cos(theta) * radius,
-        y,
-        z: Math.sin(theta) * radius,
-      }
+    return {
+      phase: index * 0.071,
+      size: 0.9 + ((index * 13) % 7) * 0.18,
+      tone: getBootTone(index, 13, 5),
+      x: Math.cos(theta) * radius,
+      y,
+      z: Math.sin(theta) * radius,
     }
-  )
+  })
 }
 
-function createBootParticles() {
-  return Array.from(
-    { length: BOOT_PARTICLE_COUNT },
-    (_, index): BootParticle => {
-      const seed = ((index * 37) % 997) / 997
-      const lane = (index % 13) / 12
-      const farField = index % 13 < 8
-      const sideField =
-        index % 13 === 8 || index % 13 === 9 || index % 13 === 10
-      const lowerGrid = index % 13 >= 10
-      const shellWeight = getBootShellWeight(
-        index,
-        seed,
-        farField,
-        sideField,
-        lowerGrid
-      )
+function createBootParticles(count: number) {
+  return Array.from({ length: count }, (_, index): BootParticle => {
+    const seed = ((index * 37) % 997) / 997
+    const lane = (index % 13) / 12
+    const farField = index % 13 < 8
+    const sideField = index % 13 === 8 || index % 13 === 9 || index % 13 === 10
+    const lowerGrid = index % 13 >= 10
+    const shellWeight = getBootShellWeight(
+      index,
+      seed,
+      farField,
+      sideField,
+      lowerGrid
+    )
 
-      return {
-        angle:
-          (index * 137.508 * Math.PI) / 180 + Math.sin(index * 0.17) * 0.12,
-        depthSeed: seed,
-        fieldSeedX: ((index * 79) % 113) / 113,
-        fieldSeedY: ((index * 61) % 107) / 107,
-        fieldSide: index % 2 === 0 ? -1 : 1,
-        farField,
-        glow: index % 5 === 0 || index % 17 === 0,
-        index,
-        lane,
-        lowerGrid,
-        noisePhase: seed * 16 + index * 0.031,
-        shellWeight,
-        sideField,
-        spin: index % 2 === 0 ? 1 : -1,
-        tone: getBootTone(index, 17, 7),
-      }
+    return {
+      angle: (index * 137.508 * Math.PI) / 180 + Math.sin(index * 0.17) * 0.12,
+      depthSeed: seed,
+      fieldSeedX: ((index * 79) % 113) / 113,
+      fieldSeedY: ((index * 61) % 107) / 107,
+      fieldSide: index % 2 === 0 ? -1 : 1,
+      farField,
+      glow: index % 5 === 0 || index % 17 === 0,
+      index,
+      lane,
+      lowerGrid,
+      noisePhase: seed * 16 + index * 0.031,
+      shellWeight,
+      sideField,
+      spin: index % 2 === 0 ? 1 : -1,
+      tone: getBootTone(index, 17, 7),
     }
-  )
+  })
 }
 
 function toneColor(tone: number, alpha: number) {
@@ -1160,11 +1155,11 @@ export type BootScene = {
   spherePoints: SpherePoint[]
 }
 
-export function createBootScene(): BootScene {
+export function createBootScene(budget: YucoreMotionBudget): BootScene {
   return {
-    particles: createBootParticles(),
-    shards: createBootShards(),
-    spherePoints: createSpherePoints(),
+    particles: createBootParticles(budget.bootParticleCount),
+    shards: createBootShards(budget.bootShardCount),
+    spherePoints: createSpherePoints(budget.bootSpherePointCount),
   }
 }
 
@@ -1191,7 +1186,8 @@ export function renderBootScene(
 
 export function startBootCanvasRenderer(
   canvas: HTMLCanvasElement,
-  durationMs = DEFAULT_BOOT_DURATION_MS
+  durationMs = DEFAULT_BOOT_DURATION_MS,
+  budget = getYucoreMotionBudget(readYucoreMotionProfile())
 ) {
   const ctx = canvas.getContext('2d', {
     alpha: false,
@@ -1199,7 +1195,7 @@ export function startBootCanvasRenderer(
   })
   if (!ctx) return
 
-  const scene = createBootScene()
+  const scene = createBootScene(budget)
   let width = 1
   let height = 1
   let animationFrame = 0
@@ -1211,7 +1207,7 @@ export function startBootCanvasRenderer(
 
   const resize = () => {
     const rect = canvas.getBoundingClientRect()
-    const dpr = Math.min(window.devicePixelRatio || 1, 1)
+    const dpr = Math.min(window.devicePixelRatio || 1, budget.maxPixelRatio)
     width = Math.max(1, Number.isFinite(rect.width) ? rect.width : 1)
     height = Math.max(1, Number.isFinite(rect.height) ? rect.height : 1)
     canvas.width = Math.floor(width * dpr)
@@ -1223,7 +1219,7 @@ export function startBootCanvasRenderer(
     animationFrame = 0
     if (document.hidden) return
 
-    const frameIntervalMs = 1000 / 30
+    const frameIntervalMs = 1000 / budget.bootTargetFps
     if (!reduceMotion && now - lastRenderTime < frameIntervalMs - 0.75) {
       animationFrame = window.requestAnimationFrame(render)
       return

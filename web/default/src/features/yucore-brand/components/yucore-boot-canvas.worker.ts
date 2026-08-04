@@ -16,11 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createBootScene, renderBootScene } from './yucore-boot-renderer'
+import {
+  createBootScene,
+  renderBootScene,
+  type BootScene,
+} from './yucore-boot-renderer'
+import {
+  getYucoreMotionBudget,
+  type YucoreMotionBudget,
+} from './yucore-motion-performance'
 
 type BootWorkerMessage =
   | {
       canvas: OffscreenCanvas
+      budget: YucoreMotionBudget
       dpr: number
       durationMs: number
       height: number
@@ -44,7 +53,8 @@ let disposed = false
 let animationFrame = 0
 let lastRenderTime = Number.NEGATIVE_INFINITY
 let startedAt = 0
-const scene = createBootScene()
+let budget = getYucoreMotionBudget('balanced')
+let scene: BootScene | null = null
 const requestFrame =
   typeof self.requestAnimationFrame === 'function'
     ? self.requestAnimationFrame.bind(self)
@@ -65,9 +75,9 @@ function resize() {
 
 function render(now: number) {
   animationFrame = 0
-  if (!ctx || disposed || hidden) return
+  if (!ctx || !scene || disposed || hidden) return
 
-  const frameIntervalMs = 1000 / 60
+  const frameIntervalMs = 1000 / budget.bootTargetFps
   if (!reduceMotion && now - lastRenderTime < frameIntervalMs - 0.75) {
     animationFrame = requestFrame(render)
     return
@@ -108,6 +118,8 @@ self.addEventListener('message', (event: MessageEvent<BootWorkerMessage>) => {
     width = message.width
     height = message.height
     dpr = message.dpr
+    budget = message.budget
+    scene = createBootScene(budget)
     durationMs = message.durationMs
     reduceMotion = message.reduceMotion
     startedAt = performance.now()

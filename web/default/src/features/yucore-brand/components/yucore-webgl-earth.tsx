@@ -20,6 +20,11 @@ import { useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
+import {
+  getYucoreMotionBudget,
+  readYucoreMotionProfile,
+  type YucoreMotionProfile,
+} from './yucore-motion-performance'
 import { createYucoreRenderLoop } from './yucore-render-loop'
 import { getEarthResourceKey } from './yucore-renderer-resource-key'
 
@@ -28,6 +33,7 @@ interface YucoreWebglEarthProps {
   className?: string
   colorMode?: 'dark' | 'light'
   density?: 'loader' | 'persistent'
+  motionProfile?: YucoreMotionProfile
   timeOffsetSeconds?: number
 }
 
@@ -277,10 +283,12 @@ export function YucoreWebglEarth(props: YucoreWebglEarthProps) {
   const activationRef = useRef<((active: boolean) => void) | null>(null)
   const resourcePropsRef = useRef(props)
   resourcePropsRef.current = props
-  const resourceKey = getEarthResourceKey(props)
+  const motionProfile = props.motionProfile ?? readYucoreMotionProfile()
+  const resourceKey = getEarthResourceKey({ ...props, motionProfile })
 
   useEffect(() => {
     const resourceProps = resourcePropsRef.current
+    const budget = getYucoreMotionBudget(motionProfile)
     const canvas = canvasRef.current
     const gl = canvas?.getContext('webgl', {
       alpha: true,
@@ -350,15 +358,20 @@ export function YucoreWebglEarth(props: YucoreWebglEarthProps) {
     let disposed = false
     const reduceMotion = prefersReducedMotion()
     const motionScale = reduceMotion ? 0.2 : 1
-    const targetFps = resourceProps.density === 'loader' ? 36 : 30
+    const targetFps =
+      resourceProps.density === 'loader'
+        ? budget.earthLoaderTargetFps
+        : budget.earthPersistentTargetFps
     const frameIntervalMs = reduceMotion ? 1000 / 12 : 1000 / targetFps
     const timeOffsetSeconds = resourceProps.timeOffsetSeconds ?? 0
     let sceneStartedAt = window.performance.now()
     let wasActive = activeRef.current
 
     const resize = () => {
-      const maxPixelRatio = resourceProps.density === 'loader' ? 1.25 : 1.1
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, maxPixelRatio)
+      const pixelRatio = Math.min(
+        window.devicePixelRatio || 1,
+        budget.maxPixelRatio
+      )
       // Layout dimensions stay stable while the parent entrance transform scales.
       width = Math.max(1, Math.floor(canvas.clientWidth))
       height = Math.max(1, Math.floor(canvas.clientHeight))
@@ -467,7 +480,7 @@ export function YucoreWebglEarth(props: YucoreWebglEarthProps) {
       gl.deleteTexture(earthTexture)
       gl.deleteProgram(program)
     }
-  }, [resourceKey])
+  }, [motionProfile, resourceKey])
 
   useEffect(() => {
     activationRef.current?.(props.active !== false)

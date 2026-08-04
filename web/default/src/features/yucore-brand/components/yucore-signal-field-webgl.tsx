@@ -20,6 +20,12 @@ import { useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
+import {
+  getYucoreMotionBudget,
+  readYucoreMotionProfile,
+  type YucoreMotionBudget,
+  type YucoreMotionProfile,
+} from './yucore-motion-performance'
 import { createYucoreRenderLoop } from './yucore-render-loop'
 import { getSignalFieldResourceKey } from './yucore-renderer-resource-key'
 
@@ -30,6 +36,7 @@ interface YucoreSignalFieldWebglProps {
   coreMode?: 'full' | 'ambient'
   corePlacement?: 'auth' | 'hero' | 'intro'
   intensity?: 'calm' | 'hero' | 'workbench'
+  motionProfile?: YucoreMotionProfile
   renderProfile?: 'default' | 'console' | 'entrance'
 }
 
@@ -242,12 +249,15 @@ function pushVertex(
 function createSignalScene(
   intensity: YucoreSignalFieldWebglProps['intensity'],
   coreMode: YucoreSignalFieldWebglProps['coreMode'],
-  renderProfile: YucoreSignalFieldWebglProps['renderProfile']
+  renderProfile: YucoreSignalFieldWebglProps['renderProfile'],
+  budget: YucoreMotionBudget
 ): SignalScene {
   const vertices: number[] = []
   const particleStart = 0
   const particleCount =
-    renderProfile === 'console' ? 180 : getParticleCount(intensity)
+    renderProfile === 'console'
+      ? 180
+      : Math.min(getParticleCount(intensity), budget.signalParticleCount)
 
   for (let index = 0; index < particleCount; index += 1) {
     let x = deterministicUnit(index, 1) * 2 - 1
@@ -280,7 +290,8 @@ function createSignalScene(
     { base: 0.76, amplitude: 0.036, frequency: 9.6, phase: 4.6 },
     { base: 0.46, amplitude: 0.055, frequency: 6.4, phase: 3.3 },
   ]
-  const segmentsPerRoute = renderProfile === 'console' ? 42 : 72
+  const segmentsPerRoute =
+    renderProfile === 'console' ? 42 : budget.signalRouteSegments
   routeDefinitions.forEach((route, routeIndex) => {
     for (let segment = 0; segment < segmentsPerRoute; segment += 1) {
       const startX = segment / segmentsPerRoute
@@ -400,7 +411,13 @@ function createSignalScene(
   }
 
   const coreStart = vertices.length / FLOATS_PER_VERTEX
-  const coreCount = coreMode === 'full' ? getCorePointCount(intensity) : 0
+  const coreCount =
+    coreMode === 'full'
+      ? Math.min(
+          getCorePointCount(intensity),
+          Math.round(budget.signalParticleCount * 0.42)
+        )
+      : 0
   const goldenAngle = Math.PI * (3 - Math.sqrt(5))
   for (let index = 0; index < coreCount; index += 1) {
     const latitude = 1 - (index / Math.max(1, coreCount - 1)) * 2
@@ -480,10 +497,12 @@ export function YucoreSignalFieldWebgl(props: YucoreSignalFieldWebglProps) {
   const activationRef = useRef<((active: boolean) => void) | null>(null)
   const resourcePropsRef = useRef(props)
   resourcePropsRef.current = props
-  const resourceKey = getSignalFieldResourceKey(props)
+  const motionProfile = props.motionProfile ?? readYucoreMotionProfile()
+  const resourceKey = getSignalFieldResourceKey({ ...props, motionProfile })
 
   useEffect(() => {
     const resourceProps = resourcePropsRef.current
+    const budget = getYucoreMotionBudget(motionProfile)
     const canvas = canvasRef.current
     const gl = canvas?.getContext('webgl', {
       alpha: true,
@@ -507,7 +526,8 @@ export function YucoreSignalFieldWebgl(props: YucoreSignalFieldWebglProps) {
     const scene = createSignalScene(
       resourceProps.intensity,
       resourceProps.coreMode,
-      resourceProps.renderProfile
+      resourceProps.renderProfile,
+      budget
     )
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
     gl.bufferData(gl.ARRAY_BUFFER, scene.vertices, gl.STATIC_DRAW)
@@ -658,8 +678,16 @@ export function YucoreSignalFieldWebgl(props: YucoreSignalFieldWebglProps) {
         desktopFps = [20, 16, 12]
         mobileFps = [15, 12, 10]
       } else if (resourceProps.renderProfile === 'entrance') {
-        desktopFps = [60, 50, 40]
-        mobileFps = [60, 45, 36]
+        desktopFps = [
+          budget.signalTargetFps,
+          Math.max(16, budget.signalTargetFps - 8),
+          Math.max(12, budget.signalTargetFps - 14),
+        ]
+        mobileFps = [
+          Math.max(16, budget.signalTargetFps - 6),
+          Math.max(14, budget.signalTargetFps - 12),
+          Math.max(12, budget.signalTargetFps - 16),
+        ]
       }
       const targetFps =
         width < 720
@@ -754,7 +782,7 @@ export function YucoreSignalFieldWebgl(props: YucoreSignalFieldWebglProps) {
       gl.deleteBuffer(buffer)
       gl.deleteProgram(program)
     }
-  }, [resourceKey])
+  }, [motionProfile, resourceKey])
 
   useEffect(() => {
     activationRef.current?.(props.active !== false)

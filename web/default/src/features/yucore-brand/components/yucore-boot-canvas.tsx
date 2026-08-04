@@ -20,6 +20,11 @@ import { useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
+import {
+  getYucoreMotionBudget,
+  readYucoreMotionProfile,
+} from './yucore-motion-performance'
+
 interface YucoreBootCanvasProps {
   className?: string
   colorMode?: 'dark' | 'light'
@@ -45,10 +50,15 @@ export function YucoreBootCanvas(props: YucoreBootCanvasProps) {
     let worker: Worker | undefined
     let resizeObserver: ResizeObserver | undefined
     let handleVisibilityChange: (() => void) | undefined
+    const budget = getYucoreMotionBudget(readYucoreMotionProfile())
     const startFallback = () => {
       void import('./yucore-boot-renderer').then((renderer) => {
         if (!disposed) {
-          stopFallback = renderer.startBootCanvasRenderer(canvas, durationMs)
+          stopFallback = renderer.startBootCanvasRenderer(
+            canvas,
+            durationMs,
+            budget
+          )
         }
       })
     }
@@ -73,7 +83,8 @@ export function YucoreBootCanvas(props: YucoreBootCanvasProps) {
         worker.postMessage(
           {
             canvas: offscreen,
-            dpr: Math.min(window.devicePixelRatio || 1, 1),
+            budget,
+            dpr: Math.min(window.devicePixelRatio || 1, budget.maxPixelRatio),
             durationMs,
             height: Math.max(1, rect.height),
             reduceMotion: window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -87,7 +98,7 @@ export function YucoreBootCanvas(props: YucoreBootCanvasProps) {
         resizeObserver = new ResizeObserver(() => {
           const nextRect = canvas.getBoundingClientRect()
           worker?.postMessage({
-            dpr: Math.min(window.devicePixelRatio || 1, 1),
+            dpr: Math.min(window.devicePixelRatio || 1, budget.maxPixelRatio),
             height: Math.max(1, nextRect.height),
             type: 'resize',
             width: Math.max(1, nextRect.width),

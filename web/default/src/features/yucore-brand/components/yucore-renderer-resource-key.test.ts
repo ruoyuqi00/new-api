@@ -62,4 +62,15 @@ describe('YuCore renderer resource keys', () => {
       getEarthResourceKey({ ...base, density: 'persistent' })
     )
   })
+
+  test('performance profile changes renderer resource identity', () => {
+    assert.notEqual(
+      getSignalFieldResourceKey({ motionProfile: 'balanced' }),
+      getSignalFieldResourceKey({ motionProfile: 'reduced' })
+    )
+    assert.notEqual(
+      getEarthResourceKey({ motionProfile: 'full' }),
+      getEarthResourceKey({ motionProfile: 'balanced' })
+    )
+  })
 })

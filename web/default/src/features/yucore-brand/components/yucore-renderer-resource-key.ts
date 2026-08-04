@@ -16,12 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { YucoreMotionProfile } from './yucore-motion-performance'
+
 type SignalFieldResourceProps = {
   active?: boolean
   colorMode?: 'dark' | 'light'
   coreMode?: 'full' | 'ambient'
   corePlacement?: 'auth' | 'hero' | 'intro'
   intensity?: 'calm' | 'hero' | 'workbench'
+  motionProfile?: YucoreMotionProfile
   renderProfile?: 'default' | 'console' | 'entrance'
 }
 
@@ -29,6 +32,7 @@ type EarthResourceProps = {
   active?: boolean
   colorMode?: 'dark' | 'light'
   density?: 'loader' | 'persistent'
+  motionProfile?: YucoreMotionProfile
   timeOffsetSeconds?: number
 }
 
@@ -40,6 +44,7 @@ export function getSignalFieldResourceKey(
     props.coreMode ?? 'ambient',
     props.corePlacement ?? 'auth',
     props.intensity ?? 'calm',
+    props.motionProfile ?? 'balanced',
     props.renderProfile ?? 'default',
   ].join(':')
 }
@@ -48,6 +53,7 @@ export function getEarthResourceKey(props: EarthResourceProps): string {
   return [
     props.colorMode ?? 'dark',
     props.density ?? 'persistent',
+    props.motionProfile ?? 'balanced',
     props.timeOffsetSeconds ?? 0,
   ].join(':')
 }
