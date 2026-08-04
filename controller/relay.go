@@ -143,11 +143,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	sensitiveWordsDetected := false
+	var detectedSensitiveWords []string
 	if needSensitiveCheck && meta != nil {
 		contains, words := service.CheckSensitiveText(meta.CombineText)
 		if contains {
 			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %d match(es)", len(words)))
 			sensitiveWordsDetected = true
+			detectedSensitiveWords = words
 		}
 	}
 
@@ -178,7 +180,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if quotaErr != nil {
 			logger.LogError(c, fmt.Sprintf("failed to calculate local sensitive input quota: %s", quotaErr.Error()))
 		}
-		service.ChargeLocalViolationFee(c, relayInfo, newAPIError, inputQuota, tokens)
+		service.ChargeLocalViolationFee(c, relayInfo, newAPIError, inputQuota, tokens, meta.CombineText, detectedSensitiveWords)
 		return
 	}
 	if needInputModeration && meta != nil && strings.TrimSpace(meta.CombineText) != "" {

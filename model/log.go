@@ -91,6 +91,9 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 	LogTypeLogin   = 7
+
+	SensitiveInputBlockedLogContent = "Sensitive input blocked"
+	SensitiveInputViolationReason   = "local_sensitive_word"
 )
 
 func ensureLogRequestId(log *Log) {
@@ -121,6 +124,10 @@ func formatUserLogs(logs []*Log, startIdx int) {
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
+			if otherMap["violation_fee_reason"] == SensitiveInputViolationReason {
+				logs[i].Content = SensitiveInputBlockedLogContent
+				delete(otherMap, "sensitive_words")
+			}
 			// Remove admin-only debug fields.
 			delete(otherMap, "admin_info")
 			// Remove operation-audit details (operator/route info), admin-only.
@@ -343,13 +350,18 @@ type RecordConsumeLogParams struct {
 	IsStream            bool                   `json:"is_stream"`
 	Group               string                 `json:"group"`
 	Other               map[string]interface{} `json:"other"`
+	ContentIsSensitive  bool                   `json:"-"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
 	if !common.LogConsumeEnabled {
 		return
 	}
-	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
+	if params.ContentIsSensitive {
+		logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, sensitive content omitted", userId))
+	} else {
+		logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
+	}
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)

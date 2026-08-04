@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -25,6 +26,7 @@ const (
 	CSAMViolationMarker                 = "Failed check: SAFETY_CHECK_TYPE"
 	ContentViolatesUsageMarker          = "Content violates usage guidelines"
 	defaultSensitiveViolationMultiplier = 1.0
+	sensitiveInputAuditMaxBytes         = 64 * 1024
 )
 
 type violationFeeReason string
@@ -267,6 +269,8 @@ func ChargeLocalViolationFee(
 	apiErr *types.NewAPIError,
 	expectedQuota int,
 	promptTokens int,
+	sensitiveInput string,
+	sensitiveWords []string,
 ) bool {
 	if ctx == nil || relayInfo == nil || apiErr == nil {
 		return false
@@ -292,7 +296,7 @@ func ChargeLocalViolationFee(
 	if chargedQuota > 0 {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, chargedQuota)
 	}
-	recordLocalSensitiveViolation(ctx, relayInfo, apiErr, promptTokens, expectedQuota, chargedQuota, chargeSucceeded)
+	recordLocalSensitiveViolation(ctx, relayInfo, apiErr, promptTokens, expectedQuota, chargedQuota, chargeSucceeded, sensitiveInput, sensitiveWords)
 	return chargeSucceeded
 }
 
@@ -304,30 +308,61 @@ func recordLocalSensitiveViolation(
 	requestedQuota int,
 	chargedQuota int,
 	chargeSucceeded bool,
+	sensitiveInput string,
+	sensitiveWords []string,
 ) {
+	originalBytes := len(sensitiveInput)
+	sensitiveInput = strings.ToValidUTF8(sensitiveInput, "\uFFFD")
+	truncated := len(sensitiveInput) > sensitiveInputAuditMaxBytes
+	if truncated {
+		cutoff := sensitiveInputAuditMaxBytes
+		for cutoff > 0 && !utf8.ValidString(sensitiveInput[:cutoff]) {
+			cutoff--
+		}
+		sensitiveInput = sensitiveInput[:cutoff]
+	}
+
+	deduplicatedWords := make([]string, 0, len(sensitiveWords))
+	seenWords := make(map[string]struct{}, len(sensitiveWords))
+	for _, word := range sensitiveWords {
+		word = strings.TrimSpace(word)
+		if word == "" {
+			continue
+		}
+		if _, exists := seenWords[word]; exists {
+			continue
+		}
+		seenWords[word] = struct{}{}
+		deduplicatedWords = append(deduplicatedWords, word)
+	}
+
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:      0,
-		ModelName:      relayInfo.OriginModelName,
-		TokenName:      ctx.GetString("token_name"),
-		Quota:          chargedQuota,
-		Content:        "Sensitive input blocked",
-		TokenId:        relayInfo.TokenId,
-		UseTimeSeconds: int(time.Now().Unix() - relayInfo.StartTime.Unix()),
-		IsStream:       relayInfo.IsStream,
-		Group:          relayInfo.UsingGroup,
+		ChannelId:          0,
+		ModelName:          relayInfo.OriginModelName,
+		TokenName:          ctx.GetString("token_name"),
+		Quota:              chargedQuota,
+		Content:            sensitiveInput,
+		TokenId:            relayInfo.TokenId,
+		UseTimeSeconds:     int(time.Now().Unix() - relayInfo.StartTime.Unix()),
+		IsStream:           relayInfo.IsStream,
+		Group:              relayInfo.UsingGroup,
+		ContentIsSensitive: true,
 		Other: map[string]any{
-			"violation_fee":        true,
-			"violation_fee_code":   string(apiErr.GetErrorCode()),
-			"violation_fee_reason": string(violationFeeReasonLocalSensitiveWord),
-			"violation_multiplier": sensitiveViolationMultiplier(),
-			"billing_scope":        "input_tokens_only",
-			"prompt_tokens":        promptTokens,
-			"model_ratio":          relayInfo.PriceData.ModelRatio,
-			"group_ratio":          relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			"requested_quota":      requestedQuota,
-			"charged_quota":        chargedQuota,
-			"charge_succeeded":     chargeSucceeded,
-			"status_code":          apiErr.StatusCode,
+			"violation_fee":                  true,
+			"violation_fee_code":             string(apiErr.GetErrorCode()),
+			"violation_fee_reason":           string(violationFeeReasonLocalSensitiveWord),
+			"violation_multiplier":           sensitiveViolationMultiplier(),
+			"billing_scope":                  "input_tokens_only",
+			"prompt_tokens":                  promptTokens,
+			"model_ratio":                    relayInfo.PriceData.ModelRatio,
+			"group_ratio":                    relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			"requested_quota":                requestedQuota,
+			"charged_quota":                  chargedQuota,
+			"charge_succeeded":               chargeSucceeded,
+			"status_code":                    apiErr.StatusCode,
+			"sensitive_words":                deduplicatedWords,
+			"sensitive_input_original_bytes": originalBytes,
+			"sensitive_input_truncated":      truncated,
 		},
 	})
 }

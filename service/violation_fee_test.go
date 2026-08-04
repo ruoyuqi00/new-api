@@ -4,8 +4,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -219,7 +221,7 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 	const promptTokens = 1_250
 	feeQuota, err := CalculateLocalSensitiveInputQuota(relayInfo, promptTokens)
 	require.NoError(t, err)
-	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, promptTokens))
+	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, promptTokens, "", nil))
 	assert.False(t, ChargeViolationFeeIfNeeded(c, relayInfo, apiErr), "local violations must not be charged again by the upstream failure path")
 
 	var user model.User
@@ -258,6 +260,51 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 	assert.NotContains(t, other, "base_amount")
 }
 
+func TestRecordLocalSensitiveViolationStoresBoundedAuditEvidence(t *testing.T) {
+	truncate(t)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          941,
+		StartTime:       time.Now(),
+		OriginModelName: "claude-test",
+		UsingGroup:      "default",
+		PriceData: types.PriceData{
+			ModelRatio:     1,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	apiErr := types.NewErrorWithStatusCode(
+		errors.New("sensitive words detected"),
+		types.ErrorCodeSensitiveWordsDetected,
+		http.StatusBadRequest,
+	)
+	input := strings.Repeat("a", 64*1024-1) + "违规" + strings.Repeat("b", 32)
+
+	recordLocalSensitiveViolation(
+		c,
+		relayInfo,
+		apiErr,
+		100,
+		25,
+		25,
+		true,
+		input,
+		[]string{"blocked", "", "blocked"},
+	)
+
+	var saved model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).First(&saved).Error)
+	assert.LessOrEqual(t, len(saved.Content), 64*1024)
+	assert.True(t, utf8.ValidString(saved.Content))
+
+	var other map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(saved.Other, &other))
+	assert.Equal(t, []any{"blocked"}, other["sensitive_words"])
+	assert.Equal(t, float64(len(input)), other["sensitive_input_original_bytes"])
+	assert.Equal(t, true, other["sensitive_input_truncated"])
+}
+
 func TestChargeLocalViolationFeeInsufficientQuotaKeepsBlockWithAuditLog(t *testing.T) {
 	truncate(t)
 
@@ -292,7 +339,7 @@ func TestChargeLocalViolationFeeInsufficientQuotaKeepsBlockWithAuditLog(t *testi
 		types.ErrOptionWithSkipRetry(),
 	)
 
-	assert.False(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100))
+	assert.False(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100, "", nil))
 
 	var user model.User
 	require.NoError(t, model.DB.First(&user, userID).Error)
@@ -370,7 +417,7 @@ func TestChargeLocalViolationFeeHonorsSubscriptionOnlyPreference(t *testing.T) {
 	)
 
 	const feeQuota = 100
-	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100))
+	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100, "", nil))
 
 	var user model.User
 	require.NoError(t, model.DB.First(&user, userID).Error)

@@ -19,7 +19,7 @@
 - Modify: `model/log.go`
 - Test: `model/log_sensitive_input_audit_test.go`
 
-- [ ] **Step 1: Write failing service tests for bounded UTF-8 evidence**
+- [x] **Step 1: Write failing service tests for bounded UTF-8 evidence**
 
 Add deterministic tests which call the local violation logging path with duplicate terms and input larger than 64 KiB, then assert that `logs.content` is valid UTF-8 and no larger than 65,536 bytes, and that `other` contains deduplicated `sensitive_words`, `sensitive_input_original_bytes`, and `sensitive_input_truncated`.
 
@@ -31,7 +31,7 @@ assert.Equal(t, float64(len(input)), other["sensitive_input_original_bytes"])
 assert.Equal(t, true, other["sensitive_input_truncated"])
 ```
 
-- [ ] **Step 2: Write a failing model test for self-log redaction**
+- [x] **Step 2: Write a failing model test for self-log redaction**
 
 Create one local-sensitive violation log and one normal log, call `formatUserLogs`, and assert only the violation log is rewritten and stripped.
 
@@ -42,13 +42,13 @@ assert.NotContains(t, common.StrToMap(logs[0].Other), "sensitive_words")
 assert.Equal(t, "normal content", logs[1].Content)
 ```
 
-- [ ] **Step 3: Run the focused tests and observe failure**
+- [x] **Step 3: Run the focused tests and observe failure**
 
 Run: `go test ./service ./model -run 'Sensitive(Input|Violation)' -count=1`
 
 Expected: FAIL because the charge API does not accept evidence and self-log formatting does not redact it.
 
-- [ ] **Step 4: Implement minimal capture and redaction**
+- [x] **Step 4: Implement minimal capture and redaction**
 
 Define the durable log constants in `model/log.go`, update `formatUserLogs`, and extend the charge call without modifying charge calculation or retry behavior.
 
@@ -66,7 +66,7 @@ if other["violation_fee_reason"] == SensitiveInputViolationReason {
 
 In `controller/relay.go`, retain the matcher result and pass `meta.CombineText` plus the matched words only after the existing quota calculation. In `service/violation_fee.go`, truncate at a UTF-8 boundary, deduplicate non-empty matched words, put the bounded content in `RecordConsumeLogParams.Content`, and store only the approved metadata. Never log the content or words through `logger`.
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run: `go test ./service ./model ./controller -run 'Sensitive(Input|Violation)' -count=1`
 
