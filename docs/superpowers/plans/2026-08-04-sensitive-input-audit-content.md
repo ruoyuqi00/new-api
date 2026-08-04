@@ -256,7 +256,7 @@ git commit -m "feat: manage sensitive input audit retention"
 - Verify all changed files
 - Update deployment image only on `199.231.85.194`
 
-- [ ] **Step 1: Run backend and frontend verification**
+- [x] **Step 1: Run backend and frontend verification**
 
 Run:
 
@@ -269,26 +269,26 @@ cd web/default && bun run build
 
 Expected: every command exits 0.
 
-- [ ] **Step 2: Review the final diff and commit residual formatting changes**
+- [x] **Step 2: Review the final diff and commit residual formatting changes**
 
 Run: `git diff --check && git status --short && git diff --stat HEAD~4`
 
 Verify there are no secrets, raw request logging, database-specific JSON operations, or changes to unrelated pricing/routing behavior. Commit any required formatting-only residue.
 
-- [ ] **Step 3: Push the feature branch**
+- [x] **Step 3: Push the feature branch**
 
 Run: `git push -u origin codex/sensitive-input-audit-content-20260804`
 
 Expected: branch is present on the configured origin.
 
-- [ ] **Step 4: Build and stage a uniquely tagged production image**
+- [x] **Step 4: Build and stage a uniquely tagged production image**
 
 Transfer only the committed source to the server using the existing SSH operations key, build a tag containing the commit prefix, and start a candidate container on the existing Docker network without changing the current Caddy upstream.
 
-- [ ] **Step 5: Verify the candidate and perform the existing rolling swap**
+- [x] **Step 5: Verify the candidate and perform the existing rolling swap**
 
 Verify candidate health, `/api/status`, unauthorized `/v1/models`, the root-only cleanup route, and user/admin log redaction contracts without emitting any stored content. Switch the stable `newapi` container name only after the candidate is healthy; keep Caddy running throughout. Roll back immediately if health or direct requests fail.
 
-- [ ] **Step 6: Verify production state**
+- [x] **Step 6: Verify production state**
 
 Confirm the final `newapi` container is healthy with zero restarts, Caddy still routes to `newapi:3000`, all five YuAPI status endpoints remain reachable as previously configured, and the scheduled task type appears without exposing evidence. Report the deployed image tag, commit, test results, and retained seven-day policy.
