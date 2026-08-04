@@ -151,7 +151,7 @@ git commit -m "feat: purge expired sensitive input evidence"
 - Modify: `controller/system_task.go`
 - Modify: `router/api-router.go`
 
-- [ ] **Step 1: Write failing system-task tests**
+- [x] **Step 1: Write failing system-task tests**
 
 Assert the handler type is registered and scheduled every 24 hours, snapshots the retention days into its payload, drains multiple batches, records only purge counts in state/result, and returns the active task when manual creation races.
 
@@ -162,13 +162,13 @@ assert.True(t, handler.Enabled())
 assert.Equal(t, SensitiveInputCleanupPayload{RetentionDays: 7, BatchSize: 200}, handler.NewPayload())
 ```
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `go test ./service -run SensitiveInputCleanupTask -count=1`
 
 Expected: FAIL because the task type and handler do not exist.
 
-- [ ] **Step 3: Implement the scheduled handler and start function**
+- [x] **Step 3: Implement the scheduled handler and start function**
 
 Add `SystemTaskTypeSensitiveInputCleanup = "sensitive_input_cleanup"`. Implement `ScheduledSystemTaskHandler` in a focused file, register it in `init`, compute the cutoff from its payload, repeatedly call the model batch until zero rows are purged, update progress safely, and finish with `purged_count` only.
 
@@ -182,7 +182,7 @@ func (sensitiveInputCleanupHandler) NewPayload() any {
 
 Expose `POST /api/system-task/sensitive-input-cleanup` inside the existing `RootAuth` route group. The controller starts or returns the active task and never accepts an arbitrary cutoff from the request.
 
-- [ ] **Step 4: Run backend tests and commit**
+- [x] **Step 4: Run backend tests and commit**
 
 Run: `go test ./model ./setting ./service ./controller ./router -count=1`
 
