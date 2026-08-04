@@ -150,6 +150,7 @@ func InitOptionMap() {
 	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
 	common.OptionMap["GroupGroupRatio"] = ratio_setting.GroupGroupRatio2JSONString()
 	common.OptionMap["SensitiveInputCheckGroups"] = setting.SensitiveInputCheckGroups2JSONString()
+	common.OptionMap["SensitiveInputRetentionDays"] = strconv.Itoa(setting.SensitiveInputRetentionDays)
 	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()
 	common.OptionMap["CompletionRatio"] = ratio_setting.CompletionRatio2JSONString()
 	common.OptionMap["ImageRatio"] = ratio_setting.ImageRatio2JSONString()
@@ -226,6 +227,11 @@ func UpdateOption(key string, value string) error {
 			return err
 		}
 	}
+	if key == "SensitiveInputRetentionDays" {
+		if _, err := setting.ParseSensitiveInputRetentionDays(value); err != nil {
+			return err
+		}
+	}
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -255,6 +261,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 			return err
 		}
 	}
+	if value, ok := values["SensitiveInputRetentionDays"]; ok {
+		if _, err := setting.ParseSensitiveInputRetentionDays(value); err != nil {
+			return err
+		}
+	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		for k, v := range values {
 			option := Option{Key: k}
@@ -280,6 +291,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if key == "SensitiveInputRetentionDays" {
+		if _, err = setting.ParseSensitiveInputRetentionDays(value); err != nil {
+			return err
+		}
+	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
@@ -566,6 +582,8 @@ func updateOptionMap(key string, value string) (err error) {
 		err = ratio_setting.UpdateGroupGroupRatioByJSONString(value)
 	case "SensitiveInputCheckGroups":
 		err = setting.UpdateSensitiveInputCheckGroupsByJSONString(value)
+	case "SensitiveInputRetentionDays":
+		err = setting.UpdateSensitiveInputRetentionDays(value)
 	case "UserUsableGroups":
 		err = setting.UpdateUserUsableGroupsByJSONString(value)
 	case "CompletionRatio":

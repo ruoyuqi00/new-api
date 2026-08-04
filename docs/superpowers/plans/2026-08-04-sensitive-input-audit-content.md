@@ -86,7 +86,7 @@ git commit -m "feat: retain sensitive input audit evidence"
 - Modify: `setting/sensitive_test.go`
 - Modify: `model/option.go`
 
-- [ ] **Step 1: Write failing retention-setting tests**
+- [x] **Step 1: Write failing retention-setting tests**
 
 Test the default of 7, accepted values 1 and 365, and rejection of 0, 366, and non-numeric values without changing the previous value.
 
@@ -97,7 +97,7 @@ assert.Error(t, UpdateSensitiveInputRetentionDays("0"))
 assert.Equal(t, 7, SensitiveInputRetentionDays)
 ```
 
-- [ ] **Step 2: Write failing cleanup model tests**
+- [x] **Step 2: Write failing cleanup model tests**
 
 Using the project database fixture, insert expired and unexpired local-sensitive logs plus an unrelated consume log. Call one batch and assert only expired evidence is cleared: content becomes the generic marker, `sensitive_words` is removed, purge metadata is added, and quota, prompt tokens, model, user, status, and violation reason are unchanged.
 
@@ -109,13 +109,13 @@ assert.Equal(t, originalQuota, expired.Quota)
 assert.Equal(t, true, expiredOther["sensitive_input_purged"])
 ```
 
-- [ ] **Step 3: Run tests and observe failure**
+- [x] **Step 3: Run tests and observe failure**
 
 Run: `go test ./setting ./model -run 'SensitiveInput(Retention|Cleanup)' -count=1`
 
 Expected: FAIL because retention parsing and purge APIs do not exist.
 
-- [ ] **Step 4: Implement settings and GORM cleanup**
+- [x] **Step 4: Implement settings and GORM cleanup**
 
 Add `SensitiveInputRetentionDays = 7` plus a strict 1..365 parser in `setting/sensitive.go`; expose it from `InitOptionMap` and apply it through `updateOptionMap` in `model/option.go`.
 
@@ -131,7 +131,7 @@ other["sensitive_input_purged"] = true
 other["sensitive_input_purged_at"] = purgedAt
 ```
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `go test ./setting ./model -run 'SensitiveInput(Retention|Cleanup)' -count=1`
 

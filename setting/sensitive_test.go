@@ -38,3 +38,23 @@ func TestShouldCheckPromptSensitiveForGroup(t *testing.T) {
 		assert.False(t, ShouldCheckPromptSensitiveForGroup("restricted"))
 	})
 }
+
+func TestUpdateSensitiveInputRetentionDays(t *testing.T) {
+	original := SensitiveInputRetentionDays
+	t.Cleanup(func() { SensitiveInputRetentionDays = original })
+
+	require.NoError(t, UpdateSensitiveInputRetentionDays("7"))
+	assert.Equal(t, 7, SensitiveInputRetentionDays)
+	require.NoError(t, UpdateSensitiveInputRetentionDays("1"))
+	assert.Equal(t, 1, SensitiveInputRetentionDays)
+	require.NoError(t, UpdateSensitiveInputRetentionDays("365"))
+	assert.Equal(t, 365, SensitiveInputRetentionDays)
+
+	for _, invalid := range []string{"0", "366", "invalid"} {
+		t.Run(invalid, func(t *testing.T) {
+			before := SensitiveInputRetentionDays
+			assert.Error(t, UpdateSensitiveInputRetentionDays(invalid))
+			assert.Equal(t, before, SensitiveInputRetentionDays)
+		})
+	}
+}
