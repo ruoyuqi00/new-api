@@ -5257,5 +5257,20 @@
   "Copy API Base URL": "Copy API Base URL",
   "Do not use global.yuaiapi.com as an API Base URL.": "Do not use global.yuaiapi.com as an API Base URL.",
   "For high concurrency and long-running requests": "For high concurrency and long-running requests",
-  "For standard API requests": "For standard API requests"
+  "For standard API requests": "For standard API requests",
+  "Sensitive input retention days": "Sensitive input retention days",
+  "Blocked input and matched words are removed after this many days. Billing audit records are kept.": "Blocked input and matched words are removed after this many days. Billing audit records are kept.",
+  "Audit evidence cleanup": "Audit evidence cleanup",
+  "Run the retention cleanup now without deleting billing records.": "Run the retention cleanup now without deleting billing records.",
+  "Run cleanup now": "Run cleanup now",
+  "Run sensitive input cleanup now?": "Run sensitive input cleanup now?",
+  "Only expired blocked input and matched words will be removed. Billing audit records will be kept.": "Only expired blocked input and matched words will be removed. Billing audit records will be kept.",
+  "Sensitive input cleanup started.": "Sensitive input cleanup started.",
+  "Failed to start sensitive input cleanup.": "Failed to start sensitive input cleanup.",
+  "Matched sensitive words": "Matched sensitive words",
+  "Capture status": "Capture status",
+  "Truncated from {{bytes}} bytes": "Truncated from {{bytes}} bytes",
+  "Original input and matched words purged": "Original input and matched words purged",
+  "Blocked input": "Blocked input",
+  "Sensitive input cleanup": "Sensitive input cleanup"
 }

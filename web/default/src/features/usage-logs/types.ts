@@ -201,7 +201,13 @@ export interface LogOtherData {
   violation_fee?: boolean
   violation_fee_code?: string
   violation_fee_marker?: string
+  violation_fee_reason?: string
   fee_quota?: number
+  sensitive_words?: string[]
+  sensitive_input_original_bytes?: number
+  sensitive_input_truncated?: boolean
+  sensitive_input_purged?: boolean
+  sensitive_input_purged_at?: number
   // Reject / intercept reason (admin)
   reject_reason?: string
   // Task-related fields (for refund logs, type=6)

@@ -5257,5 +5257,20 @@
   "Copy API Base URL": "Копировать базовый URL API",
   "Do not use global.yuaiapi.com as an API Base URL.": "Не используйте global.yuaiapi.com как базовый URL API.",
   "For high concurrency and long-running requests": "Для высокой параллельности и длительных запросов",
-  "For standard API requests": "Для стандартных запросов API"
+  "For standard API requests": "Для стандартных запросов API",
+  "Sensitive input retention days": "Срок хранения чувствительного ввода",
+  "Blocked input and matched words are removed after this many days. Billing audit records are kept.": "Заблокированный ввод и найденные слова удаляются по истечении этого срока. Данные аудита оплаты сохраняются.",
+  "Audit evidence cleanup": "Очистка данных аудита",
+  "Run the retention cleanup now without deleting billing records.": "Запустить очистку сейчас без удаления данных оплаты.",
+  "Run cleanup now": "Очистить сейчас",
+  "Run sensitive input cleanup now?": "Запустить очистку чувствительного ввода сейчас?",
+  "Only expired blocked input and matched words will be removed. Billing audit records will be kept.": "Будут удалены только просроченный заблокированный ввод и найденные слова. Данные аудита оплаты сохранятся.",
+  "Sensitive input cleanup started.": "Очистка чувствительного ввода запущена.",
+  "Failed to start sensitive input cleanup.": "Не удалось запустить очистку чувствительного ввода.",
+  "Matched sensitive words": "Найденные чувствительные слова",
+  "Capture status": "Статус хранения",
+  "Truncated from {{bytes}} bytes": "Обрезано с {{bytes}} байт",
+  "Original input and matched words purged": "Исходный ввод и найденные слова удалены",
+  "Blocked input": "Заблокированный ввод",
+  "Sensitive input cleanup": "Очистка чувствительного ввода"
 }

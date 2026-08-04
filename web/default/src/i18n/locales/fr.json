@@ -5257,5 +5257,20 @@
   "Copy API Base URL": "Copier l'URL de base de l'API",
   "Do not use global.yuaiapi.com as an API Base URL.": "N'utilisez pas global.yuaiapi.com comme URL de base de l'API.",
   "For high concurrency and long-running requests": "Pour les requêtes à forte concurrence et de longue durée",
-  "For standard API requests": "Pour les requêtes API standard"
+  "For standard API requests": "Pour les requêtes API standard",
+  "Sensitive input retention days": "Jours de conservation des entrées sensibles",
+  "Blocked input and matched words are removed after this many days. Billing audit records are kept.": "Les entrées bloquées et les termes détectés sont supprimés après ce délai. Les données de facturation sont conservées.",
+  "Audit evidence cleanup": "Nettoyage des preuves d'audit",
+  "Run the retention cleanup now without deleting billing records.": "Exécuter maintenant le nettoyage sans supprimer les données de facturation.",
+  "Run cleanup now": "Nettoyer maintenant",
+  "Run sensitive input cleanup now?": "Nettoyer maintenant les entrées sensibles ?",
+  "Only expired blocked input and matched words will be removed. Billing audit records will be kept.": "Seuls les entrées bloquées expirées et les termes détectés seront supprimés. Les données de facturation seront conservées.",
+  "Sensitive input cleanup started.": "Le nettoyage des entrées sensibles a démarré.",
+  "Failed to start sensitive input cleanup.": "Impossible de démarrer le nettoyage des entrées sensibles.",
+  "Matched sensitive words": "Termes sensibles détectés",
+  "Capture status": "État de conservation",
+  "Truncated from {{bytes}} bytes": "Tronqué depuis {{bytes}} octets",
+  "Original input and matched words purged": "Entrée d'origine et termes détectés supprimés",
+  "Blocked input": "Entrée bloquée",
+  "Sensitive input cleanup": "Nettoyage des entrées sensibles"
 }

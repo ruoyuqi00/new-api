@@ -5257,5 +5257,20 @@
   "Copy API Base URL": "API ベース URL をコピー",
   "Do not use global.yuaiapi.com as an API Base URL.": "global.yuaiapi.com を API ベース URL として使用しないでください。",
   "For high concurrency and long-running requests": "高同時実行・長時間リクエスト用",
-  "For standard API requests": "標準 API リクエスト用"
+  "For standard API requests": "標準 API リクエスト用",
+  "Sensitive input retention days": "機密入力の保持日数",
+  "Blocked input and matched words are removed after this many days. Billing audit records are kept.": "この日数を過ぎると、ブロックされた入力と一致語が削除されます。課金監査記録は保持されます。",
+  "Audit evidence cleanup": "監査証拠のクリーンアップ",
+  "Run the retention cleanup now without deleting billing records.": "課金記録を削除せずに保持期限のクリーンアップを今すぐ実行します。",
+  "Run cleanup now": "今すぐクリーンアップ",
+  "Run sensitive input cleanup now?": "機密入力のクリーンアップを今すぐ実行しますか？",
+  "Only expired blocked input and matched words will be removed. Billing audit records will be kept.": "期限切れのブロック入力と一致語のみが削除されます。課金監査記録は保持されます。",
+  "Sensitive input cleanup started.": "機密入力のクリーンアップを開始しました。",
+  "Failed to start sensitive input cleanup.": "機密入力のクリーンアップを開始できませんでした。",
+  "Matched sensitive words": "一致した機密語",
+  "Capture status": "保持状態",
+  "Truncated from {{bytes}} bytes": "{{bytes}} バイトから切り詰め",
+  "Original input and matched words purged": "元の入力と一致語を削除済み",
+  "Blocked input": "ブロックされた入力",
+  "Sensitive input cleanup": "機密入力のクリーンアップ"
 }

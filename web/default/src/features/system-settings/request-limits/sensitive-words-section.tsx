@@ -17,11 +17,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect } from 'react'
+import { Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import * as z from 'zod'
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -31,9 +44,11 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 
+import { startSensitiveInputCleanupTask } from '../api'
 import {
   SettingsForm,
   SettingsSwitchContent,
@@ -47,6 +62,7 @@ const sensitiveSchema = z.object({
   CheckSensitiveEnabled: z.boolean(),
   CheckSensitiveOnPromptEnabled: z.boolean(),
   SensitiveWords: z.string().optional(),
+  SensitiveInputRetentionDays: z.number().int().min(1).max(365),
 })
 
 type SensitiveFormValues = z.infer<typeof sensitiveSchema>
@@ -60,6 +76,8 @@ export function SensitiveWordsSection({
 }: SensitiveWordsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const [showCleanupDialog, setShowCleanupDialog] = useState(false)
+  const [isStartingCleanup, setIsStartingCleanup] = useState(false)
   const form = useForm<SensitiveFormValues>({
     resolver: zodResolver(sensitiveSchema),
     defaultValues,
@@ -77,6 +95,28 @@ export function SensitiveWordsSection({
 
     for (const [key, value] of updates) {
       await updateOption.mutateAsync({ key, value: value ?? '' })
+    }
+  }
+
+  const handleCleanup = async () => {
+    setIsStartingCleanup(true)
+    try {
+      const response = await startSensitiveInputCleanupTask()
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message || t('Failed to start sensitive input cleanup.')
+        )
+      }
+      toast.success(t('Sensitive input cleanup started.'))
+      setShowCleanupDialog(false)
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to start sensitive input cleanup.')
+      )
+    } finally {
+      setIsStartingCleanup(false)
     }
   }
 
@@ -159,8 +199,83 @@ export function SensitiveWordsSection({
               </FormItem>
             )}
           />
+
+          <FormField
+            control={form.control}
+            name='SensitiveInputRetentionDays'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Sensitive input retention days')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={1}
+                    max={365}
+                    className='w-32'
+                    value={field.value}
+                    onChange={(event) => field.onChange(event.target.valueAsNumber)}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Blocked input and matched words are removed after this many days. Billing audit records are kept.'
+                  )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <div className='flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between'>
+            <div className='space-y-1'>
+              <p className='text-sm font-medium'>
+                {t('Audit evidence cleanup')}
+              </p>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Run the retention cleanup now without deleting billing records.'
+                )}
+              </p>
+            </div>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => setShowCleanupDialog(true)}
+              disabled={isStartingCleanup}
+            >
+              <Trash2 className='size-4' aria-hidden='true' />
+              {t('Run cleanup now')}
+            </Button>
+          </div>
         </SettingsForm>
       </Form>
+
+      <AlertDialog open={showCleanupDialog} onOpenChange={setShowCleanupDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('Run sensitive input cleanup now?')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                'Only expired blocked input and matched words will be removed. Billing audit records will be kept.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isStartingCleanup}>
+              {t('Cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant='destructive'
+              onClick={handleCleanup}
+              disabled={isStartingCleanup}
+            >
+              {t('Run cleanup now')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsSection>
   )
 }

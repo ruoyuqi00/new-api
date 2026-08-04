@@ -23,6 +23,7 @@ import type {
   FetchUpstreamRatiosRequest,
   GroupCatalogResponse,
   LogCleanupTask,
+  SensitiveInputCleanupTask,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -72,6 +73,13 @@ export async function getCurrentLogCleanupTask() {
     {
       params: { type: 'log_cleanup' },
     }
+  )
+  return res.data
+}
+
+export async function startSensitiveInputCleanupTask() {
+  const res = await api.post<SystemTaskResponse<SensitiveInputCleanupTask>>(
+    '/api/system-task/sensitive-input-cleanup'
   )
   return res.data
 }

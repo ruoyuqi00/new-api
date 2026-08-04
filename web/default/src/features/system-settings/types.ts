@@ -110,6 +110,27 @@ export type LogCleanupTask = SystemTask<
   LogCleanupTaskResult
 >
 
+export type SensitiveInputCleanupTaskPayload = {
+  retention_days: number
+  batch_size: number
+}
+
+export type SensitiveInputCleanupTaskState = {
+  purged_count: number
+  batches: number
+  progress: number
+}
+
+export type SensitiveInputCleanupTaskResult = {
+  purged_count: number
+}
+
+export type SensitiveInputCleanupTask = SystemTask<
+  SensitiveInputCleanupTaskPayload,
+  SensitiveInputCleanupTaskState,
+  SensitiveInputCleanupTaskResult
+>
+
 export type SystemTaskResponse<TTask = SystemTask | null> = {
   success: boolean
   message: string
@@ -402,6 +423,7 @@ export type SecuritySettings = {
   CheckSensitiveEnabled: boolean
   CheckSensitiveOnPromptEnabled: boolean
   SensitiveWords: string
+  SensitiveInputRetentionDays: number
   'fetch_setting.enable_ssrf_protection': boolean
   'fetch_setting.allow_private_ip': boolean
   'fetch_setting.domain_filter_mode': boolean

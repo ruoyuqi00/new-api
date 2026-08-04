@@ -207,7 +207,7 @@ git commit -m "feat: schedule sensitive input cleanup"
 - Temporarily create then delete: `web/default/scripts/add-missing-keys.mjs`
 - Modify mechanically: `web/default/src/i18n/locales/{en,zh,fr,ja,ru,vi}.json`
 
-- [ ] **Step 1: Add frontend types and API client**
+- [x] **Step 1: Add frontend types and API client**
 
 Extend `LogOther` with the approved sensitive evidence fields, `SystemOptions` with `SensitiveInputRetentionDays`, and system-task types with the cleanup payload/state/result. Add a typed POST client for `/api/system-task/sensitive-input-cleanup`.
 
@@ -219,15 +219,15 @@ export type SensitiveInputCleanupTask = SystemTask<
 >
 ```
 
-- [ ] **Step 2: Render admin-only evidence and cleanup status**
+- [x] **Step 2: Render admin-only evidence and cleanup status**
 
 In the details dialog, only render the blocked-input section when `isAdmin` and `violation_fee_reason === 'local_sensitive_word'`. Show matched terms, truncation/original-size metadata, or the purged state; constrain the full text in a scrollable, wrapping container. Suppress the duplicate generic content section for this case.
 
-- [ ] **Step 3: Add retention and manual-cleanup controls**
+- [x] **Step 3: Add retention and manual-cleanup controls**
 
 Add a number input constrained to 1..365 to the sensitive-words form. Add a destructive-confirmation dialog and mutation for manual cleanup; on success show the returned task state and leave cleanup execution to the existing task runner. Add the task label to the system task panel.
 
-- [ ] **Step 4: Add all six locale translations through the mandated script**
+- [x] **Step 4: Add all six locale translations through the mandated script**
 
 Create `web/default/scripts/add-missing-keys.mjs` using `readFileSync`/`writeFileSync` and explicit translations for every new source key. Run:
 
@@ -239,7 +239,7 @@ bun run i18n:sync
 
 Delete the temporary script with `apply_patch`; do not hand-edit locale JSON.
 
-- [ ] **Step 5: Build frontend and commit**
+- [x] **Step 5: Build frontend and commit**
 
 Run: `cd web/default && bun run build`
 

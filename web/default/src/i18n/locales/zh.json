@@ -5257,5 +5257,20 @@
   "Copy API Base URL": "复制 API 请求地址",
   "Do not use global.yuaiapi.com as an API Base URL.": "请勿将 global.yuaiapi.com 用作 API 请求地址。",
   "For high concurrency and long-running requests": "用于高并发和长时间请求",
-  "For standard API requests": "用于常规 API 请求"
+  "For standard API requests": "用于常规 API 请求",
+  "Sensitive input retention days": "敏感输入保留天数",
+  "Blocked input and matched words are removed after this many days. Billing audit records are kept.": "超过该天数后将清除被拦截的输入原文与命中词，计费审计记录仍会保留。",
+  "Audit evidence cleanup": "审计证据清理",
+  "Run the retention cleanup now without deleting billing records.": "立即执行保留期清理，不删除计费记录。",
+  "Run cleanup now": "立即清理",
+  "Run sensitive input cleanup now?": "立即清理敏感输入审计证据？",
+  "Only expired blocked input and matched words will be removed. Billing audit records will be kept.": "只会清除已过期的被拦截输入原文与命中词，计费审计记录会继续保留。",
+  "Sensitive input cleanup started.": "敏感输入清理任务已启动。",
+  "Failed to start sensitive input cleanup.": "敏感输入清理任务启动失败。",
+  "Matched sensitive words": "命中的敏感词",
+  "Capture status": "留存状态",
+  "Truncated from {{bytes}} bytes": "原始 {{bytes}} 字节，已截断保存",
+  "Original input and matched words purged": "原始输入与命中词已清理",
+  "Blocked input": "被拦截的输入",
+  "Sensitive input cleanup": "敏感输入清理"
 }

@@ -5257,5 +5257,20 @@
   "Copy API Base URL": "Sao chép URL cơ sở API",
   "Do not use global.yuaiapi.com as an API Base URL.": "Không dùng global.yuaiapi.com làm URL cơ sở API.",
   "For high concurrency and long-running requests": "Dành cho lưu lượng đồng thời cao và yêu cầu kéo dài",
-  "For standard API requests": "Dành cho yêu cầu API thông thường"
+  "For standard API requests": "Dành cho yêu cầu API thông thường",
+  "Sensitive input retention days": "Số ngày lưu dữ liệu đầu vào nhạy cảm",
+  "Blocked input and matched words are removed after this many days. Billing audit records are kept.": "Dữ liệu đầu vào bị chặn và các từ khớp sẽ bị xóa sau thời hạn này. Bản ghi kiểm toán tính phí vẫn được giữ lại.",
+  "Audit evidence cleanup": "Dọn dẹp bằng chứng kiểm toán",
+  "Run the retention cleanup now without deleting billing records.": "Chạy dọn dẹp thời hạn lưu ngay mà không xóa bản ghi tính phí.",
+  "Run cleanup now": "Dọn dẹp ngay",
+  "Run sensitive input cleanup now?": "Chạy dọn dẹp dữ liệu đầu vào nhạy cảm ngay?",
+  "Only expired blocked input and matched words will be removed. Billing audit records will be kept.": "Chỉ dữ liệu đầu vào bị chặn đã hết hạn và các từ khớp bị xóa. Bản ghi kiểm toán tính phí vẫn được giữ lại.",
+  "Sensitive input cleanup started.": "Đã bắt đầu dọn dẹp dữ liệu đầu vào nhạy cảm.",
+  "Failed to start sensitive input cleanup.": "Không thể bắt đầu dọn dẹp dữ liệu đầu vào nhạy cảm.",
+  "Matched sensitive words": "Các từ nhạy cảm đã khớp",
+  "Capture status": "Trạng thái lưu giữ",
+  "Truncated from {{bytes}} bytes": "Đã cắt bớt từ {{bytes}} byte",
+  "Original input and matched words purged": "Đã xóa dữ liệu đầu vào gốc và các từ khớp",
+  "Blocked input": "Dữ liệu đầu vào bị chặn",
+  "Sensitive input cleanup": "Dọn dẹp dữ liệu đầu vào nhạy cảm"
 }

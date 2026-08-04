@@ -430,6 +430,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const typeConfig = getLogTypeConfig(props.log.type)
 
   const isViolation = isViolationFeeLog(other)
+  const isLocalSensitiveViolation =
+    other?.violation_fee_reason === 'local_sensitive_word'
+  const showSensitiveInputEvidence = props.isAdmin && isLocalSensitiveViolation
   const isRefund = props.log.type === 6
   const isConsume = props.log.type === 2
   const isTopup = props.log.type === 1
@@ -782,6 +785,29 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 value={other.violation_fee_marker}
               />
             )}
+            {showSensitiveInputEvidence &&
+              other.sensitive_words &&
+              other.sensitive_words.length > 0 && (
+                <DetailRow
+                  label={t('Matched sensitive words')}
+                  value={other.sensitive_words.join(', ')}
+                  mono
+                />
+              )}
+            {showSensitiveInputEvidence && other.sensitive_input_truncated && (
+              <DetailRow
+                label={t('Capture status')}
+                value={t('Truncated from {{bytes}} bytes', {
+                  bytes: other.sensitive_input_original_bytes ?? 0,
+                })}
+              />
+            )}
+            {showSensitiveInputEvidence && other.sensitive_input_purged && (
+              <DetailRow
+                label={t('Capture status')}
+                value={t('Original input and matched words purged')}
+              />
+            )}
             <DetailRow
               label={t('Fee Amount')}
               value={formatLogQuota(other.fee_quota ?? props.log.quota)}
@@ -789,6 +815,36 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           </DetailSection>
         )}
+
+        {showSensitiveInputEvidence &&
+          !other?.sensitive_input_purged &&
+          details && (
+            <DetailSection
+              icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
+              label={t('Blocked input')}
+              variant='danger'
+            >
+              <div className='bg-muted/30 relative min-w-0 overflow-hidden rounded-md border p-2.5'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='absolute top-1.5 right-1.5 h-5 w-5 p-0'
+                  onClick={() => copyToClipboard(details)}
+                  title={t('Copy to clipboard')}
+                  aria-label={t('Copy to clipboard')}
+                >
+                  {copiedText === details ? (
+                    <Check className='size-3 text-green-600' />
+                  ) : (
+                    <Copy className='size-3' />
+                  )}
+                </Button>
+                <p className='max-h-72 min-w-0 overflow-y-auto pr-6 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap sm:wrap-break-word'>
+                  {details}
+                </p>
+              </div>
+            </DetailSection>
+          )}
 
         {/* Refund details (type=6) */}
         {isRefund && other && (other.task_id || other.reason) && (
@@ -1188,7 +1244,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Content */}
-        {details && (
+        {details && !showSensitiveInputEvidence && (
           <div className='space-y-1.5'>
             <Label className='text-xs font-semibold'>{t('Content')}</Label>
             <div className='bg-muted/30 relative min-w-0 overflow-hidden rounded-md border p-2.5'>
