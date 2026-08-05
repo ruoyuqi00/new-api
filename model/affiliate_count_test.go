@@ -12,6 +12,7 @@ import (
 
 func setupAffiliateCountTest(t *testing.T) {
 	t.Helper()
+	require.NoError(t, DB.AutoMigrate(&Option{}))
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&User{}).Error)
 	originalInviterQuota := common.QuotaForInviter
 	originalInviteeQuota := common.QuotaForInvitee
@@ -20,13 +21,15 @@ func setupAffiliateCountTest(t *testing.T) {
 	originalComplianceVersion := paymentSetting.ComplianceTermsVersion
 	common.QuotaForInviter = 0
 	common.QuotaForInvitee = 0
-	paymentSetting.ComplianceConfirmed = true
-	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+	paymentSetting.ComplianceConfirmed = false
+	paymentSetting.ComplianceTermsVersion = ""
+	require.NoError(t, DB.Where(&Option{Key: affiliateCountReconciledOptionKey}).Delete(&Option{}).Error)
 	t.Cleanup(func() {
 		common.QuotaForInviter = originalInviterQuota
 		common.QuotaForInvitee = originalInviteeQuota
 		paymentSetting.ComplianceConfirmed = originalComplianceConfirmed
 		paymentSetting.ComplianceTermsVersion = originalComplianceVersion
+		require.NoError(t, DB.Where(&Option{Key: affiliateCountReconciledOptionKey}).Delete(&Option{}).Error)
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&User{}).Error)
 	})
 }
@@ -87,4 +90,18 @@ func TestReconcileAffiliateCountsUsesActiveInvitationBindings(t *testing.T) {
 
 	assert.Equal(t, 2, getAffiliateRewardUser(t, firstInviter.Id).AffCount)
 	assert.Equal(t, 1, getAffiliateRewardUser(t, secondInviter.Id).AffCount)
+}
+
+func TestReconcileAffiliateCountsRunsOnlyOnce(t *testing.T) {
+	setupAffiliateCountTest(t)
+	inviter := createAffiliateCountUser(t, "once-count-inviter", "once-count-code", 0)
+	createAffiliateCountUser(t, "once-count-invitee", "once-invitee-code", inviter.Id)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", inviter.Id).Update("aff_count", 99).Error)
+
+	require.NoError(t, ReconcileAffiliateCounts())
+	assert.Equal(t, 1, getAffiliateRewardUser(t, inviter.Id).AffCount)
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", inviter.Id).Update("aff_count", 77).Error)
+	require.NoError(t, ReconcileAffiliateCounts())
+	assert.Equal(t, 77, getAffiliateRewardUser(t, inviter.Id).AffCount)
 }

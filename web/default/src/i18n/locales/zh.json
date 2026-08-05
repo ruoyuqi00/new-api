@@ -3378,6 +3378,7 @@
     "Per-token logit bias map": "按 token 的 logit 偏置映射",
     "Percentage must be greater than zero when enabled": "启用时返利比例必须大于 0",
     "Percentage of eligible credited quota awarded to the inviter": "按被邀请人实际获得的符合条件额度计算并奖励邀请人",
+    "Percentage supports at most two decimal places": "返利比例最多支持两位小数",
     "Percentage:": "百分比：",
     "Performance": "性能",
     "Performance data is not yet available for this model.": "该模型暂无性能数据。",

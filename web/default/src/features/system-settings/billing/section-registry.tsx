@@ -1,3 +1,4 @@
+import { affiliateBasisPointsToPercent } from '@/lib/affiliate-rebate'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -64,8 +65,9 @@ const BILLING_SECTIONS = [
           QuotaForInviter: settings.QuotaForInviter,
           QuotaForInvitee: settings.QuotaForInvitee,
           AffiliateCreditRebateEnabled: settings.AffiliateCreditRebateEnabled,
-          AffiliateCreditRebateBasisPoints:
-            settings.AffiliateCreditRebateBasisPoints,
+          AffiliateCreditRebatePercent: affiliateBasisPointsToPercent(
+            settings.AffiliateCreditRebateBasisPoints
+          ),
           TopUpLink: settings.TopUpLink,
           general_setting: {
             docs_link: settings['general_setting.docs_link'],

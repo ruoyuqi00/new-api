@@ -21,7 +21,17 @@ export function affiliateBasisPointsToPercent(basisPoints: number): number {
 }
 
 export function affiliatePercentToBasisPoints(percent: number): number {
-  return Math.round((percent + Number.EPSILON) * 100)
+  const basisPoints = percent * 100
+  const roundedBasisPoints = Math.round(basisPoints)
+  if (
+    !Number.isFinite(percent) ||
+    Math.abs(basisPoints - roundedBasisPoints) > 1e-9
+  ) {
+    throw new RangeError(
+      'affiliate rebate percentage supports at most two decimal places'
+    )
+  }
+  return roundedBasisPoints
 }
 
 export function formatAffiliateRebatePercent(basisPoints: number): string {

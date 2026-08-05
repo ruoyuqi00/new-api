@@ -1,6 +1,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,8 +23,9 @@ var ErrInvalidAffiliateCredit = errors.New("invalid affiliate credit")
 
 type AffiliateReward struct {
 	Id               int    `json:"id"`
-	SourceType       string `json:"source_type" gorm:"type:varchar(32);uniqueIndex:idx_affiliate_reward_source"`
-	SourceId         string `json:"source_id" gorm:"type:varchar(255);uniqueIndex:idx_affiliate_reward_source"`
+	SourceType       string `json:"source_type" gorm:"type:varchar(32);uniqueIndex:idx_affiliate_reward_source_key"`
+	SourceKey        string `json:"-" gorm:"type:char(64);uniqueIndex:idx_affiliate_reward_source_key"`
+	SourceId         string `json:"source_id" gorm:"type:varchar(255)"`
 	InviteeId        int    `json:"invitee_id" gorm:"index"`
 	InviterId        int    `json:"inviter_id" gorm:"index"`
 	CreditedQuota    int    `json:"credited_quota"`
@@ -99,6 +102,9 @@ func CreditUserQuotaWithAffiliateRewardTx(
 		return nil, nil
 	}
 	if invitee.InviterId <= 0 || invitee.InviterId == userId {
+		if invitee.InviterId == userId {
+			common.SysLog(fmt.Sprintf("affiliate reward skipped: invitee_id=%d inviter_id=%d", userId, invitee.InviterId))
+		}
 		return nil, nil
 	}
 
@@ -118,8 +124,10 @@ func CreditUserQuotaWithAffiliateRewardTx(
 		return nil, nil
 	}
 
+	sourceHash := sha256.Sum256([]byte(sourceId))
 	reward := &AffiliateReward{
 		SourceType:       sourceType,
+		SourceKey:        hex.EncodeToString(sourceHash[:]),
 		SourceId:         sourceId,
 		InviteeId:        userId,
 		InviterId:        inviter.Id,

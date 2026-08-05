@@ -35,7 +35,7 @@ describe('affiliate rebate percentage conversion', () => {
     expect(formatAffiliateRebatePercent(basisPoints)).toBe(label)
   })
 
-  test('rounds form values to two percentage decimal places', () => {
-    expect(affiliatePercentToBasisPoints(5.255)).toBe(526)
+  test('rejects percentage values with more than two decimal places', () => {
+    expect(() => affiliatePercentToBasisPoints(5.255)).toThrow(RangeError)
   })
 })

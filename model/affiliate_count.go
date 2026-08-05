@@ -1,6 +1,12 @@
 package model
 
-import "gorm.io/gorm"
+import (
+	"errors"
+
+	"gorm.io/gorm"
+)
+
+const affiliateCountReconciledOptionKey = "AffiliateCountReconciledV1"
 
 type affiliateInvitationCount struct {
 	InviterId int
@@ -9,6 +15,13 @@ type affiliateInvitationCount struct {
 
 func ReconcileAffiliateCounts() error {
 	return DB.Transaction(func(tx *gorm.DB) error {
+		var marker Option
+		if err := tx.Where(&Option{Key: affiliateCountReconciledOptionKey}).First(&marker).Error; err == nil {
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
 		var groupedCounts []affiliateInvitationCount
 		if err := tx.Model(&User{}).
 			Select("inviter_id, COUNT(*) AS count").
@@ -38,6 +51,9 @@ func ReconcileAffiliateCounts() error {
 				return err
 			}
 		}
-		return nil
+		return tx.Create(&Option{
+			Key:   affiliateCountReconciledOptionKey,
+			Value: "true",
+		}).Error
 	})
 }

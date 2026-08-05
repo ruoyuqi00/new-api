@@ -3378,6 +3378,7 @@
     "Per-token logit bias map": "トークンごとの logit バイアス",
     "Percentage must be greater than zero when enabled": "有効にする場合、割合は 0 より大きくする必要があります",
     "Percentage of eligible credited quota awarded to the inviter": "対象となる付与クォータのうち紹介者に還元する割合",
+    "Percentage supports at most two decimal places": "割合は小数点以下2桁まで指定できます",
     "Percentage:": "パーセンテージ:",
     "Performance": "パフォーマンス",
     "Performance data is not yet available for this model.": "このモデルのパフォーマンスデータはまだ利用できません。",
