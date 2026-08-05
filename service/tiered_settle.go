@@ -1,9 +1,13 @@
 package service
 
 import (
+	"net/http"
+
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 )
 
 // TieredResultWrapper wraps billingexpr.TieredResult for use at the service layer.
@@ -92,6 +96,59 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 		AI:   ai,
 		AO:   ao,
 	}
+}
+
+func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.BillingSnapshot, error) {
+	if relayInfo == nil {
+		return nil, nil
+	}
+	snapshot := relayInfo.TieredBillingSnapshot
+	if snapshot == nil || snapshot.BillingMode != "tiered_expr" {
+		return nil, nil
+	}
+
+	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	if snapshot.GroupRatio == groupRatio {
+		return snapshot, nil
+	}
+
+	estimatedQuota, err := billingexpr.QuotaRoundStrict(snapshot.EstimatedQuotaBeforeGroup * groupRatio)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.GroupRatio = groupRatio
+	snapshot.EstimatedQuotaAfterGroup = estimatedQuota
+	return snapshot, nil
+}
+
+// PrepareTieredBillingForSelectedGroup synchronizes routing-dependent billing
+// before an upstream attempt and reserves any increase before sending it.
+func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	snapshot, err := refreshTieredBillingGroup(relayInfo)
+	if err != nil {
+		return types.NewErrorWithStatusCode(
+			err,
+			types.ErrorCodeModelPriceError,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	if snapshot == nil {
+		return nil
+	}
+	if snapshot.GroupRatio == 0 {
+		return nil
+	}
+
+	relayInfo.PriceData.FreeModel = false
+	if relayInfo.Billing == nil {
+		return PreConsumeBilling(c, snapshot.EstimatedQuotaAfterGroup, relayInfo)
+	}
+	if err := relayInfo.Billing.Reserve(snapshot.EstimatedQuotaAfterGroup); err != nil {
+		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
+	return nil
 }
 
 // TryTieredSettle checks if the request uses tiered_expr billing and, if so,
