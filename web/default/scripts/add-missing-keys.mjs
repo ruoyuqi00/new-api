@@ -27,6 +27,8 @@ const localeValues = {
       'Earn {{percentage}} on eligible referral credits.',
     'Percentage must be greater than zero when enabled':
       'Percentage must be greater than zero when enabled',
+    'Percentage must be at least 0.01 when enabled':
+      'Percentage must be at least 0.01 when enabled',
     'Percentage supports at most two decimal places':
       'Percentage supports at most two decimal places',
     'Percentage of eligible credited quota awarded to the inviter':
@@ -41,6 +43,8 @@ const localeValues = {
       '被邀请人获得符合条件的额度时，您可获得 {{percentage}} 返利。',
     'Percentage must be greater than zero when enabled':
       '启用时返利比例必须大于 0',
+    'Percentage must be at least 0.01 when enabled':
+      '启用时返利比例至少为 0.01',
     'Percentage supports at most two decimal places':
       '返利比例最多支持两位小数',
     'Percentage of eligible credited quota awarded to the inviter':
@@ -55,6 +59,8 @@ const localeValues = {
       'Gagnez {{percentage}} sur les crédits éligibles de vos filleuls.',
     'Percentage must be greater than zero when enabled':
       'Le pourcentage doit être supérieur à zéro lorsque la fonction est activée',
+    'Percentage must be at least 0.01 when enabled':
+      'Le pourcentage doit être au moins de 0,01 lorsque la fonction est activée',
     'Percentage supports at most two decimal places':
       'Le pourcentage accepte au maximum deux décimales',
     'Percentage of eligible credited quota awarded to the inviter':
@@ -69,6 +75,8 @@ const localeValues = {
       '紹介したユーザーの対象クレジットから {{percentage}} を獲得できます。',
     'Percentage must be greater than zero when enabled':
       '有効にする場合、割合は 0 より大きくする必要があります',
+    'Percentage must be at least 0.01 when enabled':
+      '有効にする場合、割合は 0.01 以上にしてください',
     'Percentage supports at most two decimal places':
       '割合は小数点以下2桁まで指定できます',
     'Percentage of eligible credited quota awarded to the inviter':
@@ -83,6 +91,8 @@ const localeValues = {
       'Получайте {{percentage}} от подходящих пополнений приглашённых пользователей.',
     'Percentage must be greater than zero when enabled':
       'При включении процент должен быть больше нуля',
+    'Percentage must be at least 0.01 when enabled':
+      'При включении процент должен быть не менее 0,01',
     'Percentage supports at most two decimal places':
       'Процент может содержать не более двух знаков после запятой',
     'Percentage of eligible credited quota awarded to the inviter':
@@ -97,6 +107,8 @@ const localeValues = {
       'Nhận {{percentage}} từ các khoản tín dụng giới thiệu đủ điều kiện.',
     'Percentage must be greater than zero when enabled':
       'Tỷ lệ phần trăm phải lớn hơn 0 khi bật',
+    'Percentage must be at least 0.01 when enabled':
+      'Tỷ lệ phần trăm phải tối thiểu là 0,01 khi bật',
     'Percentage supports at most two decimal places':
       'Tỷ lệ phần trăm chỉ hỗ trợ tối đa hai chữ số thập phân',
     'Percentage of eligible credited quota awarded to the inviter':

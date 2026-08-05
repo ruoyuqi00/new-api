@@ -16,17 +16,20 @@ func setupAffiliateCountTest(t *testing.T) {
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&User{}).Error)
 	originalInviterQuota := common.QuotaForInviter
 	originalInviteeQuota := common.QuotaForInvitee
+	originalNewUserQuota := common.QuotaForNewUser
 	paymentSetting := operation_setting.GetPaymentSetting()
 	originalComplianceConfirmed := paymentSetting.ComplianceConfirmed
 	originalComplianceVersion := paymentSetting.ComplianceTermsVersion
 	common.QuotaForInviter = 0
 	common.QuotaForInvitee = 0
+	common.QuotaForNewUser = 0
 	paymentSetting.ComplianceConfirmed = false
 	paymentSetting.ComplianceTermsVersion = ""
 	require.NoError(t, DB.Where(&Option{Key: affiliateCountReconciledOptionKey}).Delete(&Option{}).Error)
 	t.Cleanup(func() {
 		common.QuotaForInviter = originalInviterQuota
 		common.QuotaForInvitee = originalInviteeQuota
+		common.QuotaForNewUser = originalNewUserQuota
 		paymentSetting.ComplianceConfirmed = originalComplianceConfirmed
 		paymentSetting.ComplianceTermsVersion = originalComplianceVersion
 		require.NoError(t, DB.Where(&Option{Key: affiliateCountReconciledOptionKey}).Delete(&Option{}).Error)
@@ -46,30 +49,77 @@ func createAffiliateCountUser(t *testing.T, username string, affCode string, inv
 	return user
 }
 
-func TestFinishInsertIncrementsInviteCountWithoutFixedReward(t *testing.T) {
+func TestInsertPersistsInvitationAndCountWithoutFixedReward(t *testing.T) {
 	setupAffiliateCountTest(t)
 	inviter := createAffiliateCountUser(t, "count-inviter", "count-inviter-code", 0)
-	invitee := createAffiliateCountUser(t, "count-invitee", "count-invitee-code", inviter.Id)
+	invitee := &User{Username: "count-invitee", Status: common.UserStatusEnabled}
 
-	invitee.finishInsert(inviter.Id)
+	require.NoError(t, invitee.Insert(inviter.Id))
 
+	assert.Equal(t, inviter.Id, getAffiliateRewardUser(t, invitee.Id).InviterId)
+	updatedInviter := getAffiliateRewardUser(t, inviter.Id)
+	assert.Equal(t, 1, updatedInviter.AffCount)
+	assert.Zero(t, updatedInviter.AffQuota)
+	assert.Zero(t, updatedInviter.AffHistoryQuota)
+	var rewardCount int64
+	require.NoError(t, DB.Model(&AffiliateReward{}).Count(&rewardCount).Error)
+	assert.Zero(t, rewardCount)
+}
+
+func TestInsertWithTxPersistsOAuthInvitationAndCount(t *testing.T) {
+	setupAffiliateCountTest(t)
+	inviter := createAffiliateCountUser(t, "oauth-count-inviter", "oauth-count-inviter-code", 0)
+	invitee := &User{Username: "oauth-count-invitee", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return invitee.InsertWithTx(tx, inviter.Id)
+	}))
+
+	invitee.FinalizeOAuthUserCreation(inviter.Id)
+
+	assert.Equal(t, inviter.Id, getAffiliateRewardUser(t, invitee.Id).InviterId)
 	updatedInviter := getAffiliateRewardUser(t, inviter.Id)
 	assert.Equal(t, 1, updatedInviter.AffCount)
 	assert.Zero(t, updatedInviter.AffQuota)
 	assert.Zero(t, updatedInviter.AffHistoryQuota)
 }
 
-func TestFinalizeOAuthUserCreationIncrementsInviteCountWithoutFixedReward(t *testing.T) {
+func TestInsertWithTxRollsBackWhenInviterCannotBeUpdated(t *testing.T) {
 	setupAffiliateCountTest(t)
-	inviter := createAffiliateCountUser(t, "oauth-count-inviter", "oauth-count-inviter-code", 0)
-	invitee := createAffiliateCountUser(t, "oauth-count-invitee", "oauth-count-invitee-code", inviter.Id)
+	invitee := &User{Username: "missing-count-inviter", Status: common.UserStatusEnabled}
 
-	invitee.FinalizeOAuthUserCreation(inviter.Id)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		return invitee.InsertWithTx(tx, 999_999)
+	})
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
+	var userCount int64
+	require.NoError(t, DB.Model(&User{}).Where("username = ?", invitee.Username).Count(&userCount).Error)
+	assert.Zero(t, userCount)
+}
+
+func TestInsertAppliesFixedInvitationRewardsWithoutCreatingRebate(t *testing.T) {
+	setupAffiliateCountTest(t)
+	common.QuotaForNewUser = 100
+	common.QuotaForInvitee = 200
+	common.QuotaForInviter = 300
+	paymentSetting := operation_setting.GetPaymentSetting()
+	paymentSetting.ComplianceConfirmed = true
+	paymentSetting.ComplianceTermsVersion = "v1"
+	inviter := createAffiliateCountUser(t, "fixed-reward-inviter", "fixed-reward-code", 0)
+	invitee := &User{Username: "fixed-reward-invitee", Status: common.UserStatusEnabled}
+
+	require.NoError(t, invitee.Insert(inviter.Id))
+
+	updatedInvitee := getAffiliateRewardUser(t, invitee.Id)
+	assert.Equal(t, inviter.Id, updatedInvitee.InviterId)
+	assert.Equal(t, 300, updatedInvitee.Quota)
 	updatedInviter := getAffiliateRewardUser(t, inviter.Id)
 	assert.Equal(t, 1, updatedInviter.AffCount)
-	assert.Zero(t, updatedInviter.AffQuota)
-	assert.Zero(t, updatedInviter.AffHistoryQuota)
+	assert.Equal(t, 300, updatedInviter.AffQuota)
+	assert.Equal(t, 300, updatedInviter.AffHistoryQuota)
+	var rewardCount int64
+	require.NoError(t, DB.Model(&AffiliateReward{}).Count(&rewardCount).Error)
+	assert.Zero(t, rewardCount)
 }
 
 func TestReconcileAffiliateCountsUsesActiveInvitationBindings(t *testing.T) {

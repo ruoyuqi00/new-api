@@ -24,7 +24,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatAffiliateRebatePercent } from '@/lib/affiliate-rebate'
+import {
+  formatAffiliateRebatePercent,
+  shouldDisplayAffiliateRebateRate,
+} from '@/lib/affiliate-rebate'
 import { formatQuota } from '@/lib/format'
 
 import type { UserWalletData } from '../types'
@@ -82,7 +85,10 @@ export function AffiliateRewardsCard({
                 'Earn rewards when your referrals add funds. Transfer accumulated rewards to your balance anytime.'
               )}
             </p>
-            {affiliateRebateEnabled ? (
+            {shouldDisplayAffiliateRebateRate(
+              affiliateRebateEnabled,
+              affiliateRebateBasisPoints
+            ) ? (
               <p className='text-primary mt-1 text-xs font-medium'>
                 {t('Earn {{percentage}} on eligible referral credits.', {
                   percentage: formatAffiliateRebatePercent(

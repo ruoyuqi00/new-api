@@ -3376,6 +3376,7 @@
     "Per-token": "Par jeton",
     "Per-token (ratio based)": "Par jeton (basé sur un ratio)",
     "Per-token logit bias map": "Carte de biais des logits par jeton",
+    "Percentage must be at least 0.01 when enabled": "Le pourcentage doit être au moins de 0,01 lorsque la fonction est activée",
     "Percentage must be greater than zero when enabled": "Le pourcentage doit être supérieur à zéro lorsque la fonction est activée",
     "Percentage of eligible credited quota awarded to the inviter": "Pourcentage du quota crédité éligible attribué à l'invitant",
     "Percentage supports at most two decimal places": "Le pourcentage accepte au maximum deux décimales",

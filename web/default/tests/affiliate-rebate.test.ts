@@ -21,7 +21,10 @@ import { describe, expect, test } from 'bun:test'
 import {
   affiliateBasisPointsToPercent,
   affiliatePercentToBasisPoints,
+  buildAffiliateRebateOptionUpdates,
   formatAffiliateRebatePercent,
+  isAffiliateRebatePercentEditable,
+  shouldDisplayAffiliateRebateRate,
 } from '../src/lib/affiliate-rebate'
 
 describe('affiliate rebate percentage conversion', () => {
@@ -37,5 +40,45 @@ describe('affiliate rebate percentage conversion', () => {
 
   test('rejects percentage values with more than two decimal places', () => {
     expect(() => affiliatePercentToBasisPoints(5.255)).toThrow(RangeError)
+    expect(() => affiliatePercentToBasisPoints(0.000000000001)).toThrow(
+      RangeError
+    )
+  })
+
+  test('rejects percentage values outside the supported range', () => {
+    expect(() => affiliatePercentToBasisPoints(-0.01)).toThrow(RangeError)
+    expect(() => affiliatePercentToBasisPoints(100.01)).toThrow(RangeError)
+  })
+})
+
+describe('affiliate rebate settings behavior', () => {
+  test('writes the percentage before enabling and disables before other updates', () => {
+    expect(
+      buildAffiliateRebateOptionUpdates({
+        AffiliateCreditRebateEnabled: true,
+        AffiliateCreditRebatePercent: 5.25,
+      })
+    ).toEqual([
+      ['AffiliateCreditRebateBasisPoints', 525],
+      ['AffiliateCreditRebateEnabled', true],
+    ])
+    expect(
+      buildAffiliateRebateOptionUpdates({
+        AffiliateCreditRebatePercent: 5.25,
+        AffiliateCreditRebateEnabled: false,
+      })
+    ).toEqual([
+      ['AffiliateCreditRebateEnabled', false],
+      ['AffiliateCreditRebateBasisPoints', 525],
+    ])
+  })
+
+  test('enables percentage editing and wallet rate copy only in valid states', () => {
+    expect(isAffiliateRebatePercentEditable(true, true)).toBe(true)
+    expect(isAffiliateRebatePercentEditable(false, true)).toBe(false)
+    expect(isAffiliateRebatePercentEditable(true, false)).toBe(false)
+    expect(shouldDisplayAffiliateRebateRate(true, 525)).toBe(true)
+    expect(shouldDisplayAffiliateRebateRate(true, 0)).toBe(false)
+    expect(shouldDisplayAffiliateRebateRate(false, 525)).toBe(false)
   })
 })

@@ -3376,6 +3376,7 @@
     "Per-token": "Theo token",
     "Per-token (ratio based)": "Mỗi token (dựa trên tỷ lệ)",
     "Per-token logit bias map": "Bảng logit bias theo token",
+    "Percentage must be at least 0.01 when enabled": "Tỷ lệ phần trăm phải tối thiểu là 0,01 khi bật",
     "Percentage must be greater than zero when enabled": "Tỷ lệ phần trăm phải lớn hơn 0 khi bật",
     "Percentage of eligible credited quota awarded to the inviter": "Tỷ lệ hạn mức đủ điều kiện được thưởng cho người giới thiệu",
     "Percentage supports at most two decimal places": "Tỷ lệ phần trăm chỉ hỗ trợ tối đa hai chữ số thập phân",
