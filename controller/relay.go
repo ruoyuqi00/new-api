@@ -241,6 +241,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
+			newAPIError = billingErr
+			break
+		}
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
@@ -373,8 +377,6 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(retryParam)
 	}
 
-	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
-
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(
 			fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()),
@@ -391,6 +393,8 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
+
+	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 	if newAPIError != nil {
