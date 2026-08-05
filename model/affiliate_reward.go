@@ -2,9 +2,11 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
@@ -27,6 +29,39 @@ type AffiliateReward struct {
 	RatioBasisPoints int    `json:"ratio_basis_points"`
 	RewardQuota      int    `json:"reward_quota"`
 	CreatedTime      int64  `json:"created_time" gorm:"index"`
+}
+
+func AddUserQuotaWithAffiliateReward(userId int, quota int, eventId string) (*AffiliateReward, error) {
+	var reward *AffiliateReward
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		reward, err = CreditUserQuotaWithAffiliateRewardTx(
+			tx,
+			userId,
+			quota,
+			AffiliateRewardSourceAdminAdd,
+			eventId,
+		)
+		return err
+	})
+	return reward, err
+}
+
+func RecordAffiliateRewardLog(reward *AffiliateReward) {
+	if reward == nil {
+		return
+	}
+	RecordLog(
+		reward.InviterId,
+		LogTypeSystem,
+		fmt.Sprintf(
+			"Affiliate reward from %s: invited user %d credited %s, reward %s",
+			reward.SourceType,
+			reward.InviteeId,
+			logger.LogQuota(reward.CreditedQuota),
+			logger.LogQuota(reward.RewardQuota),
+		),
+	)
 }
 
 func CreditUserQuotaWithAffiliateRewardTx(
