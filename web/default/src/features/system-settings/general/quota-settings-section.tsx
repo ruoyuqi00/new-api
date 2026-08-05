@@ -35,7 +35,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import {
-  buildAffiliateRebateOptionUpdates,
+  buildAffiliateRebateConfigPayload,
+  hasAffiliateRebateConfigChanges,
   hasSupportedAffiliateRebatePrecision,
   isAffiliateRebatePercentEditable,
 } from '@/lib/affiliate-rebate'
@@ -52,6 +53,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
+import { useUpdateAffiliateRebate } from '../hooks/use-update-affiliate-rebate'
 import { useUpdateOption } from '../hooks/use-update-option'
 
 const quotaSchema = z
@@ -103,6 +105,7 @@ export function QuotaSettingsSection({
 }: QuotaSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const updateAffiliateRebate = useUpdateAffiliateRebate()
   const handleNumberChange =
     (onChange: (value: number | string) => void) =>
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -119,10 +122,20 @@ export function QuotaSettingsSection({
         QuotaFormValues
       >,
       defaultValues,
-      onSubmit: async (_data, changedFields) => {
-        for (const [key, value] of buildAffiliateRebateOptionUpdates(
-          changedFields
-        )) {
+      onSubmit: async (data, changedFields) => {
+        if (hasAffiliateRebateConfigChanges(changedFields)) {
+          await updateAffiliateRebate.mutateAsync(
+            buildAffiliateRebateConfigPayload(data)
+          )
+        }
+
+        for (const [key, value] of Object.entries(changedFields)) {
+          if (
+            key === 'AffiliateCreditRebateEnabled' ||
+            key === 'AffiliateCreditRebatePercent'
+          ) {
+            continue
+          }
           await updateOption.mutateAsync({
             key,
             value: value as string | number | boolean,
@@ -131,6 +144,8 @@ export function QuotaSettingsSection({
       },
     })
   const rebateEnabled = form.watch('AffiliateCreditRebateEnabled')
+  const isSaving =
+    updateOption.isPending || updateAffiliateRebate.isPending || isSubmitting
 
   return (
     <SettingsSection title={t('Quota Settings')}>
@@ -148,10 +163,7 @@ export function QuotaSettingsSection({
 
       <Form {...form}>
         <SettingsForm onSubmit={handleSubmit}>
-          <SettingsPageFormActions
-            onSave={handleSubmit}
-            isSaving={updateOption.isPending || isSubmitting}
-          />
+          <SettingsPageFormActions onSave={handleSubmit} isSaving={isSaving} />
           <FormDirtyIndicator isDirty={isDirty} />
           <SettingsFormGrid>
             <FormField
@@ -269,8 +281,7 @@ export function QuotaSettingsSection({
                         checked={field.value}
                         onCheckedChange={field.onChange}
                         disabled={
-                          updateOption.isPending ||
-                          (!complianceConfirmed && !field.value)
+                          isSaving || (!complianceConfirmed && !field.value)
                         }
                       />
                     </FormControl>
@@ -298,7 +309,7 @@ export function QuotaSettingsSection({
                         onBlur={field.onBlur}
                         ref={field.ref}
                         disabled={
-                          updateOption.isPending ||
+                          isSaving ||
                           !isAffiliateRebatePercentEditable(
                             rebateEnabled,
                             complianceConfirmed

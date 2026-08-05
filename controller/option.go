@@ -117,6 +117,55 @@ type OptionUpdateRequest struct {
 	Value any    `json:"value"`
 }
 
+type AffiliateRebateOptionsUpdateRequest struct {
+	Enabled     *bool `json:"enabled"`
+	BasisPoints *int  `json:"basis_points"`
+}
+
+func UpdateAffiliateRebateOptions(c *gin.Context) {
+	var request AffiliateRebateOptionsUpdateRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "Invalid affiliate rebate configuration")
+		return
+	}
+	if request.Enabled == nil || request.BasisPoints == nil {
+		common.ApiErrorMsg(c, "Affiliate rebate enabled state and percentage are required")
+		return
+	}
+	enabled := *request.Enabled
+	basisPoints := *request.BasisPoints
+	if basisPoints < 0 || basisPoints > 10_000 {
+		common.ApiErrorMsg(c, "Affiliate rebate percentage must be between 0 and 100%")
+		return
+	}
+	if enabled && basisPoints == 0 {
+		common.ApiErrorMsg(c, "Affiliate rebate percentage must be at least 0.01% when enabled")
+		return
+	}
+	if enabled && !operation_setting.IsPaymentComplianceConfirmed() {
+		common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
+		return
+	}
+
+	if err := model.UpdateOptionsBulk(map[string]string{
+		"AffiliateCreditRebateEnabled":     strconv.FormatBool(enabled),
+		"AffiliateCreditRebateBasisPoints": strconv.Itoa(basisPoints),
+	}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "option.affiliate_rebate.update", map[string]interface{}{
+		"keys": []string{
+			"AffiliateCreditRebateEnabled",
+			"AffiliateCreditRebateBasisPoints",
+		},
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+}
+
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
 	err := common.DecodeJson(c.Request.Body, &option)
@@ -143,36 +192,9 @@ func UpdateOption(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
 			return
 		}
-	case "AffiliateCreditRebateBasisPoints":
-		basisPoints, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
-		if parseErr != nil || basisPoints < 0 || basisPoints > 10_000 {
-			common.ApiErrorMsg(c, "返利比例必须在 0 到 100% 之间，且最多保留两位小数")
-			return
-		}
-		if basisPoints > 0 && !operation_setting.IsPaymentComplianceConfirmed() {
-			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
-			return
-		}
-		if basisPoints == 0 && common.AffiliateCreditRebateEnabled {
-			common.ApiErrorMsg(c, "请先关闭按入账比例返利，再将返利比例设为 0")
-			return
-		}
-	case "AffiliateCreditRebateEnabled":
-		enabled, parseErr := strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
-		if parseErr != nil {
-			common.ApiErrorMsg(c, "无效的返利开关值")
-			return
-		}
-		if enabled {
-			if !operation_setting.IsPaymentComplianceConfirmed() {
-				common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
-				return
-			}
-			if common.AffiliateCreditRebateBasisPoints <= 0 || common.AffiliateCreditRebateBasisPoints > 10_000 {
-				common.ApiErrorMsg(c, "启用返利前请先设置有效的返利比例")
-				return
-			}
-		}
+	case "AffiliateCreditRebateBasisPoints", "AffiliateCreditRebateEnabled":
+		common.ApiErrorMsg(c, "Affiliate rebate settings must be updated together")
+		return
 	default:
 		if isPaymentComplianceOptionKey(option.Key) {
 			common.ApiErrorMsg(c, "合规确认字段不允许通过通用设置接口修改")

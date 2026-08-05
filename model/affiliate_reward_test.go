@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,9 +13,13 @@ import (
 
 func setupAffiliateRewardTest(t *testing.T) (inviter *User, invitee *User) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&AffiliateReward{}))
+	require.NoError(t, DB.AutoMigrate(&AffiliateReward{}, &Option{}))
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&AffiliateReward{}).Error)
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&User{}).Error)
+	require.NoError(t, DB.Where("key IN ?", []string{
+		"AffiliateCreditRebateEnabled",
+		"AffiliateCreditRebateBasisPoints",
+	}).Delete(&Option{}).Error)
 
 	originalEnabled := common.AffiliateCreditRebateEnabled
 	originalBasisPoints := common.AffiliateCreditRebateBasisPoints
@@ -23,6 +28,10 @@ func setupAffiliateRewardTest(t *testing.T) (inviter *User, invitee *User) {
 		common.AffiliateCreditRebateBasisPoints = originalBasisPoints
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&AffiliateReward{}).Error)
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&User{}).Error)
+		require.NoError(t, DB.Where("key IN ?", []string{
+			"AffiliateCreditRebateEnabled",
+			"AffiliateCreditRebateBasisPoints",
+		}).Delete(&Option{}).Error)
 	})
 
 	inviter = &User{Username: "affiliate-inviter", Status: common.UserStatusEnabled, AffCode: "aff-inviter"}
@@ -30,6 +39,22 @@ func setupAffiliateRewardTest(t *testing.T) (inviter *User, invitee *User) {
 	invitee = &User{Username: "affiliate-invitee", Status: common.UserStatusEnabled, AffCode: "aff-invitee", InviterId: inviter.Id}
 	require.NoError(t, DB.Create(invitee).Error)
 	return inviter, invitee
+}
+
+func setAffiliateCreditRebateOptions(t *testing.T, enabled bool, basisPoints int) {
+	t.Helper()
+	values := map[string]string{
+		"AffiliateCreditRebateEnabled":     strconv.FormatBool(enabled),
+		"AffiliateCreditRebateBasisPoints": strconv.Itoa(basisPoints),
+	}
+	for key, value := range values {
+		option := Option{Key: key}
+		require.NoError(t, DB.FirstOrCreate(&option, Option{Key: key}).Error)
+		option.Value = value
+		require.NoError(t, DB.Save(&option).Error)
+	}
+	common.AffiliateCreditRebateEnabled = enabled
+	common.AffiliateCreditRebateBasisPoints = basisPoints
 }
 
 func getAffiliateRewardUser(t *testing.T, userId int) User {
@@ -41,8 +66,7 @@ func getAffiliateRewardUser(t *testing.T, userId int) User {
 
 func TestCreditUserQuotaWithAffiliateRewardTxAwardsConfiguredPercentage(t *testing.T) {
 	inviter, invitee := setupAffiliateRewardTest(t)
-	common.AffiliateCreditRebateEnabled = true
-	common.AffiliateCreditRebateBasisPoints = 525
+	setAffiliateCreditRebateOptions(t, true, 525)
 
 	var reward *AffiliateReward
 	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
@@ -67,10 +91,84 @@ func TestCreditUserQuotaWithAffiliateRewardTxAwardsConfiguredPercentage(t *testi
 	assert.Equal(t, 525, updatedInviter.AffHistoryQuota)
 }
 
+func TestCreditUserQuotaWithAffiliateRewardTxReadsCommittedDatabaseConfiguration(t *testing.T) {
+	_, invitee := setupAffiliateRewardTest(t)
+	setAffiliateCreditRebateOptions(t, true, 525)
+	common.AffiliateCreditRebateEnabled = false
+	common.AffiliateCreditRebateBasisPoints = 0
+
+	var reward *AffiliateReward
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		reward, err = CreditUserQuotaWithAffiliateRewardTx(
+			tx,
+			invitee.Id,
+			10_000,
+			AffiliateRewardSourceTopUp,
+			"database-config-enabled",
+		)
+		return err
+	}))
+
+	require.NotNil(t, reward)
+	assert.Equal(t, 525, reward.RewardQuota)
+}
+
+func TestCreditUserQuotaWithAffiliateRewardTxIgnoresStaleEnabledCache(t *testing.T) {
+	inviter, invitee := setupAffiliateRewardTest(t)
+	setAffiliateCreditRebateOptions(t, false, 500)
+	common.AffiliateCreditRebateEnabled = true
+	common.AffiliateCreditRebateBasisPoints = 500
+
+	var reward *AffiliateReward
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		reward, err = CreditUserQuotaWithAffiliateRewardTx(
+			tx,
+			invitee.Id,
+			10_000,
+			AffiliateRewardSourceTopUp,
+			"database-config-disabled",
+		)
+		return err
+	}))
+
+	assert.Nil(t, reward)
+	assert.Zero(t, getAffiliateRewardUser(t, inviter.Id).AffQuota)
+}
+
+func TestCreditUserQuotaWithAffiliateRewardTxRollsBackInvalidDatabaseConfiguration(t *testing.T) {
+	inviter, invitee := setupAffiliateRewardTest(t)
+	require.NoError(t, DB.Create(&Option{
+		Key:   "AffiliateCreditRebateEnabled",
+		Value: "true",
+	}).Error)
+	require.NoError(t, DB.Create(&Option{
+		Key:   "AffiliateCreditRebateBasisPoints",
+		Value: "invalid",
+	}).Error)
+	common.AffiliateCreditRebateEnabled = true
+	common.AffiliateCreditRebateBasisPoints = 500
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		_, creditErr := CreditUserQuotaWithAffiliateRewardTx(
+			tx,
+			invitee.Id,
+			10_000,
+			AffiliateRewardSourceTopUp,
+			"invalid-database-config",
+		)
+		return creditErr
+	})
+
+	require.Error(t, err)
+	assert.Zero(t, getAffiliateRewardUser(t, invitee.Id).Quota)
+	assert.Zero(t, getAffiliateRewardUser(t, inviter.Id).AffQuota)
+}
+
 func TestCreditUserQuotaWithAffiliateRewardTxSkipsDisabledReward(t *testing.T) {
 	inviter, invitee := setupAffiliateRewardTest(t)
-	common.AffiliateCreditRebateEnabled = false
-	common.AffiliateCreditRebateBasisPoints = 500
+	setAffiliateCreditRebateOptions(t, false, 500)
 
 	var reward *AffiliateReward
 	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
@@ -94,8 +192,7 @@ func TestCreditUserQuotaWithAffiliateRewardTxSkipsDisabledReward(t *testing.T) {
 
 func TestCreditUserQuotaWithAffiliateRewardTxSkipsRewardBelowOneQuota(t *testing.T) {
 	inviter, invitee := setupAffiliateRewardTest(t)
-	common.AffiliateCreditRebateEnabled = true
-	common.AffiliateCreditRebateBasisPoints = 1
+	setAffiliateCreditRebateOptions(t, true, 1)
 
 	var reward *AffiliateReward
 	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
@@ -118,8 +215,7 @@ func TestCreditUserQuotaWithAffiliateRewardTxSkipsRewardBelowOneQuota(t *testing
 func TestCreditUserQuotaWithAffiliateRewardTxSkipsMissingInviter(t *testing.T) {
 	_, invitee := setupAffiliateRewardTest(t)
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Update("inviter_id", 999_999).Error)
-	common.AffiliateCreditRebateEnabled = true
-	common.AffiliateCreditRebateBasisPoints = 500
+	setAffiliateCreditRebateOptions(t, true, 500)
 
 	var reward *AffiliateReward
 	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
@@ -140,8 +236,7 @@ func TestCreditUserQuotaWithAffiliateRewardTxSkipsMissingInviter(t *testing.T) {
 
 func TestCreditUserQuotaWithAffiliateRewardTxDuplicateSourceRollsBackCredit(t *testing.T) {
 	inviter, invitee := setupAffiliateRewardTest(t)
-	common.AffiliateCreditRebateEnabled = true
-	common.AffiliateCreditRebateBasisPoints = 500
+	setAffiliateCreditRebateOptions(t, true, 500)
 
 	credit := func() error {
 		return DB.Transaction(func(tx *gorm.DB) error {
@@ -170,8 +265,7 @@ func TestCreditUserQuotaWithAffiliateRewardTxDuplicateSourceRollsBackCredit(t *t
 
 func TestCreditUserQuotaWithAffiliateRewardTxHashesLongSourceId(t *testing.T) {
 	_, invitee := setupAffiliateRewardTest(t)
-	common.AffiliateCreditRebateEnabled = true
-	common.AffiliateCreditRebateBasisPoints = 1_000
+	setAffiliateCreditRebateOptions(t, true, 1_000)
 	sourceId := strings.Repeat("a", 255)
 
 	var reward *AffiliateReward
@@ -194,8 +288,7 @@ func TestCreditUserQuotaWithAffiliateRewardTxHashesLongSourceId(t *testing.T) {
 
 func TestIncreaseUserQuotaDoesNotCreateAffiliateReward(t *testing.T) {
 	inviter, invitee := setupAffiliateRewardTest(t)
-	common.AffiliateCreditRebateEnabled = true
-	common.AffiliateCreditRebateBasisPoints = 1_000
+	setAffiliateCreditRebateOptions(t, true, 1_000)
 
 	require.NoError(t, IncreaseUserQuota(invitee.Id, 10_000, true))
 
@@ -208,8 +301,7 @@ func TestIncreaseUserQuotaDoesNotCreateAffiliateReward(t *testing.T) {
 
 func TestTransferAffQuotaToQuotaDoesNotCreateAffiliateReward(t *testing.T) {
 	inviter, invitee := setupAffiliateRewardTest(t)
-	common.AffiliateCreditRebateEnabled = true
-	common.AffiliateCreditRebateBasisPoints = 1_000
+	setAffiliateCreditRebateOptions(t, true, 1_000)
 	transferQuota := int(common.QuotaPerUnit)
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Update("aff_quota", transferQuota).Error)
 

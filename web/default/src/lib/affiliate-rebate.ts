@@ -40,26 +40,25 @@ export function affiliatePercentToBasisPoints(percent: number): number {
   return roundedBasisPoints
 }
 
-export function buildAffiliateRebateOptionUpdates(
+export function hasAffiliateRebateConfigChanges(
   changedFields: Record<string, unknown>
-): ReadonlyArray<readonly [string, unknown]> {
-  const entries = Object.entries(changedFields).map(([key, value]) =>
-    key === 'AffiliateCreditRebatePercent'
-      ? ([
-          'AffiliateCreditRebateBasisPoints',
-          affiliatePercentToBasisPoints(value as number),
-        ] as const)
-      : ([key, value] as const)
+): boolean {
+  return (
+    'AffiliateCreditRebateEnabled' in changedFields ||
+    'AffiliateCreditRebatePercent' in changedFields
   )
-  const enabledEntry = entries.find(
-    ([key]) => key === 'AffiliateCreditRebateEnabled'
-  )
-  const otherEntries = entries.filter(
-    ([key]) => key !== 'AffiliateCreditRebateEnabled'
-  )
-  if (enabledEntry?.[1] === false) return [enabledEntry, ...otherEntries]
-  if (enabledEntry) return [...otherEntries, enabledEntry]
-  return otherEntries
+}
+
+export function buildAffiliateRebateConfigPayload(values: {
+  AffiliateCreditRebateEnabled: boolean
+  AffiliateCreditRebatePercent: number
+}): { enabled: boolean; basis_points: number } {
+  return {
+    enabled: values.AffiliateCreditRebateEnabled,
+    basis_points: affiliatePercentToBasisPoints(
+      values.AffiliateCreditRebatePercent
+    ),
+  }
 }
 
 export function isAffiliateRebatePercentEditable(

@@ -19,8 +19,7 @@ func prepareAffiliateSourceTest(t *testing.T) (inviter *User, invitee *User) {
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&Redemption{}).Error)
 	originalQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 1_000
-	common.AffiliateCreditRebateEnabled = true
-	common.AffiliateCreditRebateBasisPoints = 1_000
+	setAffiliateCreditRebateOptions(t, true, 1_000)
 	t.Cleanup(func() {
 		common.QuotaPerUnit = originalQuotaPerUnit
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&TopUp{}).Error)
