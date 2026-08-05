@@ -156,6 +156,10 @@ export interface TopupInfo {
   payment_compliance_confirmed?: boolean
   /** Current compliance terms version */
   payment_compliance_terms_version?: string
+  /** Whether percentage-based affiliate credit rebates are enabled */
+  affiliate_credit_rebate_enabled?: boolean
+  /** Affiliate credit rebate rate in basis points */
+  affiliate_credit_rebate_basis_points?: number
 }
 
 /**
