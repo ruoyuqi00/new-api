@@ -41,6 +41,10 @@ import {
   postTelegramBindResult,
   startOAuthBindResponseDeadline,
 } from '@/features/auth/lib/oauth-bind-window'
+import {
+  getOAuthSessionStorage,
+  resolveOAuthCallbackMode,
+} from '@/features/auth/lib/oauth-callback-mode'
 import { api, applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 
@@ -71,8 +75,13 @@ function OAuthCallback() {
     flow_token?: string
     error_code?: string
   }
-  const mode: 'login' | 'bind' =
-    typeof window !== 'undefined' && window.opener ? 'bind' : 'login'
+  const mode =
+    typeof window === 'undefined'
+      ? 'login'
+      : resolveOAuthCallbackMode(provider, search.state ?? '', {
+          opener: window.opener,
+          storage: getOAuthSessionStorage(window),
+        })
 
   useEffect(() => {
     if (typeof window === 'undefined') return
