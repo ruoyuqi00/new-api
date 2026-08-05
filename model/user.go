@@ -487,14 +487,21 @@ func HardDeleteUserById(id int) error {
 }
 
 func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+	updates := map[string]interface{}{
+		"aff_count": gorm.Expr("aff_count + ?", 1),
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	if common.QuotaForInviter > 0 {
+		updates["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
+		updates["aff_history"] = gorm.Expr("aff_history + ?", common.QuotaForInviter)
+	}
+	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
@@ -583,10 +590,9 @@ func (user *User) finishInsert(inviterId int) {
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
 		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
 		}
+		_ = inviteUser(inviterId)
 	}
 }
 
@@ -640,8 +646,8 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 		}
 		if common.QuotaForInviter > 0 {
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
 		}
+		_ = inviteUser(inviterId)
 	}
 }
 
