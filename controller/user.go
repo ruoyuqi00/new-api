@@ -1183,10 +1183,12 @@ func ManageUser(c *gin.Context) {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
+			reward, err := model.AddUserQuotaWithAffiliateReward(user.Id, req.Value, common.GetUUID())
+			if err != nil {
 				common.ApiError(c, err)
 				return
 			}
+			model.RecordAffiliateRewardLog(reward)
 			recordManageAuditFor(c, user.Id, "user.quota_add", map[string]interface{}{
 				"quota": logger.LogQuota(req.Value),
 			})
