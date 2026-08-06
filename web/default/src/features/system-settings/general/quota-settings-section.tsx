@@ -34,7 +34,11 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { affiliatePercentToBasisPoints } from '@/lib/affiliate-rebate'
+import {
+  buildAffiliateRebateOptionUpdates,
+  hasSupportedAffiliateRebatePrecision,
+  isAffiliateRebatePercentEditable,
+} from '@/lib/affiliate-rebate'
 
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
@@ -62,7 +66,7 @@ const quotaSchema = z
       .min(0)
       .max(100)
       .refine(
-        (value) => Math.abs(value * 100 - Math.round(value * 100)) <= 1e-9,
+        hasSupportedAffiliateRebatePrecision,
         'Percentage supports at most two decimal places'
       ),
     TopUpLink: z.string(),
@@ -76,12 +80,12 @@ const quotaSchema = z
   .superRefine((values, context) => {
     if (
       values.AffiliateCreditRebateEnabled &&
-      values.AffiliateCreditRebatePercent === 0
+      values.AffiliateCreditRebatePercent < 0.01
     ) {
       context.addIssue({
         code: 'custom',
         path: ['AffiliateCreditRebatePercent'],
-        message: 'Percentage must be greater than zero when enabled',
+        message: 'Percentage must be at least 0.01 when enabled',
       })
     }
   })
@@ -116,28 +120,9 @@ export function QuotaSettingsSection({
       >,
       defaultValues,
       onSubmit: async (_data, changedFields) => {
-        const entries = Object.entries(changedFields).map(([key, value]) =>
-          key === 'AffiliateCreditRebatePercent'
-            ? ([
-                'AffiliateCreditRebateBasisPoints',
-                affiliatePercentToBasisPoints(value as number),
-              ] as const)
-            : ([key, value] as const)
-        )
-        const enabledEntry = entries.find(
-          ([key]) => key === 'AffiliateCreditRebateEnabled'
-        )
-        const otherEntries = entries.filter(
-          ([key]) => key !== 'AffiliateCreditRebateEnabled'
-        )
-        let orderedEntries = otherEntries
-        if (enabledEntry?.[1] === false) {
-          orderedEntries = [enabledEntry, ...otherEntries]
-        } else if (enabledEntry) {
-          orderedEntries = [...otherEntries, enabledEntry]
-        }
-
-        for (const [key, value] of orderedEntries) {
+        for (const [key, value] of buildAffiliateRebateOptionUpdates(
+          changedFields
+        )) {
           await updateOption.mutateAsync({
             key,
             value: value as string | number | boolean,
@@ -314,8 +299,10 @@ export function QuotaSettingsSection({
                         ref={field.ref}
                         disabled={
                           updateOption.isPending ||
-                          !complianceConfirmed ||
-                          !rebateEnabled
+                          !isAffiliateRebatePercentEditable(
+                            rebateEnabled,
+                            complianceConfirmed
+                          )
                         }
                         className='pr-8'
                       />

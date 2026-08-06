@@ -3376,6 +3376,7 @@
     "Per-token": "按 Token",
     "Per-token (ratio based)": "按令牌计费（基于比例）",
     "Per-token logit bias map": "按 token 的 logit 偏置映射",
+    "Percentage must be at least 0.01 when enabled": "启用时返利比例至少为 0.01",
     "Percentage must be greater than zero when enabled": "启用时返利比例必须大于 0",
     "Percentage of eligible credited quota awarded to the inviter": "按被邀请人实际获得的符合条件额度计算并奖励邀请人",
     "Percentage supports at most two decimal places": "返利比例最多支持两位小数",

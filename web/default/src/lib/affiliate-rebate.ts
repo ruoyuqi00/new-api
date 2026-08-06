@@ -20,18 +20,60 @@ export function affiliateBasisPointsToPercent(basisPoints: number): number {
   return basisPoints / 100
 }
 
+export function hasSupportedAffiliateRebatePrecision(percent: number): boolean {
+  const basisPoints = percent * 100
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(basisPoints)) * 4
+  return Math.abs(basisPoints - Math.round(basisPoints)) <= tolerance
+}
+
 export function affiliatePercentToBasisPoints(percent: number): number {
   const basisPoints = percent * 100
   const roundedBasisPoints = Math.round(basisPoints)
   if (
     !Number.isFinite(percent) ||
-    Math.abs(basisPoints - roundedBasisPoints) > 1e-9
+    percent < 0 ||
+    percent > 100 ||
+    !hasSupportedAffiliateRebatePrecision(percent)
   ) {
-    throw new RangeError(
-      'affiliate rebate percentage supports at most two decimal places'
-    )
+    throw new RangeError('unsupported affiliate rebate percentage')
   }
   return roundedBasisPoints
+}
+
+export function buildAffiliateRebateOptionUpdates(
+  changedFields: Record<string, unknown>
+): ReadonlyArray<readonly [string, unknown]> {
+  const entries = Object.entries(changedFields).map(([key, value]) =>
+    key === 'AffiliateCreditRebatePercent'
+      ? ([
+          'AffiliateCreditRebateBasisPoints',
+          affiliatePercentToBasisPoints(value as number),
+        ] as const)
+      : ([key, value] as const)
+  )
+  const enabledEntry = entries.find(
+    ([key]) => key === 'AffiliateCreditRebateEnabled'
+  )
+  const otherEntries = entries.filter(
+    ([key]) => key !== 'AffiliateCreditRebateEnabled'
+  )
+  if (enabledEntry?.[1] === false) return [enabledEntry, ...otherEntries]
+  if (enabledEntry) return [...otherEntries, enabledEntry]
+  return otherEntries
+}
+
+export function isAffiliateRebatePercentEditable(
+  enabled: boolean,
+  complianceConfirmed: boolean
+): boolean {
+  return enabled && complianceConfirmed
+}
+
+export function shouldDisplayAffiliateRebateRate(
+  enabled: boolean,
+  basisPoints: number
+): boolean {
+  return enabled && basisPoints > 0
 }
 
 export function formatAffiliateRebatePercent(basisPoints: number): string {

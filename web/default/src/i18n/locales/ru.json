@@ -3376,6 +3376,7 @@
     "Per-token": "За токен",
     "Per-token (ratio based)": "За токен (на основе соотношения)",
     "Per-token logit bias map": "Карта смещений логитов по токенам",
+    "Percentage must be at least 0.01 when enabled": "При включении процент должен быть не менее 0,01",
     "Percentage must be greater than zero when enabled": "При включении процент должен быть больше нуля",
     "Percentage of eligible credited quota awarded to the inviter": "Доля подходящей зачисленной квоты, начисляемая пригласившему пользователю",
     "Percentage supports at most two decimal places": "Процент может содержать не более двух знаков после запятой",

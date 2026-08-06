@@ -3376,6 +3376,7 @@
     "Per-token": "トークン単位",
     "Per-token (ratio based)": "トークンごと (比率ベース)",
     "Per-token logit bias map": "トークンごとの logit バイアス",
+    "Percentage must be at least 0.01 when enabled": "有効にする場合、割合は 0.01 以上にしてください",
     "Percentage must be greater than zero when enabled": "有効にする場合、割合は 0 より大きくする必要があります",
     "Percentage of eligible credited quota awarded to the inviter": "対象となる付与クォータのうち紹介者に還元する割合",
     "Percentage supports at most two decimal places": "割合は小数点以下2桁まで指定できます",
