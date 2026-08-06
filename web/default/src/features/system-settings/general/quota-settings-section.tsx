@@ -34,6 +34,10 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import {
+  affiliateBasisPointsToPercent,
+  affiliatePercentToBasisPoints,
+} from '@/lib/affiliate-rebate'
 
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
@@ -49,19 +53,34 @@ import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
-const quotaSchema = z.object({
-  QuotaForNewUser: z.coerce.number().min(0),
-  PreConsumedQuota: z.coerce.number().min(0),
-  QuotaForInviter: z.coerce.number().min(0),
-  QuotaForInvitee: z.coerce.number().min(0),
-  TopUpLink: z.string(),
-  general_setting: z.object({
-    docs_link: z.string(),
-  }),
-  quota_setting: z.object({
-    enable_free_model_pre_consume: z.boolean(),
-  }),
-})
+const quotaSchema = z
+  .object({
+    QuotaForNewUser: z.coerce.number().min(0),
+    PreConsumedQuota: z.coerce.number().min(0),
+    QuotaForInviter: z.coerce.number().min(0),
+    QuotaForInvitee: z.coerce.number().min(0),
+    AffiliateCreditRebateEnabled: z.boolean(),
+    AffiliateCreditRebateBasisPoints: z.coerce.number().int().min(0).max(10000),
+    TopUpLink: z.string(),
+    general_setting: z.object({
+      docs_link: z.string(),
+    }),
+    quota_setting: z.object({
+      enable_free_model_pre_consume: z.boolean(),
+    }),
+  })
+  .superRefine((values, context) => {
+    if (
+      values.AffiliateCreditRebateEnabled &&
+      values.AffiliateCreditRebateBasisPoints === 0
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['AffiliateCreditRebateBasisPoints'],
+        message: 'Percentage must be greater than zero when enabled',
+      })
+    }
+  })
 
 type QuotaFormValues = z.infer<typeof quotaSchema>
 
@@ -93,7 +112,21 @@ export function QuotaSettingsSection({
       >,
       defaultValues,
       onSubmit: async (_data, changedFields) => {
-        for (const [key, value] of Object.entries(changedFields)) {
+        const entries = Object.entries(changedFields)
+        const enabledEntry = entries.find(
+          ([key]) => key === 'AffiliateCreditRebateEnabled'
+        )
+        const otherEntries = entries.filter(
+          ([key]) => key !== 'AffiliateCreditRebateEnabled'
+        )
+        let orderedEntries = otherEntries
+        if (enabledEntry?.[1] === false) {
+          orderedEntries = [enabledEntry, ...otherEntries]
+        } else if (enabledEntry) {
+          orderedEntries = [...otherEntries, enabledEntry]
+        }
+
+        for (const [key, value] of orderedEntries) {
           await updateOption.mutateAsync({
             key,
             value: value as string | number | boolean,
@@ -214,6 +247,85 @@ export function QuotaSettingsSection({
                   </FormControl>
                   <FormDescription>
                     {t('Quota given to invited users')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <SettingsFormGridItem span='full'>
+              <FormField
+                control={form.control}
+                name='AffiliateCreditRebateEnabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Affiliate Credit Rebate')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          "Reward inviters whenever an invited user's eligible balance credit succeeds."
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={
+                          updateOption.isPending ||
+                          (!complianceConfirmed && !field.value)
+                        }
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+            </SettingsFormGridItem>
+
+            <FormField
+              control={form.control}
+              name='AffiliateCreditRebateBasisPoints'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Affiliate Rebate Percentage')}</FormLabel>
+                  <FormControl>
+                    <div className='relative'>
+                      <Input
+                        type='number'
+                        min={0}
+                        max={100}
+                        step={0.01}
+                        value={
+                          typeof field.value === 'number'
+                            ? affiliateBasisPointsToPercent(field.value)
+                            : ''
+                        }
+                        onChange={(event) => {
+                          field.onChange(
+                            event.target.value === ''
+                              ? ''
+                              : affiliatePercentToBasisPoints(
+                                  event.currentTarget.valueAsNumber
+                                )
+                          )
+                        }}
+                        name={field.name}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                        disabled={
+                          updateOption.isPending || !complianceConfirmed
+                        }
+                        className='pr-8'
+                      />
+                      <span className='text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm'>
+                        %
+                      </span>
+                    </div>
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Percentage of eligible credited quota awarded to the inviter'
+                    )}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

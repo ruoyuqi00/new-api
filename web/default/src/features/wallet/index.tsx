@@ -322,6 +322,12 @@ export function Wallet(props: WalletProps) {
               complianceConfirmed={
                 topupInfo?.payment_compliance_confirmed !== false
               }
+              affiliateRebateEnabled={
+                topupInfo?.affiliate_credit_rebate_enabled
+              }
+              affiliateRebateBasisPoints={
+                topupInfo?.affiliate_credit_rebate_basis_points
+              }
               loading={affiliateLoading}
             />
           </div>
