@@ -486,11 +486,11 @@ func HardDeleteUserById(id int) error {
 	return user.HardDelete()
 }
 
-func inviteUser(inviterId int) (err error) {
+func inviteUser(inviterId int, grantFixedReward bool) (err error) {
 	updates := map[string]interface{}{
 		"aff_count": gorm.Expr("aff_count + ?", 1),
 	}
-	if common.QuotaForInviter > 0 {
+	if grantFixedReward && common.QuotaForInviter > 0 {
 		updates["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
 		updates["aff_history"] = gorm.Expr("aff_history + ?", common.QuotaForInviter)
 	}
@@ -584,15 +584,18 @@ func (user *User) finishInsert(inviterId int) {
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+	if inviterId != 0 {
+		complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+		if complianceConfirmed {
+			if common.QuotaForInvitee > 0 {
+				_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+				RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+			}
+			if common.QuotaForInviter > 0 {
+				RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
+			}
 		}
-		if common.QuotaForInviter > 0 {
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-		}
-		_ = inviteUser(inviterId)
+		_ = inviteUser(inviterId, complianceConfirmed)
 	}
 }
 
@@ -639,15 +642,18 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+	if inviterId != 0 {
+		complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+		if complianceConfirmed {
+			if common.QuotaForInvitee > 0 {
+				_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+				RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+			}
+			if common.QuotaForInviter > 0 {
+				RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
+			}
 		}
-		if common.QuotaForInviter > 0 {
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-		}
-		_ = inviteUser(inviterId)
+		_ = inviteUser(inviterId, complianceConfirmed)
 	}
 }
 

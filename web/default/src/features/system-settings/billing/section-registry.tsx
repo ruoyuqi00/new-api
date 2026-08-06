@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { affiliateBasisPointsToPercent } from '@/lib/affiliate-rebate'
 import { parseCurrencyDisplayType } from '@/lib/currency'
 
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
@@ -64,8 +65,9 @@ const BILLING_SECTIONS = [
           QuotaForInviter: settings.QuotaForInviter,
           QuotaForInvitee: settings.QuotaForInvitee,
           AffiliateCreditRebateEnabled: settings.AffiliateCreditRebateEnabled,
-          AffiliateCreditRebateBasisPoints:
-            settings.AffiliateCreditRebateBasisPoints,
+          AffiliateCreditRebatePercent: affiliateBasisPointsToPercent(
+            settings.AffiliateCreditRebateBasisPoints
+          ),
           TopUpLink: settings.TopUpLink,
           general_setting: {
             docs_link: settings['general_setting.docs_link'],

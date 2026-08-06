@@ -3378,6 +3378,7 @@
     "Per-token logit bias map": "Per-token logit bias map",
     "Percentage must be greater than zero when enabled": "Percentage must be greater than zero when enabled",
     "Percentage of eligible credited quota awarded to the inviter": "Percentage of eligible credited quota awarded to the inviter",
+    "Percentage supports at most two decimal places": "Percentage supports at most two decimal places",
     "Percentage:": "Percentage:",
     "Performance": "Performance",
     "Performance data is not yet available for this model.": "Performance data is not yet available for this model.",

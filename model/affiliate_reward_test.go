@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -165,4 +166,60 @@ func TestCreditUserQuotaWithAffiliateRewardTxDuplicateSourceRollsBackCredit(t *t
 	var rewardCount int64
 	require.NoError(t, DB.Model(&AffiliateReward{}).Count(&rewardCount).Error)
 	assert.EqualValues(t, 1, rewardCount)
+}
+
+func TestCreditUserQuotaWithAffiliateRewardTxHashesLongSourceId(t *testing.T) {
+	_, invitee := setupAffiliateRewardTest(t)
+	common.AffiliateCreditRebateEnabled = true
+	common.AffiliateCreditRebateBasisPoints = 1_000
+	sourceId := strings.Repeat("a", 255)
+
+	var reward *AffiliateReward
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		reward, err = CreditUserQuotaWithAffiliateRewardTx(
+			tx,
+			invitee.Id,
+			10_000,
+			AffiliateRewardSourceTopUp,
+			sourceId,
+		)
+		return err
+	}))
+
+	require.NotNil(t, reward)
+	assert.Equal(t, sourceId, reward.SourceId)
+	assert.Len(t, reward.SourceKey, 64)
+}
+
+func TestIncreaseUserQuotaDoesNotCreateAffiliateReward(t *testing.T) {
+	inviter, invitee := setupAffiliateRewardTest(t)
+	common.AffiliateCreditRebateEnabled = true
+	common.AffiliateCreditRebateBasisPoints = 1_000
+
+	require.NoError(t, IncreaseUserQuota(invitee.Id, 10_000, true))
+
+	assert.Equal(t, 10_000, getAffiliateRewardUser(t, invitee.Id).Quota)
+	assert.Zero(t, getAffiliateRewardUser(t, inviter.Id).AffQuota)
+	var rewardCount int64
+	require.NoError(t, DB.Model(&AffiliateReward{}).Count(&rewardCount).Error)
+	assert.Zero(t, rewardCount)
+}
+
+func TestTransferAffQuotaToQuotaDoesNotCreateAffiliateReward(t *testing.T) {
+	inviter, invitee := setupAffiliateRewardTest(t)
+	common.AffiliateCreditRebateEnabled = true
+	common.AffiliateCreditRebateBasisPoints = 1_000
+	transferQuota := int(common.QuotaPerUnit)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Update("aff_quota", transferQuota).Error)
+
+	require.NoError(t, invitee.TransferAffQuotaToQuota(transferQuota))
+
+	updatedInvitee := getAffiliateRewardUser(t, invitee.Id)
+	assert.Equal(t, transferQuota, updatedInvitee.Quota)
+	assert.Zero(t, updatedInvitee.AffQuota)
+	assert.Zero(t, getAffiliateRewardUser(t, inviter.Id).AffQuota)
+	var rewardCount int64
+	require.NoError(t, DB.Model(&AffiliateReward{}).Count(&rewardCount).Error)
+	assert.Zero(t, rewardCount)
 }

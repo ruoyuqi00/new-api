@@ -34,10 +34,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import {
-  affiliateBasisPointsToPercent,
-  affiliatePercentToBasisPoints,
-} from '@/lib/affiliate-rebate'
+import { affiliatePercentToBasisPoints } from '@/lib/affiliate-rebate'
 
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
@@ -60,7 +57,14 @@ const quotaSchema = z
     QuotaForInviter: z.coerce.number().min(0),
     QuotaForInvitee: z.coerce.number().min(0),
     AffiliateCreditRebateEnabled: z.boolean(),
-    AffiliateCreditRebateBasisPoints: z.coerce.number().int().min(0).max(10000),
+    AffiliateCreditRebatePercent: z.coerce
+      .number()
+      .min(0)
+      .max(100)
+      .refine(
+        (value) => Math.abs(value * 100 - Math.round(value * 100)) <= 1e-9,
+        'Percentage supports at most two decimal places'
+      ),
     TopUpLink: z.string(),
     general_setting: z.object({
       docs_link: z.string(),
@@ -72,11 +76,11 @@ const quotaSchema = z
   .superRefine((values, context) => {
     if (
       values.AffiliateCreditRebateEnabled &&
-      values.AffiliateCreditRebateBasisPoints === 0
+      values.AffiliateCreditRebatePercent === 0
     ) {
       context.addIssue({
         code: 'custom',
-        path: ['AffiliateCreditRebateBasisPoints'],
+        path: ['AffiliateCreditRebatePercent'],
         message: 'Percentage must be greater than zero when enabled',
       })
     }
@@ -112,7 +116,14 @@ export function QuotaSettingsSection({
       >,
       defaultValues,
       onSubmit: async (_data, changedFields) => {
-        const entries = Object.entries(changedFields)
+        const entries = Object.entries(changedFields).map(([key, value]) =>
+          key === 'AffiliateCreditRebatePercent'
+            ? ([
+                'AffiliateCreditRebateBasisPoints',
+                affiliatePercentToBasisPoints(value as number),
+              ] as const)
+            : ([key, value] as const)
+        )
         const enabledEntry = entries.find(
           ([key]) => key === 'AffiliateCreditRebateEnabled'
         )
@@ -134,6 +145,7 @@ export function QuotaSettingsSection({
         }
       },
     })
+  const rebateEnabled = form.watch('AffiliateCreditRebateEnabled')
 
   return (
     <SettingsSection title={t('Quota Settings')}>
@@ -284,7 +296,7 @@ export function QuotaSettingsSection({
 
             <FormField
               control={form.control}
-              name='AffiliateCreditRebateBasisPoints'
+              name='AffiliateCreditRebatePercent'
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>{t('Affiliate Rebate Percentage')}</FormLabel>
@@ -295,25 +307,15 @@ export function QuotaSettingsSection({
                         min={0}
                         max={100}
                         step={0.01}
-                        value={
-                          typeof field.value === 'number'
-                            ? affiliateBasisPointsToPercent(field.value)
-                            : ''
-                        }
-                        onChange={(event) => {
-                          field.onChange(
-                            event.target.value === ''
-                              ? ''
-                              : affiliatePercentToBasisPoints(
-                                  event.currentTarget.valueAsNumber
-                                )
-                          )
-                        }}
+                        value={field.value ?? ''}
+                        onChange={handleNumberChange(field.onChange)}
                         name={field.name}
                         onBlur={field.onBlur}
                         ref={field.ref}
                         disabled={
-                          updateOption.isPending || !complianceConfirmed
+                          updateOption.isPending ||
+                          !complianceConfirmed ||
+                          !rebateEnabled
                         }
                         className='pr-8'
                       />

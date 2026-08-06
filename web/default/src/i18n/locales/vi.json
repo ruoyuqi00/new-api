@@ -3378,6 +3378,7 @@
     "Per-token logit bias map": "Bảng logit bias theo token",
     "Percentage must be greater than zero when enabled": "Tỷ lệ phần trăm phải lớn hơn 0 khi bật",
     "Percentage of eligible credited quota awarded to the inviter": "Tỷ lệ hạn mức đủ điều kiện được thưởng cho người giới thiệu",
+    "Percentage supports at most two decimal places": "Tỷ lệ phần trăm chỉ hỗ trợ tối đa hai chữ số thập phân",
     "Percentage:": "Phần trăm:",
     "Performance": "Hiệu suất",
     "Performance data is not yet available for this model.": "Chưa có dữ liệu hiệu năng cho mô hình này.",

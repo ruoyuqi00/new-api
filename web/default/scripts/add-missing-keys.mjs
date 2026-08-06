@@ -33,6 +33,8 @@ const newKeys = {
       'Earn {{percentage}} on eligible referral credits.',
     'Percentage must be greater than zero when enabled':
       'Percentage must be greater than zero when enabled',
+    'Percentage supports at most two decimal places':
+      'Percentage supports at most two decimal places',
     'Percentage of eligible credited quota awarded to the inviter':
       'Percentage of eligible credited quota awarded to the inviter',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
@@ -45,6 +47,8 @@ const newKeys = {
       '被邀请人获得符合条件的额度时，您可获得 {{percentage}} 返利。',
     'Percentage must be greater than zero when enabled':
       '启用时返利比例必须大于 0',
+    'Percentage supports at most two decimal places':
+      '返利比例最多支持两位小数',
     'Percentage of eligible credited quota awarded to the inviter':
       '按被邀请人实际获得的符合条件额度计算并奖励邀请人',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
@@ -57,6 +61,8 @@ const newKeys = {
       'Gagnez {{percentage}} sur les crédits éligibles de vos filleuls.',
     'Percentage must be greater than zero when enabled':
       'Le pourcentage doit être supérieur à zéro lorsque la fonction est activée',
+    'Percentage supports at most two decimal places':
+      'Le pourcentage accepte au maximum deux décimales',
     'Percentage of eligible credited quota awarded to the inviter':
       "Pourcentage du quota crédité éligible attribué à l'invitant",
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
@@ -69,6 +75,8 @@ const newKeys = {
       '紹介したユーザーの対象クレジットから {{percentage}} を獲得できます。',
     'Percentage must be greater than zero when enabled':
       '有効にする場合、割合は 0 より大きくする必要があります',
+    'Percentage supports at most two decimal places':
+      '割合は小数点以下2桁まで指定できます',
     'Percentage of eligible credited quota awarded to the inviter':
       '対象となる付与クォータのうち紹介者に還元する割合',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
@@ -81,6 +89,8 @@ const newKeys = {
       'Получайте {{percentage}} от подходящих пополнений приглашённых пользователей.',
     'Percentage must be greater than zero when enabled':
       'При включении процент должен быть больше нуля',
+    'Percentage supports at most two decimal places':
+      'Процент может содержать не более двух знаков после запятой',
     'Percentage of eligible credited quota awarded to the inviter':
       'Доля подходящей зачисленной квоты, начисляемая пригласившему пользователю',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
@@ -93,6 +103,8 @@ const newKeys = {
       'Nhận {{percentage}} từ các khoản tín dụng giới thiệu đủ điều kiện.',
     'Percentage must be greater than zero when enabled':
       'Tỷ lệ phần trăm phải lớn hơn 0 khi bật',
+    'Percentage supports at most two decimal places':
+      'Tỷ lệ phần trăm chỉ hỗ trợ tối đa hai chữ số thập phân',
     'Percentage of eligible credited quota awarded to the inviter':
       'Tỷ lệ hạn mức đủ điều kiện được thưởng cho người giới thiệu',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":

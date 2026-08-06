@@ -3378,6 +3378,7 @@
     "Per-token logit bias map": "Carte de biais des logits par jeton",
     "Percentage must be greater than zero when enabled": "Le pourcentage doit être supérieur à zéro lorsque la fonction est activée",
     "Percentage of eligible credited quota awarded to the inviter": "Pourcentage du quota crédité éligible attribué à l'invitant",
+    "Percentage supports at most two decimal places": "Le pourcentage accepte au maximum deux décimales",
     "Percentage:": "Pourcentage :",
     "Performance": "Performances",
     "Performance data is not yet available for this model.": "Aucune donnée de performance n'est encore disponible pour ce modèle.",
