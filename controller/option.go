@@ -143,6 +143,36 @@ func UpdateOption(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
 			return
 		}
+	case "AffiliateCreditRebateBasisPoints":
+		basisPoints, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
+		if parseErr != nil || basisPoints < 0 || basisPoints > 10_000 {
+			common.ApiErrorMsg(c, "返利比例必须在 0 到 100% 之间，且最多保留两位小数")
+			return
+		}
+		if basisPoints > 0 && !operation_setting.IsPaymentComplianceConfirmed() {
+			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
+			return
+		}
+		if basisPoints == 0 && common.AffiliateCreditRebateEnabled {
+			common.ApiErrorMsg(c, "请先关闭按入账比例返利，再将返利比例设为 0")
+			return
+		}
+	case "AffiliateCreditRebateEnabled":
+		enabled, parseErr := strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
+		if parseErr != nil {
+			common.ApiErrorMsg(c, "无效的返利开关值")
+			return
+		}
+		if enabled {
+			if !operation_setting.IsPaymentComplianceConfirmed() {
+				common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
+				return
+			}
+			if common.AffiliateCreditRebateBasisPoints <= 0 || common.AffiliateCreditRebateBasisPoints > 10_000 {
+				common.ApiErrorMsg(c, "启用返利前请先设置有效的返利比例")
+				return
+			}
+		}
 	default:
 		if isPaymentComplianceOptionKey(option.Key) {
 			common.ApiErrorMsg(c, "合规确认字段不允许通过通用设置接口修改")
