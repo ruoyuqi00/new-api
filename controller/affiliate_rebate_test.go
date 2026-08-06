@@ -88,6 +88,28 @@ func performAffiliateOptionRequest(t *testing.T, body string) affiliateOptionRes
 	return response
 }
 
+func performAffiliateRebateConfigRequest(t *testing.T, body string) affiliateOptionResponse {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/option/affiliate_rebate", bytes.NewBufferString(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 1)
+	ctx.Set("role", common.RoleRootUser)
+	UpdateAffiliateRebateOptions(ctx)
+
+	var response affiliateOptionResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	return response
+}
+
+func getAffiliateOptionValue(t *testing.T, key string) string {
+	t.Helper()
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", key).First(&option).Error)
+	return option.Value
+}
+
 func TestAffiliateCreditRebateRejectsInvalidBasisPoints(t *testing.T) {
 	for _, basisPoints := range []int{-1, 10_001} {
 		t.Run(fmt.Sprintf("basis-points-%d", basisPoints), func(t *testing.T) {
@@ -115,7 +137,7 @@ func TestAffiliateCreditRebateRequiresComplianceBeforeEnabling(t *testing.T) {
 	assert.False(t, common.AffiliateCreditRebateEnabled)
 }
 
-func TestAffiliateCreditRebateAcceptsValidConfiguration(t *testing.T) {
+func TestAffiliateCreditRebateRejectsNonAtomicGenericUpdates(t *testing.T) {
 	setupAffiliateOptionTest(t)
 	paymentSetting := operation_setting.GetPaymentSetting()
 	paymentSetting.ComplianceConfirmed = true
@@ -125,15 +147,69 @@ func TestAffiliateCreditRebateAcceptsValidConfiguration(t *testing.T) {
 		t,
 		`{"key":"AffiliateCreditRebateBasisPoints","value":525}`,
 	)
-	require.True(t, ratioResponse.Success)
-	assert.Equal(t, 525, common.AffiliateCreditRebateBasisPoints)
+	assert.False(t, ratioResponse.Success)
+	assert.Zero(t, common.AffiliateCreditRebateBasisPoints)
 
 	enabledResponse := performAffiliateOptionRequest(
 		t,
 		`{"key":"AffiliateCreditRebateEnabled","value":true}`,
 	)
-	require.True(t, enabledResponse.Success)
+	assert.False(t, enabledResponse.Success)
+	assert.False(t, common.AffiliateCreditRebateEnabled)
+}
+
+func TestAffiliateCreditRebateAtomicallyUpdatesConfiguration(t *testing.T) {
+	setupAffiliateOptionTest(t)
+	paymentSetting := operation_setting.GetPaymentSetting()
+	paymentSetting.ComplianceConfirmed = true
+	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+
+	response := performAffiliateRebateConfigRequest(
+		t,
+		`{"enabled":true,"basis_points":525}`,
+	)
+
+	require.True(t, response.Success)
+	assert.Equal(t, "true", getAffiliateOptionValue(t, "AffiliateCreditRebateEnabled"))
+	assert.Equal(t, "525", getAffiliateOptionValue(t, "AffiliateCreditRebateBasisPoints"))
 	assert.True(t, common.AffiliateCreditRebateEnabled)
+	assert.Equal(t, 525, common.AffiliateCreditRebateBasisPoints)
+}
+
+func TestAffiliateCreditRebateRejectsInvalidAtomicUpdateWithoutChangingConfiguration(t *testing.T) {
+	setupAffiliateOptionTest(t)
+	paymentSetting := operation_setting.GetPaymentSetting()
+	paymentSetting.ComplianceConfirmed = true
+	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+	require.NoError(t, model.UpdateOptionsBulk(map[string]string{
+		"AffiliateCreditRebateEnabled":     "false",
+		"AffiliateCreditRebateBasisPoints": "525",
+	}))
+
+	response := performAffiliateRebateConfigRequest(
+		t,
+		`{"enabled":true,"basis_points":0}`,
+	)
+
+	assert.False(t, response.Success)
+	assert.Equal(t, "false", getAffiliateOptionValue(t, "AffiliateCreditRebateEnabled"))
+	assert.Equal(t, "525", getAffiliateOptionValue(t, "AffiliateCreditRebateBasisPoints"))
+	assert.False(t, common.AffiliateCreditRebateEnabled)
+	assert.Equal(t, 525, common.AffiliateCreditRebateBasisPoints)
+}
+
+func TestAffiliateCreditRebateAtomicUpdateRequiresBothFields(t *testing.T) {
+	setupAffiliateOptionTest(t)
+	require.NoError(t, model.UpdateOptionsBulk(map[string]string{
+		"AffiliateCreditRebateEnabled":     "false",
+		"AffiliateCreditRebateBasisPoints": "525",
+	}))
+
+	response := performAffiliateRebateConfigRequest(t, `{"basis_points":500}`)
+
+	assert.False(t, response.Success)
+	assert.Equal(t, "false", getAffiliateOptionValue(t, "AffiliateCreditRebateEnabled"))
+	assert.Equal(t, "525", getAffiliateOptionValue(t, "AffiliateCreditRebateBasisPoints"))
 }
 
 func TestAffiliateCreditRebateWalletInfoExposesCurrentConfiguration(t *testing.T) {

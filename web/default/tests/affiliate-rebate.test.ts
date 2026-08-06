@@ -21,8 +21,9 @@ import { describe, expect, test } from 'bun:test'
 import {
   affiliateBasisPointsToPercent,
   affiliatePercentToBasisPoints,
-  buildAffiliateRebateOptionUpdates,
+  buildAffiliateRebateConfigPayload,
   formatAffiliateRebatePercent,
+  hasAffiliateRebateConfigChanges,
   isAffiliateRebatePercentEditable,
   shouldDisplayAffiliateRebateRate,
 } from '../src/lib/affiliate-rebate'
@@ -52,25 +53,29 @@ describe('affiliate rebate percentage conversion', () => {
 })
 
 describe('affiliate rebate settings behavior', () => {
-  test('writes the percentage before enabling and disables before other updates', () => {
+  test('builds one atomic configuration payload from the submitted form', () => {
     expect(
-      buildAffiliateRebateOptionUpdates({
+      buildAffiliateRebateConfigPayload({
         AffiliateCreditRebateEnabled: true,
         AffiliateCreditRebatePercent: 5.25,
       })
-    ).toEqual([
-      ['AffiliateCreditRebateBasisPoints', 525],
-      ['AffiliateCreditRebateEnabled', true],
-    ])
+    ).toEqual({ enabled: true, basis_points: 525 })
+  })
+
+  test('detects changes to either field in the atomic configuration', () => {
     expect(
-      buildAffiliateRebateOptionUpdates({
-        AffiliateCreditRebatePercent: 5.25,
-        AffiliateCreditRebateEnabled: false,
+      hasAffiliateRebateConfigChanges({
+        AffiliateCreditRebateEnabled: true,
       })
-    ).toEqual([
-      ['AffiliateCreditRebateEnabled', false],
-      ['AffiliateCreditRebateBasisPoints', 525],
-    ])
+    ).toBe(true)
+    expect(
+      hasAffiliateRebateConfigChanges({
+        AffiliateCreditRebatePercent: 5.25,
+      })
+    ).toBe(true)
+    expect(hasAffiliateRebateConfigChanges({ QuotaForNewUser: 1000 })).toBe(
+      false
+    )
   })
 
   test('enables percentage editing and wallet rate copy only in valid states', () => {

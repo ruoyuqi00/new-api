@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,7 +20,10 @@ const (
 	AffiliateRewardSourceAdminAdd   = "admin_add"
 )
 
-var ErrInvalidAffiliateCredit = errors.New("invalid affiliate credit")
+var (
+	ErrInvalidAffiliateCredit             = errors.New("invalid affiliate credit")
+	ErrInvalidAffiliateCreditRebateConfig = errors.New("invalid affiliate credit rebate configuration")
+)
 
 type AffiliateReward struct {
 	Id               int    `json:"id"`
@@ -83,6 +87,11 @@ func CreditUserQuotaWithAffiliateRewardTx(
 		return nil, ErrInvalidAffiliateCredit
 	}
 
+	rebateEnabled, basisPoints, err := getAffiliateCreditRebateConfigTx(tx)
+	if err != nil {
+		return nil, err
+	}
+
 	var invitee User
 	if err := tx.Select("id", "inviter_id").First(&invitee, userId).Error; err != nil {
 		return nil, err
@@ -97,8 +106,7 @@ func CreditUserQuotaWithAffiliateRewardTx(
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	basisPoints := common.AffiliateCreditRebateBasisPoints
-	if !common.AffiliateCreditRebateEnabled || basisPoints <= 0 || basisPoints > 10_000 {
+	if !rebateEnabled {
 		return nil, nil
 	}
 	if invitee.InviterId <= 0 || invitee.InviterId == userId {
@@ -153,4 +161,37 @@ func CreditUserQuotaWithAffiliateRewardTx(
 		return nil, gorm.ErrRecordNotFound
 	}
 	return reward, nil
+}
+
+func getAffiliateCreditRebateConfigTx(tx *gorm.DB) (bool, int, error) {
+	var options []Option
+	if err := tx.Where("key IN ?", []string{
+		"AffiliateCreditRebateEnabled",
+		"AffiliateCreditRebateBasisPoints",
+	}).Find(&options).Error; err != nil {
+		return false, 0, err
+	}
+
+	enabled := false
+	basisPoints := 0
+	for _, option := range options {
+		switch option.Key {
+		case "AffiliateCreditRebateEnabled":
+			parsed, err := strconv.ParseBool(strings.TrimSpace(option.Value))
+			if err != nil {
+				return false, 0, ErrInvalidAffiliateCreditRebateConfig
+			}
+			enabled = parsed
+		case "AffiliateCreditRebateBasisPoints":
+			parsed, err := strconv.Atoi(strings.TrimSpace(option.Value))
+			if err != nil {
+				return false, 0, ErrInvalidAffiliateCreditRebateConfig
+			}
+			basisPoints = parsed
+		}
+	}
+	if basisPoints < 0 || basisPoints > 10_000 || (enabled && basisPoints == 0) {
+		return false, 0, ErrInvalidAffiliateCreditRebateConfig
+	}
+	return enabled, basisPoints, nil
 }

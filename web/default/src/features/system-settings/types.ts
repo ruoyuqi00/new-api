@@ -39,6 +39,11 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type UpdateAffiliateRebateOptionsRequest = {
+  enabled: boolean
+  basis_points: number
+}
+
 export type GroupCatalogItem = {
   name: string
   ratio: number

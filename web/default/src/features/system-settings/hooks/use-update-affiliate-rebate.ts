@@ -20,48 +20,22 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
-import { updateSystemOption } from '../api'
-import type { UpdateOptionRequest } from '../types'
+import { updateAffiliateRebateOptions } from '../api'
+import type { UpdateAffiliateRebateOptionsRequest } from '../types'
 
-// Configuration keys that require status refresh
-const STATUS_RELATED_KEYS = new Set([
-  'theme.frontend',
-  'HeaderNavModules',
-  'SidebarModulesAdmin',
-  'Notice',
-  'LogConsumeEnabled',
-  'QuotaPerUnit',
-  'USDExchangeRate',
-  'DisplayInCurrencyEnabled',
-  'DisplayTokenStatEnabled',
-  'general_setting.quota_display_type',
-  'general_setting.custom_currency_symbol',
-  'general_setting.custom_currency_exchange_rate',
-])
-
-export function useUpdateOption() {
+export function useUpdateAffiliateRebate() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (request: UpdateOptionRequest) => {
-      const data = await updateSystemOption(request)
+    mutationFn: async (request: UpdateAffiliateRebateOptionsRequest) => {
+      const data = await updateAffiliateRebateOptions(request)
       if (!data.success) {
         throw new Error(data.message || i18next.t('Failed to update setting'))
       }
       return data
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
-
-      if (STATUS_RELATED_KEYS.has(variables.key)) {
-        queryClient.invalidateQueries({ queryKey: ['status'] })
-        try {
-          window.localStorage.removeItem('status')
-        } catch {
-          /* empty */
-        }
-      }
-
       toast.success(i18next.t('Setting updated successfully'))
     },
     onError: (error: Error) => {
