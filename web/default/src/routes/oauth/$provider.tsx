@@ -41,6 +41,11 @@ import {
   postTelegramBindResult,
   startOAuthBindResponseDeadline,
 } from '@/features/auth/lib/oauth-bind-window'
+import {
+  getOAuthSessionStorage,
+  isTelegramOAuthBindCallback,
+  resolveOAuthCallbackMode,
+} from '@/features/auth/lib/oauth-callback-mode'
 import { api, applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 
@@ -71,14 +76,22 @@ function OAuthCallback() {
     flow_token?: string
     error_code?: string
   }
-  const mode: 'login' | 'bind' =
-    typeof window !== 'undefined' && window.opener ? 'bind' : 'login'
+  const callbackState = search.state ?? ''
+  let mode: 'login' | 'bind' = 'login'
+  if (isTelegramOAuthBindCallback(provider, search.telegram_bind)) {
+    mode = 'bind'
+  } else if (typeof window !== 'undefined') {
+    mode = resolveOAuthCallbackMode(provider, callbackState, {
+      opener: window.opener,
+      storage: getOAuthSessionStorage(window),
+    })
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
 
     const code = search.code ?? ''
-    const state = search.state ?? ''
+    const state = callbackState
     const telegramCallback =
       provider === 'telegram'
         ? parseTelegramBindCallback({
@@ -225,6 +238,7 @@ function OAuthCallback() {
       safeNavigate('/sign-in', '/sign-in')
     })()
   }, [
+    callbackState,
     mode,
     navigate,
     provider,
@@ -234,7 +248,6 @@ function OAuthCallback() {
     search.error_description,
     search.flow_token,
     search.redirect,
-    search.state,
     search.telegram_bind,
   ])
 
