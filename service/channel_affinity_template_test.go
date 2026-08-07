@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -351,4 +352,89 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	require.False(t, exists)
 	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
 	require.False(t, exists)
+}
+
+func TestDefaultCodexAffinityFallsBackToSessionIDWithoutChangingBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requestBody := `{"model":"gpt-5","input":"hello"}`
+	sessionID := fmt.Sprintf("session-fallback-%d", time.Now().UnixNano())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("Session_id", sessionID)
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+	require.False(t, found)
+	require.Zero(t, channelID)
+
+	meta, ok := getChannelAffinityMeta(ctx)
+	require.True(t, ok)
+	require.Equal(t, "request_header", meta.KeySourceType)
+	require.Equal(t, "Session_id", meta.KeySourceKey)
+	require.Equal(t, 3600, meta.TTLSeconds)
+
+	storage, err := common.GetBodyStorage(ctx)
+	require.NoError(t, err)
+	bodyAfter, err := storage.Bytes()
+	require.NoError(t, err)
+	require.Equal(t, []byte(requestBody), bodyAfter)
+
+	RecordChannelAffinity(ctx, 2400)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(ctx) })
+
+	nextRecorder := httptest.NewRecorder()
+	nextCtx, _ := gin.CreateTestContext(nextRecorder)
+	nextCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+	nextCtx.Request.Header.Set("Content-Type", "application/json")
+	nextCtx.Request.Header.Set("Session_id", sessionID)
+
+	channelID, found = GetPreferredChannelByAffinity(nextCtx, "gpt-5", "default")
+	require.True(t, found)
+	require.Equal(t, 2400, channelID)
+}
+
+func TestDefaultCodexAffinityPrefersPromptCacheKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	promptCacheKey := fmt.Sprintf("prompt-cache-%d", time.Now().UnixNano())
+	requestBody := fmt.Sprintf(`{"model":"gpt-5","prompt_cache_key":"%s","input":"hello"}`, promptCacheKey)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("Session_id", "different-session")
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+	require.False(t, found)
+	require.Zero(t, channelID)
+
+	meta, ok := getChannelAffinityMeta(ctx)
+	require.True(t, ok)
+	require.Equal(t, "gjson", meta.KeySourceType)
+	require.Equal(t, "prompt_cache_key", meta.KeySourcePath)
+	require.Equal(t, affinityFingerprint(promptCacheKey), meta.KeyFingerprint)
+
+	storage, err := common.GetBodyStorage(ctx)
+	require.NoError(t, err)
+	bodyAfter, err := storage.Bytes()
+	require.NoError(t, err)
+	require.Equal(t, []byte(requestBody), bodyAfter)
+}
+
+func TestDefaultCodexAffinityRequiresExplicitKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+
+	require.False(t, found)
+	require.Zero(t, channelID)
+	_, hasMeta := getChannelAffinityMeta(ctx)
+	require.False(t, hasMeta)
 }
