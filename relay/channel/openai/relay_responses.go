@@ -182,6 +182,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		case relaycommon.StreamEndReasonClientGone, relaycommon.StreamEndReasonHandlerStop:
 		default:
 			const incompleteMessage = "Upstream stream ended before completion."
+			info.PreservePreConsumedQuota = true
 			info.StreamStatus.RecordError(incompleteMessage)
 			if responseID == "" {
 				responseID = "resp_" + c.GetString(common.RequestIdKey)

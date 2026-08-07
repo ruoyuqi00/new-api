@@ -354,6 +354,13 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 	return "openai"
 }
 
+func applyPreConsumedQuotaFloor(relayInfo *relaycommon.RelayInfo, calculatedQuota int) (int, bool) {
+	if relayInfo == nil || !relayInfo.PreservePreConsumedQuota || calculatedQuota >= relayInfo.FinalPreConsumedQuota {
+		return calculatedQuota, false
+	}
+	return relayInfo.FinalPreConsumedQuota, true
+}
+
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
 	originUsage := usage
 	if usage == nil {
@@ -379,6 +386,11 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			tieredResult = tieredRes
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
 		}
+	}
+
+	if quota, preserved := applyPreConsumedQuotaFloor(relayInfo, summary.Quota); preserved {
+		summary.Quota = quota
+		logger.LogWarn(ctx, "accepted upstream stream ended incomplete; preserving pre-consumed quota")
 	}
 
 	if summary.WebSearchCallCount > 0 {

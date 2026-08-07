@@ -18,16 +18,18 @@ relay error path that refunds pre-consumed quota.
 - Give a Responses client a protocol-level terminal failure when an accepted
   upstream stream ends before any Responses terminal event.
 - Preserve exactly one upstream attempt after an HTTP 200 stream has been accepted.
-- Preserve the existing billing and usage estimation path, including no automatic
-  refund for an accepted but incomplete stream.
+- Preserve existing pricing and usage estimation while preventing settlement of
+  an accepted but incomplete stream below its already pre-consumed quota.
 - Stop writing after a downstream write or flush failure.
 - Propagate downstream request cancellation to the upstream HTTP request.
-- Keep the change local to transport and Responses protocol handling.
+- Keep the change local to transport, Responses protocol handling, and the narrow
+  settlement floor required by the no-refund invariant.
 
 ## Non-Goals
 
 - No retry or replay after an accepted upstream stream.
-- No pricing, pre-consume, settlement, refund, or database changes.
+- No pricing formula, pre-consume amount, normal settlement, refund API, or database
+  changes.
 - No attempt to manufacture missing upstream usage fields.
 - No Caddy, container, production configuration, or traffic changes.
 - No promise that an unhealthy upstream will complete; the change makes failure
@@ -112,9 +114,16 @@ unchanged.
 ### Billing invariant
 
 An incomplete accepted stream returns usage and a nil relay error, just like the
-current accepted-stream path. The controller therefore performs normal settlement
-and does not enter retry or refund handling. Usage extraction and fallback token
-estimation remain unchanged.
+current accepted-stream path. The controller therefore does not enter retry or
+full-refund handling. Usage extraction and fallback token estimation remain
+unchanged.
+
+Partial fallback usage can calculate a quota below the request's pre-consumed
+quota. Normal settlement would return that delta even though upstream accepted and
+billed the request. The Responses handler therefore marks only a missing-terminal
+accepted stream, and text settlement applies the already reserved quota as a
+floor. A higher calculated charge is retained. Normal completed streams and
+explicit upstream terminal events keep their existing settlement behavior.
 
 Pre-header HTTP failures retain the existing retry and refund behavior because the
 upstream stream was not accepted.
@@ -129,7 +138,9 @@ Tests use `testify/require` and `testify/assert` and cover observable contracts:
 - a downstream write failure stops the stream and does not append a synthetic
   failure;
 - an incomplete accepted stream returns a nil relay error, which is the controller
-  contract that prevents retry and refund;
+  contract that prevents retry and full refund;
+- settlement for that marked stream cannot fall below its pre-consumed quota;
+- ordinary streams can still settle below pre-consume from actual usage;
 - existing usage and cached-token extraction remain unchanged;
 - cancellation of the incoming request cancels the upstream HTTP request context.
 

@@ -224,21 +224,35 @@ git commit -m "fix: cancel upstream requests with clients"
 ### Task 4: Verify billing boundaries and full backend compatibility
 
 **Files:**
-- Verify only
+- Modify: `relay/common/relay_info.go`
+- Modify: `relay/channel/openai/relay_responses.go`
+- Modify: `service/text_quota.go`
+- Test: `relay/channel/openai/relay_responses_test.go`
+- Test: `service/text_quota_test.go`
 
 - [ ] **Step 1: Confirm the accepted-stream contract**
 
-Re-run the EOF regression and confirm `relayErr` is nil. This is the controller boundary that avoids `processChannelError`, retry, and `Billing.Refund` for an already accepted HTTP 200 stream.
+Re-run the EOF regression and confirm `relayErr` is nil. This is the controller boundary that avoids `processChannelError`, retry, and full `Billing.Refund` for an already accepted HTTP 200 stream.
 
-- [ ] **Step 2: Confirm no billing files changed**
+- [ ] **Step 2: Verify the incomplete-stream settlement floor**
 
 ```powershell
-git diff 4d192bf88 --name-only | rg "^(service/(billing|quota|pre_consume)|controller/relay\.go|model/)"
+go test ./service -run TestApplyPreConsumedQuotaFloor -count=1
 ```
 
-Expected: no output.
+Expected: PASS. A marked incomplete stream cannot settle below its pre-consumed
+quota, while ordinary streams and higher actual charges are unchanged.
 
-- [ ] **Step 3: Run the complete Go test suite**
+- [ ] **Step 3: Confirm pricing, pre-consume, refund APIs, controllers, and models are unchanged**
+
+```powershell
+git diff 4d192bf88 --name-only | rg "^(service/(billing|pre_consume)|controller/relay\.go|model/)"
+```
+
+Expected: no output. The only settlement change is the narrow floor in
+`service/text_quota.go`.
+
+- [ ] **Step 4: Run the complete Go test suite**
 
 ```powershell
 go test ./... -count=1

@@ -46,7 +46,8 @@ func TestOaiResponsesStreamHandlerParsesResponseDoneUsage(t *testing.T) {
 		)),
 	}
 
-	usage, relayErr := OaiResponsesStreamHandler(ctx, mappedClientResponseInfo(), resp)
+	info := mappedClientResponseInfo()
+	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 	require.Nil(t, relayErr)
 	require.Equal(t, 1200, usage.PromptTokens)
@@ -70,7 +71,8 @@ func TestOaiResponsesStreamHandlerEmitsFailureForEOFWithoutTerminalEvent(t *test
 		)),
 	}
 
-	usage, relayErr := OaiResponsesStreamHandler(ctx, mappedClientResponseInfo(), resp)
+	info := mappedClientResponseInfo()
+	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 	require.Nil(t, relayErr)
 	require.NotNil(t, usage)
@@ -78,6 +80,7 @@ func TestOaiResponsesStreamHandlerEmitsFailureForEOFWithoutTerminalEvent(t *test
 	require.Contains(t, recorder.Body.String(), `"sequence_number":6`)
 	require.Contains(t, recorder.Body.String(), `"code":"server_error"`)
 	require.Contains(t, recorder.Body.String(), "Upstream stream ended before completion.")
+	require.True(t, info.PreservePreConsumedQuota)
 }
 
 func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
@@ -120,11 +123,13 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader(tt.body)),
 			}
 
-			_, relayErr := OaiResponsesStreamHandler(ctx, mappedClientResponseInfo(), resp)
+			info := mappedClientResponseInfo()
+			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 			require.Nil(t, relayErr)
 			require.Equal(t, 1, strings.Count(recorder.Body.String(), tt.terminalEvent))
 			require.Equal(t, tt.failureEventCnt, strings.Count(recorder.Body.String(), "event: response.failed"))
+			require.False(t, info.PreservePreConsumedQuota)
 		})
 	}
 }

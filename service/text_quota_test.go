@@ -555,3 +555,55 @@ func TestComposeTieredTextQuotaSaturatesTieredResultTotal(t *testing.T) {
 
 	require.Equal(t, math.MaxInt32, quota)
 }
+
+func TestApplyPreConsumedQuotaFloor(t *testing.T) {
+	tests := []struct {
+		name          string
+		relayInfo     *relaycommon.RelayInfo
+		calculated    int
+		wantQuota     int
+		wantPreserved bool
+	}{
+		{
+			name: "incomplete accepted stream keeps pre-consumed quota",
+			relayInfo: &relaycommon.RelayInfo{
+				PreservePreConsumedQuota: true,
+				FinalPreConsumedQuota:    1000,
+			},
+			calculated:    250,
+			wantQuota:     1000,
+			wantPreserved: true,
+		},
+		{
+			name: "higher actual charge remains unchanged",
+			relayInfo: &relaycommon.RelayInfo{
+				PreservePreConsumedQuota: true,
+				FinalPreConsumedQuota:    1000,
+			},
+			calculated: 1250,
+			wantQuota:  1250,
+		},
+		{
+			name: "ordinary stream can settle below pre-consume",
+			relayInfo: &relaycommon.RelayInfo{
+				FinalPreConsumedQuota: 1000,
+			},
+			calculated: 250,
+			wantQuota:  250,
+		},
+		{
+			name:       "nil relay info",
+			calculated: 250,
+			wantQuota:  250,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			quota, preserved := applyPreConsumedQuotaFloor(tt.relayInfo, tt.calculated)
+
+			require.Equal(t, tt.wantQuota, quota)
+			require.Equal(t, tt.wantPreserved, preserved)
+		})
+	}
+}
