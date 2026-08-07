@@ -41,7 +41,8 @@ func TestOaiResponsesStreamHandlerEmitsFailureForEOFWithoutTerminalEvent(t *test
 	require.Nil(t, relayErr)
 	require.NotNil(t, usage)
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.failed"))
-	require.Contains(t, recorder.Body.String(), `"code":"upstream_stream_incomplete"`)
+	require.Contains(t, recorder.Body.String(), `"code":"server_error"`)
+	require.Contains(t, recorder.Body.String(), "Upstream stream ended before completion.")
 }
 ```
 
@@ -72,6 +73,7 @@ Expected: the EOF case fails; existing upstream terminal events remain observabl
 ### Task 2: Implement protocol-aware terminal failure without returning a relay error
 
 **Files:**
+- Modify: `dto/openai_response.go`
 - Modify: `relay/channel/openai/relay_responses.go`
 - Modify: `relay/channel/openai/helper.go`
 - Test: `relay/channel/openai/relay_responses_test.go`
@@ -100,7 +102,16 @@ if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
 
 - [ ] **Step 2: Track Responses terminal events**
 
-Before invoking `StreamScannerHandler`, add `terminalReceived := false` and response metadata fields. In the callback, mark these types terminal:
+Add an optional sequence number to `dto.ResponsesStreamResponse` so generated
+events can preserve protocol ordering:
+
+```go
+SequenceNumber *int64 `json:"sequence_number,omitempty"`
+```
+
+Before invoking `StreamScannerHandler`, add `terminalReceived := false`, the next
+sequence number, and response metadata fields. In the callback, mark these types
+terminal:
 
 ```go
 switch streamResponse.Type {
@@ -123,16 +134,17 @@ failure := dto.ResponsesStreamResponse{
 		Object: "response",
 		Status: []byte(`"failed"`),
 		Model:  responseModel,
-		Error: types.OpenAIError{
-			Type:    "server_error",
-			Code:    "upstream_stream_incomplete",
-			Message: "Upstream stream ended before completion.",
+		Error: map[string]any{
+			"code":    "server_error",
+			"message": "Upstream stream ended before completion.",
 		},
 	},
 }
 ```
 
-Skip emission for `client_gone` and `handler_stop`. Record the incomplete condition in `info.StreamStatus`, but return the calculated usage and `nil` relay error.
+Set `failure.SequenceNumber` to the next observed sequence number when available.
+Skip emission for `client_gone` and `handler_stop`. Record the incomplete condition
+in `info.StreamStatus`, but return the calculated usage and `nil` relay error.
 
 - [ ] **Step 4: Run the focused tests and verify GREEN**
 
@@ -147,7 +159,7 @@ Expected: PASS, including usage and cached-token extraction.
 - [ ] **Step 5: Commit the protocol patch**
 
 ```powershell
-git add relay/channel/openai/relay_responses.go relay/channel/openai/helper.go relay/channel/openai/relay_responses_test.go
+git add dto/openai_response.go relay/channel/openai/relay_responses.go relay/channel/openai/helper.go relay/channel/openai/relay_responses_test.go
 git commit -m "fix: report incomplete responses streams"
 ```
 

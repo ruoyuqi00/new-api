@@ -87,11 +87,13 @@ The synthetic event is standard Responses SSE framing:
 
 ```text
 event: response.failed
-data: {"type":"response.failed","response":{"status":"failed","error":{"type":"server_error","code":"upstream_stream_incomplete","message":"Upstream stream ended before completion."}}}
+data: {"type":"response.failed","sequence_number":<next>,"response":{"status":"failed","error":{"code":"server_error","message":"Upstream stream ended before completion."}}}
 ```
 
-Known response ID and model metadata may be copied from an earlier event. No input,
-output, credential, or request-header data is included.
+This follows the official OpenAI `response.failed` event shape. When upstream sent a
+sequence number, the synthetic event uses the next number. Known response ID and
+model metadata may be copied from an earlier event. No input, output, credential,
+or request-header data is included.
 
 ### Downstream write failures
 
