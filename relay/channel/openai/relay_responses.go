@@ -88,6 +88,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	terminalReceived := false
+	var nextSequenceNumber *int64
+	responseID := ""
+	responseModel := ""
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if normalized, changed := normalizeCompletedImageGenerationStatus([]byte(data)); changed {
@@ -107,7 +111,26 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		if streamResponse.SequenceNumber != nil {
+			next := *streamResponse.SequenceNumber + 1
+			nextSequenceNumber = &next
+		}
+		if streamResponse.Response != nil {
+			if streamResponse.Response.ID != "" {
+				responseID = streamResponse.Response.ID
+			}
+			if streamResponse.Response.Model != "" {
+				responseModel = streamResponse.Response.Model
+			}
+		}
+		switch streamResponse.Type {
+		case "response.completed", "response.done", "response.incomplete", "response.failed", "response.error":
+			terminalReceived = true
+		}
+		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
+			sr.Stop(err)
+			return
+		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
 			if streamResponse.Response != nil {
@@ -153,6 +176,50 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+
+	if !terminalReceived && c.Request.Context().Err() == nil && info.StreamStatus != nil {
+		switch info.StreamStatus.EndReason {
+		case relaycommon.StreamEndReasonClientGone, relaycommon.StreamEndReasonHandlerStop:
+		default:
+			const incompleteMessage = "Upstream stream ended before completion."
+			info.StreamStatus.RecordError(incompleteMessage)
+			if responseID == "" {
+				responseID = "resp_" + c.GetString(common.RequestIdKey)
+				if responseID == "resp_" {
+					responseID = "resp_incomplete"
+				}
+			}
+			if responseModel == "" {
+				responseModel = info.ClientResponseModelName()
+			}
+			failure := dto.ResponsesStreamResponse{
+				Type:           "response.failed",
+				SequenceNumber: nextSequenceNumber,
+				Response: &dto.OpenAIResponsesResponse{
+					ID:         responseID,
+					Object:     "response",
+					Status:     []byte(`"failed"`),
+					Error:      map[string]any{"code": "server_error", "message": incompleteMessage},
+					Model:      responseModel,
+					Output:     []dto.ResponsesOutput{},
+					ToolChoice: []byte(`"auto"`),
+					Tools:      []map[string]any{},
+					Truncation: []byte(`"disabled"`),
+					Metadata:   []byte(`{}`),
+				},
+			}
+			failureData, err := common.Marshal(&failure)
+			if err != nil {
+				logger.LogError(c, "failed to marshal incomplete responses stream event: "+err.Error())
+				info.StreamStatus.RecordError(err.Error())
+			} else {
+				if err := sendResponsesStreamData(c, failure, string(failureData)); err != nil {
+					logger.LogError(c, "failed to send incomplete responses stream event: "+err.Error())
+					info.StreamStatus.RecordError(err.Error())
+				}
+			}
+		}
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
