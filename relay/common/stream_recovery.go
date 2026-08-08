@@ -59,17 +59,35 @@ type StreamRecovery struct {
 	drainedBytes int64
 	finished     bool
 
-	upstreamContext   context.Context
-	upstreamCancel    context.CancelFunc
-	stopParentWatcher func() bool
-	drainTimer        *time.Timer
-	limiterRelease    func()
+	upstreamContext    context.Context
+	upstreamCancel     context.CancelFunc
+	stopParentWatcher  func() bool
+	drainTimer         *time.Timer
+	limiterRelease     func()
+	testTransitionHook func(streamRecoveryTransition)
 }
+
+type streamRecoveryTransition uint8
+
+const (
+	streamRecoveryTransitionAccept streamRecoveryTransition = iota
+	streamRecoveryTransitionParentDone
+	streamRecoveryTransitionTerminal
+	streamRecoveryTransitionUnknown
+	streamRecoveryTransitionTimeout
+)
 
 type streamRecoveryLimiter struct {
 	mu         sync.Mutex
 	total      int
 	perChannel map[int]int
+}
+
+type streamRecoveryCleanup struct {
+	stopParentWatcher func() bool
+	drainTimer        *time.Timer
+	cancelUpstream    context.CancelFunc
+	limiterRelease    func()
 }
 
 var streamRecoveryAdmission = streamRecoveryLimiter{
@@ -130,6 +148,10 @@ func (info *RelayInfo) StartStreamRecoveryAttempt(parent context.Context) contex
 		recovery.mu.Unlock()
 		return parent
 	}
+	if recovery.finished && !recovery.accepted {
+		recovery.finished = false
+		recovery.upstreamContext = nil
+	}
 	if recovery.upstreamContext != nil {
 		upstream := recovery.upstreamContext
 		recovery.mu.Unlock()
@@ -157,10 +179,15 @@ func (info *RelayInfo) MarkStreamAccepted() {
 	if info == nil || info.StreamRecovery == nil {
 		return
 	}
-	info.StreamRecovery.mu.Lock()
-	defer info.StreamRecovery.mu.Unlock()
-	if !info.StreamRecovery.finished {
-		info.StreamRecovery.accepted = true
+	recovery := info.StreamRecovery
+	recovery.mu.Lock()
+	hook := recovery.testTransitionHook
+	if !recovery.finished {
+		recovery.accepted = true
+	}
+	recovery.mu.Unlock()
+	if hook != nil {
+		hook(streamRecoveryTransitionAccept)
 	}
 }
 
@@ -192,7 +219,7 @@ func (info *RelayInfo) TryDetachStream() bool {
 	}
 	recovery.detached = true
 	recovery.limiterRelease = release
-	recovery.drainTimer = time.AfterFunc(time.Duration(timeoutSeconds)*time.Second, recovery.handleDrainTimeout)
+	recovery.drainTimer = time.AfterFunc(streamRecoveryTimeoutDuration(timeoutSeconds), recovery.handleDrainTimeout)
 	recovery.mu.Unlock()
 	return true
 }
@@ -242,7 +269,7 @@ func (info *RelayInfo) MarkStreamAuthoritativeUsage() {
 	info.StreamRecovery.mu.Lock()
 	defer info.StreamRecovery.mu.Unlock()
 	if !info.StreamRecovery.finished {
-		info.StreamRecovery.usageState = StreamUsageStateExact
+		info.StreamRecovery.usageState = StreamUsageStatePartial
 	}
 }
 
@@ -257,12 +284,15 @@ func (info *RelayInfo) MarkStreamTerminalUsage() {
 		recovery.mu.Unlock()
 		return
 	}
-	if recovery.usageState != StreamUsageStateExact {
-		recovery.usageState = StreamUsageStatePartial
-	}
+	recovery.usageState = StreamUsageStateExact
 	recovery.drainResult = StreamDrainResultCompleted
+	hook := recovery.testTransitionHook
+	cleanup := recovery.finishLocked()
 	recovery.mu.Unlock()
-	info.FinishStreamRecovery()
+	if hook != nil {
+		hook(streamRecoveryTransitionTerminal)
+	}
+	cleanup.run()
 }
 
 func (info *RelayInfo) MarkStreamUsageUnknown(result StreamDrainResult) {
@@ -278,8 +308,13 @@ func (info *RelayInfo) MarkStreamUsageUnknown(result StreamDrainResult) {
 	}
 	recovery.usageState = StreamUsageStateUnknown
 	recovery.drainResult = result
+	hook := recovery.testTransitionHook
+	cleanup := recovery.finishLocked()
 	recovery.mu.Unlock()
-	info.FinishStreamRecovery()
+	if hook != nil {
+		hook(streamRecoveryTransitionUnknown)
+	}
+	cleanup.run()
 }
 
 func (info *RelayInfo) FinishStreamRecovery() {
@@ -323,8 +358,13 @@ func (recovery *StreamRecovery) handleParentDone() {
 		recovery.mu.Unlock()
 		return
 	}
+	hook := recovery.testTransitionHook
+	cleanup := recovery.finishLocked()
 	recovery.mu.Unlock()
-	recovery.finish()
+	if hook != nil {
+		hook(streamRecoveryTransitionParentDone)
+	}
+	cleanup.run()
 }
 
 func (recovery *StreamRecovery) handleDrainTimeout() {
@@ -335,8 +375,22 @@ func (recovery *StreamRecovery) handleDrainTimeout() {
 	}
 	recovery.usageState = StreamUsageStateUnknown
 	recovery.drainResult = StreamDrainResultTimeout
+	hook := recovery.testTransitionHook
+	cleanup := recovery.finishLocked()
 	recovery.mu.Unlock()
-	recovery.finish()
+	if hook != nil {
+		hook(streamRecoveryTransitionTimeout)
+	}
+	cleanup.run()
+}
+
+func streamRecoveryTimeoutDuration(timeoutSeconds int) time.Duration {
+	seconds := int64(timeoutSeconds)
+	maxSeconds := int64(math.MaxInt64) / int64(time.Second)
+	if seconds > maxSeconds {
+		seconds = maxSeconds
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (recovery *StreamRecovery) finish() {
@@ -345,27 +399,37 @@ func (recovery *StreamRecovery) finish() {
 		recovery.mu.Unlock()
 		return
 	}
+	cleanup := recovery.finishLocked()
+	recovery.mu.Unlock()
+	cleanup.run()
+}
+
+func (recovery *StreamRecovery) finishLocked() streamRecoveryCleanup {
 	recovery.finished = true
-	stopParentWatcher := recovery.stopParentWatcher
-	drainTimer := recovery.drainTimer
-	cancelUpstream := recovery.upstreamCancel
-	release := recovery.limiterRelease
+	cleanup := streamRecoveryCleanup{
+		stopParentWatcher: recovery.stopParentWatcher,
+		drainTimer:        recovery.drainTimer,
+		cancelUpstream:    recovery.upstreamCancel,
+		limiterRelease:    recovery.limiterRelease,
+	}
 	recovery.stopParentWatcher = nil
 	recovery.drainTimer = nil
 	recovery.upstreamCancel = nil
 	recovery.limiterRelease = nil
-	recovery.mu.Unlock()
+	return cleanup
+}
 
-	if stopParentWatcher != nil {
-		stopParentWatcher()
+func (cleanup streamRecoveryCleanup) run() {
+	if cleanup.stopParentWatcher != nil {
+		cleanup.stopParentWatcher()
 	}
-	if drainTimer != nil {
-		drainTimer.Stop()
+	if cleanup.drainTimer != nil {
+		cleanup.drainTimer.Stop()
 	}
-	if cancelUpstream != nil {
-		cancelUpstream()
+	if cleanup.cancelUpstream != nil {
+		cleanup.cancelUpstream()
 	}
-	if release != nil {
-		release()
+	if cleanup.limiterRelease != nil {
+		cleanup.limiterRelease()
 	}
 }

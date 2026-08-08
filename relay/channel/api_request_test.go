@@ -2,11 +2,16 @@ package channel
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -248,4 +253,313 @@ func TestDoRequestCancelsUpstreamWhenClientDisconnects(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("upstream handler did not observe cancellation")
 	}
+}
+
+func TestDoRequestEligibleStreamCancelsBeforeAcceptance(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	service.InitHttpClient()
+
+	upstreamStarted := make(chan struct{})
+	upstreamCanceled := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	var releaseHandlerOnce sync.Once
+	releaseUpstreamHandler := func() {
+		releaseHandlerOnce.Do(func() { close(releaseHandler) })
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(upstreamStarted)
+		select {
+		case <-r.Context().Done():
+			close(upstreamCanceled)
+		case <-releaseHandler:
+		}
+	}))
+	t.Cleanup(func() {
+		releaseUpstreamHandler()
+		server.CloseClientConnections()
+		server.Close()
+	})
+	t.Cleanup(releaseUpstreamHandler)
+
+	requestContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestContext)
+
+	upstreamRequest, err := http.NewRequest(http.MethodPost, server.URL, nil)
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{},
+		Timings:     relaycommon.NewRelayTimings(),
+	}
+	info.EnableStreamRecovery()
+
+	done := make(chan error, 1)
+	go func() {
+		resp, requestErr := DoRequest(ctx, upstreamRequest, info)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		done <- requestErr
+	}()
+
+	select {
+	case <-upstreamStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream request did not start")
+	}
+	cancel()
+
+	select {
+	case requestErr := <-done:
+		require.Error(t, requestErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("eligible upstream request was not canceled before acceptance")
+	}
+	select {
+	case <-upstreamCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream handler did not observe pre-acceptance cancellation")
+	}
+	require.False(t, info.GetStreamRecoverySnapshot().Accepted)
+}
+
+func TestDoRequestEligibleStreamSurvivesClientCancelAfterHeaders(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	service.InitHttpClient()
+
+	terminalReady := make(chan struct{})
+	terminalFlushed := make(chan struct{})
+	upstreamCanceled := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	var terminalReadyOnce sync.Once
+	var releaseHandlerOnce sync.Once
+	releaseTerminal := func() {
+		terminalReadyOnce.Do(func() { close(terminalReady) })
+	}
+	releaseUpstreamHandler := func() {
+		releaseHandlerOnce.Do(func() { close(releaseHandler) })
+	}
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		select {
+		case <-terminalReady:
+		case <-releaseHandler:
+			return
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		w.(http.Flusher).Flush()
+		close(terminalFlushed)
+		select {
+		case <-r.Context().Done():
+			close(upstreamCanceled)
+		case <-releaseHandler:
+		}
+	}))
+	t.Cleanup(func() {
+		releaseTerminal()
+		releaseUpstreamHandler()
+		server.CloseClientConnections()
+		server.Close()
+	})
+	t.Cleanup(releaseUpstreamHandler)
+	t.Cleanup(releaseTerminal)
+
+	requestContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestContext)
+
+	upstreamRequest, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(""))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{},
+		Timings:     relaycommon.NewRelayTimings(),
+	}
+	info.EnableStreamRecovery()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	resp, err := DoRequest(ctx, upstreamRequest, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.True(t, info.GetStreamRecoverySnapshot().Accepted)
+
+	cancel()
+	select {
+	case <-upstreamCanceled:
+		t.Fatal("accepted upstream request was canceled with the downstream client")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	releaseTerminal()
+	select {
+	case <-terminalFlushed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("accepted upstream request did not reach its terminal body")
+	}
+	require.Equal(t, int32(1), requests.Load())
+
+	info.FinishStreamRecovery()
+	select {
+	case <-upstreamCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("finishing stream recovery did not cancel the upstream request")
+	}
+}
+
+func TestDoRequestEligibleStreamDoesNotAcceptNon2xx(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	service.InitHttpClient()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(server.Close)
+
+	requestContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestContext)
+
+	upstreamRequest, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(""))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{},
+		Timings:     relaycommon.NewRelayTimings(),
+	}
+	info.EnableStreamRecovery()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	resp, err := DoRequest(ctx, upstreamRequest, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	require.False(t, info.GetStreamRecoverySnapshot().Accepted)
+}
+
+func TestDoRequestRetryResetsRecoveryAttempt(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	service.InitHttpClient()
+
+	closedServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	closedURL := closedServer.URL
+	closedServer.Close()
+
+	requestContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{},
+		Timings:     relaycommon.NewRelayTimings(),
+	}
+	info.EnableStreamRecovery()
+
+	failedRequest, err := http.NewRequest(http.MethodPost, closedURL, nil)
+	require.NoError(t, err)
+	resp, err := DoRequest(ctx, failedRequest, info)
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.False(t, info.GetStreamRecoverySnapshot().Accepted)
+
+	upstreamCanceled := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	var releaseHandlerOnce sync.Once
+	releaseUpstreamHandler := func() {
+		releaseHandlerOnce.Do(func() { close(releaseHandler) })
+	}
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+			close(upstreamCanceled)
+		case <-releaseHandler:
+		}
+	}))
+	t.Cleanup(func() {
+		releaseUpstreamHandler()
+		server.CloseClientConnections()
+		server.Close()
+	})
+	t.Cleanup(releaseUpstreamHandler)
+
+	retryRequest, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(""))
+	require.NoError(t, err)
+	resp, err = DoRequest(ctx, retryRequest, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	retryResp := resp
+	t.Cleanup(func() { _ = retryResp.Body.Close() })
+	require.True(t, info.GetStreamRecoverySnapshot().Accepted)
+	require.Equal(t, int32(1), requests.Load())
+
+	info.FinishStreamRecovery()
+	select {
+	case <-upstreamCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("accepted retry attempt was not finished")
+	}
+
+	requestAfterAcceptance, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(""))
+	require.NoError(t, err)
+	resp, err = DoRequest(ctx, requestAfterAcceptance, info)
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.Equal(t, int32(1), requests.Load(), "accepted recovery must not start another upstream attempt")
+}
+
+func TestDoRequestRecordsRelayTimings(t *testing.T) {
+	service.InitHttpClient()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader("{}"))
+	upstreamRequest, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader("{}"))
+	require.NoError(t, err)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{},
+		Timings:     relaycommon.NewRelayTimings(),
+	}
+	info.Timings.MarkRequestConversionStart(time.Now().Add(-time.Millisecond))
+	resp, err := DoRequest(c, upstreamRequest, info)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	timings := info.Timings.SnapshotMilliseconds()
+	require.Greater(t, timings["request_conversion_ms"], 0.0)
+	require.Greater(t, timings["upstream_headers_ms"], 0.0)
 }

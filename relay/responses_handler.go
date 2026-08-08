@@ -121,6 +121,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 
 	var httpResp *http.Response
+	if appconstant.StreamUsageDrainEnabled && info.IsStream {
+		info.EnableStreamRecovery()
+	}
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
@@ -132,11 +135,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		httpResp = resp.(*http.Response)
 
 		if httpResp.StatusCode != http.StatusOK {
+			defer info.FinishStreamRecovery()
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
 			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 			return newAPIError
 		}
+		info.MarkStreamAccepted()
+		defer info.FinishStreamRecovery()
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)

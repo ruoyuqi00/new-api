@@ -511,6 +511,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if c != nil && c.Request != nil && httptrace.ContextClientTrace(requestContext) == nil {
 		requestContext = c.Request.Context()
 	}
+	if info != nil && info.StreamRecovery != nil {
+		requestContext = info.StartStreamRecoveryAttempt(requestContext)
+	}
 	var attempt *common.UpstreamRequestAttempt
 	if info != nil {
 		attempt = info.BeginUpstreamRequestAttempt()
@@ -535,13 +538,19 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		default:
 			attempt.MarkAmbiguousIfPotentiallySent()
 		}
+		info.FinishStreamRecovery()
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
+		info.FinishStreamRecovery()
 		return nil, errors.New("resp is nil")
 	}
 	attempt.MarkFinalResponseReceived()
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		info.MarkStreamAccepted()
+	}
+	info.Timings.MarkUpstreamHeaders(time.Now())
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
