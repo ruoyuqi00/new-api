@@ -1,6 +1,7 @@
 package model
 
 import (
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -8,8 +9,80 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+func TestGetAffiliateCreditRebateConfigTxQuotesReservedKeyColumnForMySQL(t *testing.T) {
+	mysqlDB, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "user:password@tcp(127.0.0.1:3306)/newapi",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DisableAutomaticPing: true,
+		DryRun:               true,
+	})
+	require.NoError(t, err)
+
+	var query string
+	require.NoError(t, mysqlDB.Callback().Query().After("gorm:query").Register(
+		"capture_affiliate_rebate_config_query",
+		func(db *gorm.DB) {
+			query = db.Statement.SQL.String()
+		},
+	))
+
+	_, _, err = getAffiliateCreditRebateConfigTx(mysqlDB)
+	require.NoError(t, err)
+	assert.Contains(t, query, "WHERE `key` IN (?,?)")
+}
+
+func TestCreditUserQuotaWithAffiliateRewardTxMySQLCompatibility(t *testing.T) {
+	dsn := os.Getenv("TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set TEST_MYSQL_DSN to run MySQL affiliate credit compatibility test")
+	}
+
+	mysqlDB, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := mysqlDB.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, mysqlDB.Migrator().DropTable(&AffiliateReward{}, &Option{}, &User{}))
+		require.NoError(t, sqlDB.Close())
+	})
+
+	require.NoError(t, mysqlDB.Migrator().DropTable(&AffiliateReward{}, &Option{}, &User{}))
+	require.NoError(t, mysqlDB.AutoMigrate(&User{}, &Option{}, &AffiliateReward{}))
+	require.NoError(t, mysqlDB.Create(&[]Option{
+		{Key: "AffiliateCreditRebateEnabled", Value: "false"},
+		{Key: "AffiliateCreditRebateBasisPoints", Value: "0"},
+	}).Error)
+
+	user := &User{Username: "mysql-affiliate-credit", Status: common.UserStatusEnabled}
+	require.NoError(t, mysqlDB.Create(user).Error)
+
+	var reward *AffiliateReward
+	require.NoError(t, mysqlDB.Transaction(func(tx *gorm.DB) error {
+		var creditErr error
+		reward, creditErr = CreditUserQuotaWithAffiliateRewardTx(
+			tx,
+			user.Id,
+			1_000,
+			AffiliateRewardSourceAdminAdd,
+			"mysql-admin-credit",
+		)
+		return creditErr
+	}))
+	assert.Nil(t, reward)
+
+	var credited User
+	require.NoError(t, mysqlDB.Select("quota").First(&credited, user.Id).Error)
+	assert.Equal(t, 1_000, credited.Quota)
+
+	var rewardCount int64
+	require.NoError(t, mysqlDB.Model(&AffiliateReward{}).Count(&rewardCount).Error)
+	assert.Zero(t, rewardCount)
+}
 
 func setupAffiliateRewardTest(t *testing.T) (inviter *User, invitee *User) {
 	t.Helper()

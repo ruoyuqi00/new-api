@@ -165,7 +165,7 @@ func CreditUserQuotaWithAffiliateRewardTx(
 
 func getAffiliateCreditRebateConfigTx(tx *gorm.DB) (bool, int, error) {
 	var options []Option
-	if err := tx.Where("key IN ?", []string{
+	if err := tx.Where(commonKeyCol+" IN ?", []string{
 		"AffiliateCreditRebateEnabled",
 		"AffiliateCreditRebateBasisPoints",
 	}).Find(&options).Error; err != nil {
