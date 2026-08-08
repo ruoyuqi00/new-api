@@ -6,6 +6,11 @@ var StreamingTimeout int
 var DifyDebug bool
 var MaxFileDownloadMB int
 var StreamScannerMaxBufferMB int
+var StreamUsageDrainEnabled bool
+var StreamUsageDrainMaxConcurrency int
+var StreamUsageDrainMaxPerChannel int
+var StreamUsageDrainTimeoutSeconds int
+var StreamUsageDrainMaxBytesMB int
 var ForceStreamOption bool
 var CountToken bool
 var GetMediaToken bool

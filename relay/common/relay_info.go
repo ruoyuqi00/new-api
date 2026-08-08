@@ -240,6 +240,7 @@ type RelayInfo struct {
 	FinalRequestRelayFormat types.RelayFormat
 
 	StreamStatus                      *StreamStatus
+	StreamRecovery                    *StreamRecovery
 	ChannelAffinityResponseID         string
 	ChannelAffinityResponseIDObserved bool
 	StreamTerminalMarkersRequired     bool

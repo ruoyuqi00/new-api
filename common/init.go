@@ -195,6 +195,23 @@ func initConstantEnv() {
 	constant.DifyDebug = GetEnvOrDefaultBool("DIFY_DEBUG", true)
 	constant.MaxFileDownloadMB = GetEnvOrDefault("MAX_FILE_DOWNLOAD_MB", 64)
 	constant.StreamScannerMaxBufferMB = GetEnvOrDefault("STREAM_SCANNER_MAX_BUFFER_MB", 128)
+	constant.StreamUsageDrainEnabled = GetEnvOrDefaultBool("STREAM_USAGE_DRAIN_ENABLED", false)
+	constant.StreamUsageDrainMaxConcurrency = GetEnvOrDefault("STREAM_USAGE_DRAIN_MAX_CONCURRENCY", 32)
+	constant.StreamUsageDrainMaxPerChannel = GetEnvOrDefault("STREAM_USAGE_DRAIN_MAX_PER_CHANNEL", 8)
+	constant.StreamUsageDrainTimeoutSeconds = GetEnvOrDefault("STREAM_USAGE_DRAIN_TIMEOUT_SECONDS", 300)
+	constant.StreamUsageDrainMaxBytesMB = GetEnvOrDefault("STREAM_USAGE_DRAIN_MAX_BYTES_MB", 32)
+	if constant.StreamUsageDrainMaxConcurrency <= 0 {
+		constant.StreamUsageDrainMaxConcurrency = 32
+	}
+	if constant.StreamUsageDrainMaxPerChannel <= 0 {
+		constant.StreamUsageDrainMaxPerChannel = 8
+	}
+	if constant.StreamUsageDrainTimeoutSeconds <= 0 {
+		constant.StreamUsageDrainTimeoutSeconds = 300
+	}
+	if constant.StreamUsageDrainMaxBytesMB <= 0 {
+		constant.StreamUsageDrainMaxBytesMB = 32
+	}
 	// MaxRequestBodyMB 请求体最大大小（解压后），用于防止超大请求/zip bomb导致内存暴涨
 	constant.MaxRequestBodyMB = GetEnvOrDefault("MAX_REQUEST_BODY_MB", 128)
 	constant.AnonymousRequestBodyLimitKB = GetEnvOrDefault("ANONYMOUS_REQUEST_BODY_LIMIT_KB", 512)
