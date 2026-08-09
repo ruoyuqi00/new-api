@@ -15,7 +15,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const ginKeyChannelPoolLease = "channel_pool_lease"
+const (
+	ginKeyChannelPoolLease            = "channel_pool_lease"
+	defaultChannelPoolCooldownSeconds = 10
+)
+
+func effectiveChannelPoolCooldownSeconds(configured int) int {
+	if configured < 0 {
+		return 0
+	}
+	if configured == 0 {
+		return defaultChannelPoolCooldownSeconds
+	}
+	return configured
+}
 
 func TryAcquireChannelPoolLease(c *gin.Context, channel *model.Channel) (bool, error) {
 	if c == nil || channel == nil {
@@ -108,7 +121,11 @@ func MaybeCooldownSelectedChannelPool(c *gin.Context, err *types.NewAPIError) {
 		return
 	}
 	settings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
-	if !ok || settings.ChannelPoolCooldownSeconds <= 0 {
+	if !ok {
+		return
+	}
+	cooldownSeconds := effectiveChannelPoolCooldownSeconds(settings.ChannelPoolCooldownSeconds)
+	if cooldownSeconds <= 0 {
 		return
 	}
 	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
@@ -124,8 +141,8 @@ func MaybeCooldownSelectedChannelPool(c *gin.Context, err *types.NewAPIError) {
 		return
 	}
 	reason := fmt.Sprintf("status=%d code=%s", err.StatusCode, err.GetErrorCode())
-	model.CooldownChannelPool(channelID, group, modelName, settings.ChannelPoolCooldownSeconds, reason)
-	logger.LogWarn(c, fmt.Sprintf("channel pool cooldown set: channel #%d group=%s model=%s seconds=%d reason=%s", channelID, group, modelName, settings.ChannelPoolCooldownSeconds, reason))
+	model.CooldownChannelPool(channelID, group, modelName, cooldownSeconds, reason)
+	logger.LogWarn(c, fmt.Sprintf("channel pool cooldown set: channel #%d group=%s model=%s seconds=%d reason=%s", channelID, group, modelName, cooldownSeconds, reason))
 }
 
 func shouldCooldownSelectedChannelPool(c *gin.Context, err *types.NewAPIError) bool {
