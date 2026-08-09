@@ -152,6 +152,10 @@ const normalizeKeySource = (src) => {
     return { type, key: '', path };
   }
 
+  if (type === 'request_header') {
+    return { type, key, path };
+  }
+
   return { type, key, path: '' };
 };
 
@@ -793,8 +797,10 @@ export default function SettingsChannelAffinity(props) {
 
   const updateKeySource = (index, patch) => {
     const next = [...(editingRule?.key_sources || [])];
+    const current = next[index] || {};
+    const typeChanged = patch?.type && patch.type !== current.type;
     next[index] = normalizeKeySource({
-      ...(next[index] || {}),
+      ...(typeChanged ? {} : current),
       ...(patch || {}),
     });
     setEditingRule((prev) => ({ ...(prev || {}), key_sources: next }));
@@ -1385,20 +1391,35 @@ export default function SettingsChannelAffinity(props) {
                     editingRule?.key_sources?.[idx],
                   );
                   const isGjson = src.type === 'gjson';
+                  const isRequestHeader = src.type === 'request_header';
                   return (
-                    <Input
-                      placeholder={
-                        isGjson ? 'metadata.conversation_id' : 'X-Affinity-Key'
-                      }
-                      aria-label={t('Key 或 Path')}
-                      value={isGjson ? src.path : src.key}
-                      onChange={(value) =>
-                        updateKeySource(
-                          idx,
-                          isGjson ? { path: value } : { key: value },
-                        )
-                      }
-                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Input
+                        placeholder={
+                          isGjson
+                            ? 'metadata.conversation_id'
+                            : 'X-Affinity-Key'
+                        }
+                        aria-label={t('Key 或 Path')}
+                        value={isGjson ? src.path : src.key}
+                        onChange={(value) =>
+                          updateKeySource(
+                            idx,
+                            isGjson ? { path: value } : { key: value },
+                          )
+                        }
+                      />
+                      {isRequestHeader && (
+                        <Input
+                          placeholder='session_id'
+                          aria-label={t('Key 或 Path')}
+                          value={src.path}
+                          onChange={(value) =>
+                            updateKeySource(idx, { path: value })
+                          }
+                        />
+                      )}
+                    </div>
                   );
                 },
               },

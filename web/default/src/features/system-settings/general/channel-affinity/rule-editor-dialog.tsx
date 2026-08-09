@@ -95,6 +95,9 @@ function normalizeStringList(text: string): string[] {
 function normalizeKeySource(src: Partial<KeySource>): KeySource {
   const type = (src?.type || 'gjson') as KeySource['type']
   if (type === 'gjson') return { type, key: '', path: src?.path || '' }
+  if (type === 'request_header') {
+    return { type, key: src?.key || '', path: src?.path || '' }
+  }
   return { type, key: src?.key || '', path: '' }
 }
 
@@ -334,10 +337,11 @@ export function RuleEditorDialog(props: Props) {
                   onValueChange={(v) => {
                     if (v === null) return
                     const next = [...keySources]
+                    const nextType = v as KeySource['type']
                     next[idx] = {
                       ...normalizeKeySource({
-                        ...src,
-                        type: v as KeySource['type'],
+                        ...(nextType === src.type ? src : {}),
+                        type: nextType,
                       }),
                       rowId: src.rowId,
                     }
@@ -375,6 +379,18 @@ export function RuleEditorDialog(props: Props) {
                     setKeySources(next)
                   }}
                 />
+                {src.type === 'request_header' && (
+                  <Input
+                    className='min-w-0 flex-1'
+                    placeholder='session_id'
+                    value={src.path || ''}
+                    onChange={(e) => {
+                      const next = [...keySources]
+                      next[idx] = { ...src, path: e.target.value }
+                      setKeySources(next)
+                    }}
+                  />
+                )}
                 <Button
                   type='button'
                   variant='ghost'

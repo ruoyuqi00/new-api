@@ -211,6 +211,21 @@ func TestExtractChannelAffinityValue_RequestHeader(t *testing.T) {
 	require.Equal(t, "tenant-123", value)
 }
 
+func TestExtractChannelAffinityValue_RequestHeaderJSONPath(t *testing.T) {
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"session-123","turn_id":"turn-456"}`)
+
+	value := extractChannelAffinityValue(ctx, operation_setting.ChannelAffinityKeySource{
+		Type: "request_header",
+		Key:  "X-Codex-Turn-Metadata",
+		Path: "session_id",
+	})
+
+	require.Equal(t, "session-123", value)
+}
+
 func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -421,6 +436,46 @@ func TestDefaultCodexAffinityPrefersPromptCacheKey(t *testing.T) {
 	bodyAfter, err := storage.Bytes()
 	require.NoError(t, err)
 	require.Equal(t, []byte(requestBody), bodyAfter)
+}
+
+func TestDefaultCodexAffinityFallsBackToTurnMetadataSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"session-from-metadata","turn_id":"changes-each-turn"}`)
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+
+	require.False(t, found)
+	require.Zero(t, channelID)
+	meta, ok := getChannelAffinityMeta(ctx)
+	require.True(t, ok)
+	require.Equal(t, "request_header", meta.KeySourceType)
+	require.Equal(t, "X-Codex-Turn-Metadata", meta.KeySourceKey)
+	require.Equal(t, "session_id", meta.KeySourcePath)
+	require.Equal(t, affinityFingerprint("session-from-metadata"), meta.KeyFingerprint)
+}
+
+func TestDefaultCodexAffinityFallsBackToTurnMetadataThreadID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("X-Codex-Turn-Metadata", `{"thread_id":"thread-from-metadata","turn_id":"changes-each-turn"}`)
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+
+	require.False(t, found)
+	require.Zero(t, channelID)
+	meta, ok := getChannelAffinityMeta(ctx)
+	require.True(t, ok)
+	require.Equal(t, "thread_id", meta.KeySourcePath)
+	require.Equal(t, affinityFingerprint("thread-from-metadata"), meta.KeyFingerprint)
 }
 
 func TestDefaultCodexAffinityRequiresExplicitKey(t *testing.T) {

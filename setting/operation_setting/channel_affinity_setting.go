@@ -88,6 +88,8 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			KeySources: []ChannelAffinityKeySource{
 				{Type: "gjson", Path: "prompt_cache_key"},
 				{Type: "request_header", Key: "Session_id"},
+				{Type: "request_header", Key: "X-Codex-Turn-Metadata", Path: "session_id"},
+				{Type: "request_header", Key: "X-Codex-Turn-Metadata", Path: "thread_id"},
 			},
 			ValueRegex:            "",
 			TTLSeconds:            0,
