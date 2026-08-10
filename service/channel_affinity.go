@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -26,6 +27,8 @@ const (
 	ginKeyChannelAffinityLogInfo    = "channel_affinity_log_info"
 	ginKeyChannelAffinitySkipRetry  = "channel_affinity_skip_retry_on_failure"
 	ginKeyChannelAffinitySucceeded  = "channel_affinity_request_succeeded"
+	ginKeyChannelAffinityRule       = "channel_affinity_rule"
+	ginKeyChannelAffinityResponseID = "channel_affinity_response_id"
 
 	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
@@ -55,6 +58,13 @@ type channelAffinityMeta struct {
 	UsingGroup     string
 	ModelName      string
 	RequestPath    string
+}
+
+type channelAffinityRuleContext struct {
+	Rule        operation_setting.ChannelAffinityRule
+	UsingGroup  string
+	ModelName   string
+	RequestPath string
 }
 
 type ChannelAffinityStatsContext struct {
@@ -363,6 +373,24 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 			return strings.TrimSpace(conversation.String())
 		}
 		return ""
+	case "response_chain":
+		path := strings.TrimSpace(src.Path)
+		if path == "" {
+			path = "previous_response_id"
+		}
+		storage, err := common.GetBodyStorage(c)
+		if err != nil {
+			return ""
+		}
+		body, err := storage.Bytes()
+		if err != nil || len(body) == 0 {
+			return ""
+		}
+		responseID := gjson.GetBytes(body, path)
+		if !responseID.Exists() || responseID.Type != gjson.String {
+			return ""
+		}
+		return strings.TrimSpace(responseID.String())
 	default:
 		return ""
 	}
@@ -410,6 +438,34 @@ func setChannelAffinityContext(c *gin.Context, meta channelAffinityMeta) {
 	c.Set(ginKeyChannelAffinityCacheKey, meta.CacheKey)
 	c.Set(ginKeyChannelAffinityTTLSeconds, meta.TTLSeconds)
 	c.Set(ginKeyChannelAffinityMeta, meta)
+}
+
+func setChannelAffinityRuleContext(c *gin.Context, ruleContext channelAffinityRuleContext) {
+	if c == nil {
+		return
+	}
+	c.Set(ginKeyChannelAffinityRule, ruleContext)
+}
+
+func getChannelAffinityRuleContext(c *gin.Context) (channelAffinityRuleContext, bool) {
+	if c == nil {
+		return channelAffinityRuleContext{}, false
+	}
+	value, ok := c.Get(ginKeyChannelAffinityRule)
+	if !ok {
+		return channelAffinityRuleContext{}, false
+	}
+	ruleContext, ok := value.(channelAffinityRuleContext)
+	return ruleContext, ok
+}
+
+func ruleHasChannelAffinitySource(rule operation_setting.ChannelAffinityRule, sourceType string) bool {
+	for _, source := range rule.KeySources {
+		if strings.TrimSpace(source.Type) == sourceType {
+			return true
+		}
+	}
+	return false
 }
 
 func getChannelAffinityContext(c *gin.Context) (string, int, bool) {
@@ -628,6 +684,14 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		if len(rule.UserAgentInclude) > 0 && !matchAnyIncludeFold(rule.UserAgentInclude, userAgent) {
 			continue
 		}
+		if ruleHasChannelAffinitySource(rule, "response_chain") {
+			setChannelAffinityRuleContext(c, channelAffinityRuleContext{
+				Rule:        rule,
+				UsingGroup:  usingGroup,
+				ModelName:   modelName,
+				RequestPath: path,
+			})
+		}
 		var affinityValue string
 		var usedSource operation_setting.ChannelAffinityKeySource
 		for _, src := range rule.KeySources {
@@ -638,6 +702,17 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			}
 		}
 		if affinityValue == "" {
+			if ruleHasChannelAffinitySource(rule, "response_chain") {
+				c.Set(ginKeyChannelAffinityLogInfo, map[string]interface{}{
+					"reason":       rule.Name,
+					"rule_name":    rule.Name,
+					"using_group":  usingGroup,
+					"model":        modelName,
+					"request_path": path,
+					"key_source":   "none",
+					"missing_key":  true,
+				})
+			}
 			continue
 		}
 		if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, affinityValue) {
@@ -652,7 +727,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		keyHint := buildChannelAffinityKeyHint(affinityValue)
 		if isScopedChannelAffinitySource(usedSource.Type) {
 			var ok bool
-			cacheKeySuffix, ok = buildScopedChannelAffinityCacheKeySuffix(rule, usedSource.Type, c.GetInt("token_id"), modelName, usingGroup, affinityValue)
+			cacheKeySuffix, ok = buildScopedChannelAffinityCacheKeySuffix(rule, usedSource.Type, common.GetContextKeyInt(c, constant.ContextKeyTokenId), modelName, usingGroup, affinityValue)
 			if !ok {
 				continue
 			}
@@ -783,6 +858,17 @@ func MarkChannelAffinityRequestSucceeded(c *gin.Context) {
 	c.Set(ginKeyChannelAffinitySucceeded, true)
 }
 
+func SetChannelAffinityResponseID(c *gin.Context, responseID string) {
+	if c == nil {
+		return
+	}
+	responseID = strings.TrimSpace(responseID)
+	if responseID == "" {
+		return
+	}
+	c.Set(ginKeyChannelAffinityResponseID, responseID)
+}
+
 func RecordChannelAffinity(c *gin.Context, channelID int) {
 	if c == nil || !c.GetBool(ginKeyChannelAffinitySucceeded) || channelID <= 0 {
 		return
@@ -796,19 +882,45 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 			channelID = successChannelID
 		}
 	}
-	cacheKey, ttlSeconds, ok := getChannelAffinityContext(c)
+	cache := getChannelAffinityCache()
+	if cacheKey, ttlSeconds, ok := getChannelAffinityContext(c); ok {
+		if ttlSeconds <= 0 {
+			ttlSeconds = setting.DefaultTTLSeconds
+		}
+		if ttlSeconds <= 0 {
+			ttlSeconds = 3600
+		}
+		if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
+			common.SysError(fmt.Sprintf("channel affinity cache set failed: key=%s, err=%v", cacheKey, err))
+		}
+	}
+
+	responseID := strings.TrimSpace(c.GetString(ginKeyChannelAffinityResponseID))
+	ruleContext, hasRuleContext := getChannelAffinityRuleContext(c)
+	if responseID == "" || !hasRuleContext {
+		return
+	}
+	cacheKeySuffix, ok := buildScopedChannelAffinityCacheKeySuffix(
+		ruleContext.Rule,
+		"response_chain",
+		common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+		ruleContext.ModelName,
+		ruleContext.UsingGroup,
+		responseID,
+	)
 	if !ok {
 		return
 	}
+	ttlSeconds := ruleContext.Rule.TTLSeconds
 	if ttlSeconds <= 0 {
 		ttlSeconds = setting.DefaultTTLSeconds
 	}
 	if ttlSeconds <= 0 {
 		ttlSeconds = 3600
 	}
-	cache := getChannelAffinityCache()
+	cacheKey := channelAffinityCacheNamespace + ":" + cacheKeySuffix
 	if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
-		common.SysError(fmt.Sprintf("channel affinity cache set failed: key=%s, err=%v", cacheKey, err))
+		common.SysError(fmt.Sprintf("channel affinity response chain cache set failed: key=%s, err=%v", cacheKey, err))
 	}
 }
 

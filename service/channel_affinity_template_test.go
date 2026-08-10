@@ -608,3 +608,106 @@ func TestDefaultCodexAffinityParsesConversationForms(t *testing.T) {
 		})
 	}
 }
+
+func recordResponseChainAffinityForTest(t *testing.T, responseID string, tokenID int, modelName string, usingGroup string, channelID int) {
+	t.Helper()
+	ctx := newChannelAffinityRequestContext(t, `{"model":"gpt-5","input":"first"}`, tokenID)
+	_, found := GetPreferredChannelByAffinity(ctx, modelName, usingGroup)
+	require.False(t, found)
+	SetChannelAffinityResponseID(ctx, responseID)
+	MarkChannelAffinityRequestSucceeded(ctx)
+	RecordChannelAffinity(ctx, channelID)
+}
+
+func responseChainLookupContext(t *testing.T, responseID string, tokenID int) *gin.Context {
+	t.Helper()
+	body := fmt.Sprintf(`{"model":"gpt-5","previous_response_id":"%s","input":"next"}`, responseID)
+	return newChannelAffinityRequestContext(t, body, tokenID)
+}
+
+func TestResponsesChainAffinityContinuesSuccessfulChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	responseID := fmt.Sprintf("resp-chain-%d", time.Now().UnixNano())
+	recordResponseChainAffinityForTest(t, responseID, 8201, "gpt-5", "gptpro", 9201)
+
+	next := responseChainLookupContext(t, responseID, 8201)
+	channelID, found := GetPreferredChannelByAffinity(next, "gpt-5", "gptpro")
+	require.True(t, found)
+	assert.Equal(t, 9201, channelID)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(next) })
+}
+
+func TestResponsesChainAffinityScopesAndSeparatesSharedTokenChains(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	suffix := time.Now().UnixNano()
+	scopedResponseID := fmt.Sprintf("resp-scope-%d", suffix)
+	recordResponseChainAffinityForTest(t, scopedResponseID, 8210, "gpt-5", "gptpro", 9210)
+
+	tests := []struct {
+		name       string
+		tokenID    int
+		modelName  string
+		usingGroup string
+	}{
+		{"other token", 8211, "gpt-5", "gptpro"},
+		{"other group", 8210, "gpt-5", "other"},
+		{"other model", 8210, "gpt-5-mini", "gptpro"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := responseChainLookupContext(t, scopedResponseID, tt.tokenID)
+			channelID, found := GetPreferredChannelByAffinity(ctx, tt.modelName, tt.usingGroup)
+			require.False(t, found)
+			assert.Zero(t, channelID)
+		})
+	}
+
+	chainA := fmt.Sprintf("resp-chain-a-%d", suffix)
+	chainB := fmt.Sprintf("resp-chain-b-%d", suffix)
+	recordResponseChainAffinityForTest(t, chainA, 8220, "gpt-5", "gptpro", 9221)
+	recordResponseChainAffinityForTest(t, chainB, 8220, "gpt-5", "gptpro", 9222)
+
+	lookupA := responseChainLookupContext(t, chainA, 8220)
+	channelA, foundA := GetPreferredChannelByAffinity(lookupA, "gpt-5", "gptpro")
+	require.True(t, foundA)
+	assert.Equal(t, 9221, channelA)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(lookupA) })
+
+	lookupB := responseChainLookupContext(t, chainB, 8220)
+	channelB, foundB := GetPreferredChannelByAffinity(lookupB, "gpt-5", "gptpro")
+	require.True(t, foundB)
+	assert.Equal(t, 9222, channelB)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(lookupB) })
+}
+
+func TestResponsesChainAffinityRequiresAuthoritativeSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	responseID := fmt.Sprintf("resp-unconfirmed-%d", time.Now().UnixNano())
+	first := newChannelAffinityRequestContext(t, `{"model":"gpt-5","input":"first"}`, 8230)
+	_, found := GetPreferredChannelByAffinity(first, "gpt-5", "gptpro")
+	require.False(t, found)
+	SetChannelAffinityResponseID(first, responseID)
+	RecordChannelAffinity(first, 9230)
+
+	next := responseChainLookupContext(t, responseID, 8230)
+	channelID, found := GetPreferredChannelByAffinity(next, "gpt-5", "gptpro")
+	require.False(t, found)
+	assert.Zero(t, channelID)
+}
+
+func TestDefaultCodexAffinityMarksMissingStableKeyWithoutIdentifiers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := newChannelAffinityRequestContext(t, `{"model":"gpt-5","input":"hello"}`, 8240)
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "gptpro")
+	require.False(t, found)
+	assert.Zero(t, channelID)
+
+	adminInfo := map[string]interface{}{}
+	AppendChannelAffinityAdminInfo(ctx, adminInfo)
+	affinityInfo, ok := adminInfo["channel_affinity"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, affinityInfo["missing_key"])
+	assert.Equal(t, "none", affinityInfo["key_source"])
+	assert.NotContains(t, affinityInfo, "key_hint")
+}
