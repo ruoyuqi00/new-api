@@ -272,9 +272,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
-			if shouldCommitChannelAffinity(c, relayInfo) {
-				service.MarkChannelAffinityRequestSucceeded(c)
-			}
+			commitChannelAffinityOutcome(c, relayInfo)
 			service.ReleaseCurrentChannelPoolLease(c)
 			return
 		}
@@ -468,6 +466,14 @@ func shouldCommitChannelAffinity(c *gin.Context, relayInfo *relaycommon.RelayInf
 		return false
 	}
 	return relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors()
+}
+
+func commitChannelAffinityOutcome(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	if !shouldCommitChannelAffinity(c, relayInfo) {
+		return
+	}
+	service.SetChannelAffinityResponseID(c, relayInfo.ChannelAffinityResponseID)
+	service.MarkChannelAffinityRequestSucceeded(c)
 }
 
 func prepareRelayRetry(c *gin.Context, retryParam *service.RetryParam, channelID int, providerAccountRetryEligible bool) {

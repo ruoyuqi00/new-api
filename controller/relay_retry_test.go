@@ -145,6 +145,65 @@ func TestShouldCommitChannelAffinityRequiresNormalRelayCompletion(t *testing.T) 
 	}
 }
 
+func newResponseChainCommitTestContext(t *testing.T, body string, tokenID int, canceled bool) *gin.Context {
+	t.Helper()
+	c := newRelayRetryTestContext(t, canceled)
+	requestContext := c.Request.Context()
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)).WithContext(requestContext)
+	c.Request.Header.Set("Content-Type", "application/json")
+	common.SetContextKey(c, constant.ContextKeyTokenId, tokenID)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "gptpro")
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-5")
+	return c
+}
+
+func TestCommitResponseChainAffinityOutcome(t *testing.T) {
+	tests := []struct {
+		name      string
+		canceled  bool
+		streamEnd relaycommon.StreamEndReason
+		terminal  bool
+		wantFound bool
+	}{
+		{name: "completed", streamEnd: relaycommon.StreamEndReasonDone, terminal: true, wantFound: true},
+		{name: "client gone", streamEnd: relaycommon.StreamEndReasonClientGone, terminal: true},
+		{name: "context canceled", canceled: true, streamEnd: relaycommon.StreamEndReasonDone, terminal: true},
+		{name: "missing terminal success", streamEnd: relaycommon.StreamEndReasonDone},
+	}
+
+	for index, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			responseID := "resp-controller-" + strings.ReplaceAll(tt.name, " ", "-")
+			tokenID := 8300 + index
+			first := newResponseChainCommitTestContext(t, `{"model":"gpt-5","input":"first"}`, tokenID, tt.canceled)
+			_, found := service.GetPreferredChannelByAffinity(first, "gpt-5", "gptpro")
+			require.False(t, found)
+			relayInfo := &relaycommon.RelayInfo{
+				IsStream:                      true,
+				RelayFormat:                   types.RelayFormatOpenAIResponses,
+				StreamStatus:                  relayStreamStatusForAffinityTest(tt.streamEnd, false),
+				StreamTerminalMarkersRequired: true,
+				StreamTerminalSuccess:         tt.terminal,
+				ChannelAffinityResponseID:     responseID,
+			}
+
+			commitChannelAffinityOutcome(first, relayInfo)
+			service.RecordChannelAffinity(first, 9300+index)
+
+			nextBody := `{"model":"gpt-5","previous_response_id":"` + responseID + `","input":"next"}`
+			next := newResponseChainCommitTestContext(t, nextBody, tokenID, false)
+			channelID, found := service.GetPreferredChannelByAffinity(next, "gpt-5", "gptpro")
+			require.Equal(t, tt.wantFound, found)
+			if tt.wantFound {
+				require.Equal(t, 9300+index, channelID)
+				t.Cleanup(func() { service.ClearCurrentChannelAffinityCache(next) })
+			} else {
+				require.Zero(t, channelID)
+			}
+		})
+	}
+}
+
 func TestPrepareRelayRetryPreservesCurrentAffinity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	requestBody := `{"model":"gpt-5","prompt_cache_key":"retry-preserves-affinity"}`
