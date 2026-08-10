@@ -85,6 +85,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 
 	defer service.CloseResponseBodyGracefully(resp)
+	info.StreamTerminalMarkersRequired = true
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
@@ -124,8 +125,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 		switch streamResponse.Type {
-		case "response.completed", "response.done", "response.incomplete", "response.failed", "response.error":
+		case "response.completed", "response.done":
 			terminalReceived = true
+			info.StreamTerminalSuccess = true
+		case "response.incomplete", "response.failed", "response.error":
+			terminalReceived = true
+			info.StreamTerminalSuccess = false
 		}
 		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
 			sr.Stop(err)
@@ -135,6 +140,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		case "response.completed", "response.done":
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {
+					info.StreamTerminalUsageSeen = true
 					if streamResponse.Response.Usage.InputTokens != 0 {
 						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
 					}

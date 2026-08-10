@@ -22,6 +22,23 @@ func TestInitChannelMetaResetsResponseModelAuditForRetry(t *testing.T) {
 	require.Empty(t, info.ActualResponseModel)
 }
 
+func TestInitChannelMetaResetsStreamOutcomeForRetry(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &RelayInfo{
+		StreamStatus:                  NewStreamStatus(),
+		StreamTerminalMarkersRequired: true,
+		StreamTerminalSuccess:         true,
+		StreamTerminalUsageSeen:       true,
+	}
+
+	info.InitChannelMeta(c)
+
+	require.Nil(t, info.StreamStatus)
+	require.False(t, info.StreamTerminalMarkersRequired)
+	require.False(t, info.StreamTerminalSuccess)
+	require.False(t, info.StreamTerminalUsageSeen)
+}
+
 func TestRelayInfoGetFinalRequestRelayFormatPrefersExplicitFinal(t *testing.T) {
 	info := &RelayInfo{
 		RelayFormat:             types.RelayFormatOpenAI,

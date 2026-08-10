@@ -361,12 +361,22 @@ func applyPreConsumedQuotaFloor(relayInfo *relaycommon.RelayInfo, calculatedQuot
 	return relayInfo.FinalPreConsumedQuota, true
 }
 
-func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
+	if usage == nil {
+		return false
+	}
 	if ctx != nil && ctx.Request != nil && ctx.Request.Context().Err() != nil {
 		return false
 	}
-	if relayInfo == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
+	if relayInfo == nil || !relayInfo.IsStream {
 		return true
+	}
+	if relayInfo.StreamStatus == nil {
+		return false
+	}
+	if relayInfo.StreamTerminalMarkersRequired &&
+		(!relayInfo.StreamTerminalSuccess || !relayInfo.StreamTerminalUsageSeen) {
+		return false
 	}
 	return relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors()
 }
@@ -376,7 +386,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if usage == nil {
 		extraContent = append(extraContent, "上游无计费信息")
 	}
-	if originUsage != nil && shouldObserveConfirmedChannelAffinityUsage(ctx, relayInfo) {
+	if shouldObserveConfirmedChannelAffinityUsage(ctx, relayInfo, originUsage) {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
 	} else {
 		ObserveChannelAffinityUsageCacheUnknownFromContext(ctx)

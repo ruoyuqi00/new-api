@@ -458,8 +458,14 @@ func shouldCommitChannelAffinity(c *gin.Context, relayInfo *relaycommon.RelayInf
 	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
 		return false
 	}
-	if relayInfo == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
+	if relayInfo == nil || !relayInfo.IsStream {
 		return true
+	}
+	if relayInfo.StreamStatus == nil {
+		return false
+	}
+	if relayInfo.StreamTerminalMarkersRequired && !relayInfo.StreamTerminalSuccess {
+		return false
 	}
 	return relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors()
 }

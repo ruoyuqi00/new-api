@@ -24,17 +24,20 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 		name       string
 		canceled   bool
 		relayInfo  *relaycommon.RelayInfo
+		usage      *dto.Usage
 		wantResult bool
 	}{
 		{
 			name:       "non-stream success",
 			relayInfo:  &relaycommon.RelayInfo{},
+			usage:      &dto.Usage{},
 			wantResult: true,
 		},
 		{
 			name:      "client canceled",
 			canceled:  true,
 			relayInfo: &relaycommon.RelayInfo{},
+			usage:     &dto.Usage{},
 		},
 		{
 			name: "stream completed",
@@ -42,6 +45,48 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 				IsStream:     true,
 				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
 			},
+			usage:      &dto.Usage{},
+			wantResult: true,
+		},
+		{
+			name: "stream without terminal status",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream: true,
+			},
+			usage: &dto.Usage{},
+		},
+		{
+			name: "responses stream missing terminal usage",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:                      true,
+				RelayFormat:                   types.RelayFormatOpenAIResponses,
+				StreamStatus:                  streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
+				StreamTerminalMarkersRequired: true,
+				StreamTerminalSuccess:         true,
+			},
+			usage: &dto.Usage{PromptTokens: 100},
+		},
+		{
+			name: "responses stream exact terminal usage",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:                      true,
+				RelayFormat:                   types.RelayFormatOpenAIResponses,
+				StreamStatus:                  streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
+				StreamTerminalMarkersRequired: true,
+				StreamTerminalSuccess:         true,
+				StreamTerminalUsageSeen:       true,
+			},
+			usage:      &dto.Usage{PromptTokens: 100},
+			wantResult: true,
+		},
+		{
+			name: "responses adapter authoritative usage",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:     true,
+				RelayFormat:  types.RelayFormatOpenAIResponses,
+				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
+			},
+			usage:      &dto.Usage{PromptTokens: 100},
 			wantResult: true,
 		},
 		{
@@ -50,6 +95,7 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 				IsStream:     true,
 				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonClientGone, false),
 			},
+			usage: &dto.Usage{},
 		},
 		{
 			name: "stream eof with incomplete error",
@@ -57,6 +103,7 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 				IsStream:     true,
 				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonEOF, true),
 			},
+			usage: &dto.Usage{},
 		},
 	}
 
@@ -72,7 +119,7 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 			}
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestCtx)
 
-			require.Equal(t, tt.wantResult, shouldObserveConfirmedChannelAffinityUsage(ctx, tt.relayInfo))
+			require.Equal(t, tt.wantResult, shouldObserveConfirmedChannelAffinityUsage(ctx, tt.relayInfo, tt.usage))
 		})
 	}
 }

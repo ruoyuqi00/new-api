@@ -87,6 +87,41 @@ func TestShouldCommitChannelAffinityRequiresNormalRelayCompletion(t *testing.T) 
 			wantCommit: true,
 		},
 		{
+			name: "stream without terminal status",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream: true,
+			},
+		},
+		{
+			name: "responses stream completed",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:                      true,
+				RelayFormat:                   types.RelayFormatOpenAIResponses,
+				StreamStatus:                  relayStreamStatusForAffinityTest(relaycommon.StreamEndReasonDone, false),
+				StreamTerminalMarkersRequired: true,
+				StreamTerminalSuccess:         true,
+			},
+			wantCommit: true,
+		},
+		{
+			name: "responses stream incomplete",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:                      true,
+				RelayFormat:                   types.RelayFormatOpenAIResponses,
+				StreamStatus:                  relayStreamStatusForAffinityTest(relaycommon.StreamEndReasonEOF, false),
+				StreamTerminalMarkersRequired: true,
+			},
+		},
+		{
+			name: "responses adapter with independent terminal handling",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:     true,
+				RelayFormat:  types.RelayFormatOpenAIResponses,
+				StreamStatus: relayStreamStatusForAffinityTest(relaycommon.StreamEndReasonDone, false),
+			},
+			wantCommit: true,
+		},
+		{
 			name: "stream client gone",
 			relayInfo: &relaycommon.RelayInfo{
 				IsStream:     true,

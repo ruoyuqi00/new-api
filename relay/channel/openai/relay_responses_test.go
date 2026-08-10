@@ -54,6 +54,9 @@ func TestOaiResponsesStreamHandlerParsesResponseDoneUsage(t *testing.T) {
 	require.Equal(t, 25, usage.CompletionTokens)
 	require.Equal(t, 1024, usage.PromptTokensDetails.CachedTokens)
 	require.Equal(t, 128, usage.PromptTokensDetails.CacheWriteTokens)
+	require.True(t, info.StreamTerminalMarkersRequired)
+	require.True(t, info.StreamTerminalSuccess)
+	require.True(t, info.StreamTerminalUsageSeen)
 }
 
 func TestOaiResponsesStreamHandlerEmitsFailureForEOFWithoutTerminalEvent(t *testing.T) {
@@ -93,12 +96,23 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 		body            string
 		terminalEvent   string
 		failureEventCnt int
+		terminalSuccess bool
+		terminalUsage   bool
 	}{
 		{
 			name:            "completed",
 			body:            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
 			terminalEvent:   "event: response.completed",
 			failureEventCnt: 0,
+			terminalSuccess: true,
+			terminalUsage:   true,
+		},
+		{
+			name:            "completed without usage",
+			body:            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"completed\"}}\n\n",
+			terminalEvent:   "event: response.completed",
+			failureEventCnt: 0,
+			terminalSuccess: true,
 		},
 		{
 			name:            "incomplete",
@@ -130,6 +144,8 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 			require.Equal(t, 1, strings.Count(recorder.Body.String(), tt.terminalEvent))
 			require.Equal(t, tt.failureEventCnt, strings.Count(recorder.Body.String(), "event: response.failed"))
 			require.False(t, info.PreservePreConsumedQuota)
+			require.Equal(t, tt.terminalSuccess, info.StreamTerminalSuccess)
+			require.Equal(t, tt.terminalUsage, info.StreamTerminalUsageSeen)
 		})
 	}
 }

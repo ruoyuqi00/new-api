@@ -53,8 +53,14 @@ The relay controller marks the Gin context only when a request is safe to commit
 as affinity success:
 
 - non-streaming relay returned no error and the client context is active;
-- streaming relay returned no error, the client context is active, and any
-  available stream status is a normal end without recorded errors.
+- streaming relay returned no error, the client context is active, and a stream
+  status exists with a normal end and no recorded errors.
+
+The OpenAI Responses wire handler additionally records whether it received a
+successful terminal event and authoritative terminal usage. `response.incomplete`,
+`response.failed`, `response.error`, and completed events without usage cannot
+be treated as confirmed cache observations. Other Responses adapters keep their
+own terminal handling and are not forced to emit OpenAI-wire-specific markers.
 
 `RecordChannelAffinity` refuses to write without this marker. HTTP 200 alone is
 not proof of success.
