@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ const (
 	userSessionRevokeBatchSize  = 500
 	userSessionCleanupScanLimit = 1000
 	userSessionCleanupBatchSize = 500
+
+	userSessionRollbackFenceOwnerField = "RollbackFenceOwner"
 )
 
 var (
@@ -34,6 +37,7 @@ var (
 	ErrUserSessionLimit                 = errors.New("active user session limit reached")
 	ErrUserSessionIssuanceLimit         = errors.New("user session issuance limit reached")
 	errUserSessionCacheObservationStale = errors.New("user session cache observation is stale")
+	errUserSessionCacheOwnershipChanged = errors.New("user session cache fence ownership changed")
 )
 
 // UserSession is the server-side control plane for short-lived access JWTs.
@@ -84,6 +88,25 @@ type userSessionCacheEntry struct {
 	CacheSchema     int
 }
 
+type userSessionCacheSnapshot struct {
+	sid                string
+	key                string
+	fields             map[string]string
+	expiresAtMillis    int64
+	expectedFenceState map[string]string
+	fenceOwner         string
+}
+
+type userSessionTransactionRunner func(func(*gorm.DB) error) error
+
+type userSessionTransactionOutcome int
+
+const (
+	userSessionTransactionOutcomeUnknown userSessionTransactionOutcome = iota
+	userSessionTransactionOutcomeRolledBack
+	userSessionTransactionOutcomeCommitted
+)
+
 func (session *UserSession) cacheEntry() *userSessionCacheEntry {
 	return &userSessionCacheEntry{
 		SID:             session.SID,
@@ -130,8 +153,7 @@ func userSessionCacheDeadline() time.Time {
 	return time.Now().Add(time.Duration(userCacheTTLSeconds()) * time.Second)
 }
 
-func CreateUserSession(session *UserSession) error {
-	now := time.Now().Unix()
+func prepareNewUserSession(session *UserSession, now int64) error {
 	if session == nil || session.SID == "" || session.UserID <= 0 || session.UserAuthVersion <= 0 || session.RefreshHash == "" || session.ExpiresAt <= now {
 		return ErrUserSessionInvalid
 	}
@@ -150,10 +172,10 @@ func CreateUserSession(session *UserSession) error {
 	if session.CreatedAt == 0 {
 		session.CreatedAt = now
 	}
-	cacheDeadline := userSessionCacheDeadline()
-	if err := DB.Create(session).Error; err != nil {
-		return err
-	}
+	return nil
+}
+
+func cacheNewUserSession(session *UserSession, cacheDeadline time.Time) error {
 	if err := writeUserSessionCache(session.cacheEntry(), cacheDeadline); err != nil {
 		if errors.Is(err, errUserSessionCacheObservationStale) {
 			return confirmUserSessionActiveSnapshot(session)
@@ -164,6 +186,237 @@ func CreateUserSession(session *UserSession) error {
 		common.SysLog("failed to populate newly created user session cache: " + err.Error())
 	}
 	return nil
+}
+
+func CreateUserSession(session *UserSession) error {
+	now := time.Now().Unix()
+	if err := prepareNewUserSession(session, now); err != nil {
+		return err
+	}
+	cacheDeadline := userSessionCacheDeadline()
+	if err := DB.Create(session).Error; err != nil {
+		return err
+	}
+	return cacheNewUserSession(session, cacheDeadline)
+}
+
+func CreateUserSessionWithinLimits(session *UserSession, activeLimit, issuanceLimit int, issuanceWindowSeconds int64) ([]UserSession, error) {
+	return createUserSessionWithinLimitsWithTransaction(
+		session,
+		activeLimit,
+		issuanceLimit,
+		issuanceWindowSeconds,
+		func(transaction func(*gorm.DB) error) error {
+			return DB.Transaction(transaction)
+		},
+	)
+}
+
+func createUserSessionWithinLimitsWithTransaction(
+	session *UserSession,
+	activeLimit, issuanceLimit int,
+	issuanceWindowSeconds int64,
+	runTransaction userSessionTransactionRunner,
+) ([]UserSession, error) {
+	now := time.Now().Unix()
+	if activeLimit <= 0 || issuanceLimit <= 0 || issuanceWindowSeconds <= 0 || runTransaction == nil {
+		return nil, ErrUserSessionInvalid
+	}
+	if err := prepareNewUserSession(session, now); err != nil {
+		return nil, err
+	}
+
+	cacheDeadline := userSessionCacheDeadline()
+	evicted := make([]UserSession, 0)
+	cacheSnapshots := make([]userSessionCacheSnapshot, 0)
+	replacementSIDConfirmedAbsent := false
+	err := runTransaction(func(tx *gorm.DB) error {
+		var user User
+		if err := lockForUpdate(tx).Select("id").Where("id = ?", session.UserID).First(&user).Error; err != nil {
+			return err
+		}
+		var issuanceCount int64
+		if err := tx.Model(&UserSession{}).
+			Where("user_id = ? AND created_at > ?", session.UserID, now-issuanceWindowSeconds).
+			Count(&issuanceCount).Error; err != nil {
+			return err
+		}
+		if issuanceCount >= int64(issuanceLimit) {
+			return ErrUserSessionIssuanceLimit
+		}
+		var replacementSIDCount int64
+		if err := tx.Model(&UserSession{}).Where("sid = ?", session.SID).Count(&replacementSIDCount).Error; err != nil {
+			return err
+		}
+		if replacementSIDCount != 0 {
+			return gorm.ErrDuplicatedKey
+		}
+		replacementSIDConfirmedAbsent = true
+
+		var activeCount int64
+		if err := tx.Model(&UserSession{}).
+			Where("user_id = ? AND status = ? AND expires_at > ?", session.UserID, UserSessionStatusActive, now).
+			Count(&activeCount).Error; err != nil {
+			return err
+		}
+		evictCount := activeCount - int64(activeLimit) + 1
+		if evictCount > 0 {
+			if err := lockForUpdate(tx).
+				Where("user_id = ? AND status = ? AND expires_at > ?", session.UserID, UserSessionStatusActive, now).
+				Order("last_active_at ASC").
+				Order("created_at ASC").
+				Order("sid ASC").
+				Limit(int(evictCount)).
+				Find(&evicted).Error; err != nil {
+				return err
+			}
+			if int64(len(evicted)) != evictCount {
+				return ErrUserSessionLimit
+			}
+
+			sids := make([]string, 0, len(evicted))
+			for i := range evicted {
+				snapshot, err := writeUserSessionDenyFenceWithSnapshot(&evicted[i], UserSessionStatusRevoking, now, "session_limit_replaced")
+				if err != nil {
+					return err
+				}
+				if snapshot != nil {
+					cacheSnapshots = append(cacheSnapshots, *snapshot)
+				}
+				sids = append(sids, evicted[i].SID)
+			}
+
+			result := tx.Model(&UserSession{}).
+				Where("user_id = ? AND sid IN ? AND status = ? AND expires_at > ?", session.UserID, sids, UserSessionStatusActive, now).
+				Updates(map[string]interface{}{
+					"status":         UserSessionStatusRevoked,
+					"revoked_at":     now,
+					"revoked_reason": "session_limit_replaced",
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != evictCount {
+				return ErrUserSessionLimit
+			}
+		}
+
+		return tx.Create(session).Error
+	})
+	if err != nil {
+		if !replacementSIDConfirmedAbsent {
+			return nil, err
+		}
+		outcome, reconcileErr := reconcileUserSessionReplacement(session, evicted, now)
+		if reconcileErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("reconcile user session replacement: %w", reconcileErr))
+		}
+		switch outcome {
+		case userSessionTransactionOutcomeCommitted:
+			// The exact replacement and revocations are authoritative even when
+			// the original commit acknowledgement was lost.
+		case userSessionTransactionOutcomeRolledBack:
+			for i := len(cacheSnapshots) - 1; i >= 0; i-- {
+				if restoreErr := restoreUserSessionCacheSnapshot(&cacheSnapshots[i]); restoreErr != nil {
+					common.SysLog("failed to restore user session cache after confirmed transaction rollback: " + restoreErr.Error())
+				}
+			}
+			return nil, err
+		default:
+			return nil, err
+		}
+	}
+
+	cacheSnapshotsBySID := make(map[string]*userSessionCacheSnapshot, len(cacheSnapshots))
+	for i := range cacheSnapshots {
+		cacheSnapshotsBySID[cacheSnapshots[i].sid] = &cacheSnapshots[i]
+	}
+	for i := range evicted {
+		evicted[i].Status = UserSessionStatusRevoked
+		evicted[i].RevokedAt = now
+		evicted[i].RevokedReason = "session_limit_replaced"
+		var cacheErr error
+		if snapshot := cacheSnapshotsBySID[evicted[i].SID]; snapshot != nil {
+			cacheErr = writeUserSessionCacheOwned(evicted[i].cacheEntry(), time.Time{}, snapshot.fenceOwner)
+		} else {
+			cacheErr = writeUserSessionCache(evicted[i].cacheEntry(), time.Time{})
+		}
+		if cacheErr != nil && !errors.Is(cacheErr, errUserSessionCacheOwnershipChanged) {
+			common.SysLog("failed to finalize replaced user session tombstone: " + cacheErr.Error())
+		}
+	}
+	if err := cacheNewUserSession(session, cacheDeadline); err != nil {
+		return nil, err
+	}
+	return evicted, nil
+}
+
+func reconcileUserSessionReplacement(
+	session *UserSession,
+	evicted []UserSession,
+	revokedAt int64,
+) (userSessionTransactionOutcome, error) {
+	outcome := userSessionTransactionOutcomeUnknown
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := lockForUpdate(tx).Select("id").Where("id = ?", session.UserID).First(&user).Error; err != nil {
+			return err
+		}
+
+		var storedReplacement UserSession
+		replacementErr := lockForUpdate(tx).Where("sid = ?", session.SID).First(&storedReplacement).Error
+		replacementMissing := errors.Is(replacementErr, gorm.ErrRecordNotFound)
+		if replacementErr != nil && !replacementMissing {
+			return replacementErr
+		}
+
+		sids := make([]string, 0, len(evicted))
+		for i := range evicted {
+			sids = append(sids, evicted[i].SID)
+		}
+		var storedCandidates []UserSession
+		if err := lockForUpdate(tx).Where("user_id = ? AND sid IN ?", session.UserID, sids).Find(&storedCandidates).Error; err != nil {
+			return err
+		}
+		if len(storedCandidates) != len(evicted) {
+			return nil
+		}
+		storedBySID := make(map[string]UserSession, len(storedCandidates))
+		for i := range storedCandidates {
+			storedBySID[storedCandidates[i].SID] = storedCandidates[i]
+		}
+
+		candidatesMatchRollback := true
+		candidatesMatchCommit := true
+		for i := range evicted {
+			stored, ok := storedBySID[evicted[i].SID]
+			if !ok {
+				return nil
+			}
+			if stored != evicted[i] {
+				candidatesMatchRollback = false
+			}
+			committed := evicted[i]
+			committed.Status = UserSessionStatusRevoked
+			committed.RevokedAt = revokedAt
+			committed.RevokedReason = "session_limit_replaced"
+			if stored != committed {
+				candidatesMatchCommit = false
+			}
+		}
+
+		expectedReplacement := *session
+		expectedReplacement.PreviousRefreshHash = strings.TrimSpace(expectedReplacement.PreviousRefreshHash)
+		replacementMatchesCommit := replacementErr == nil && storedReplacement == expectedReplacement
+		switch {
+		case replacementMatchesCommit && candidatesMatchCommit:
+			outcome = userSessionTransactionOutcomeCommitted
+		case replacementMissing && candidatesMatchRollback:
+			outcome = userSessionTransactionOutcomeRolledBack
+		}
+		return nil
+	})
+	return outcome, err
 }
 
 func CountActiveUserSessions(userID int, now int64) (int64, error) {
@@ -274,6 +527,10 @@ func getUserSessionCache(sid string) (*userSessionCacheEntry, error) {
 // reactivate a revoked Session after the tombstone expires. Deny states pass a
 // zero deadline because their TTL starts when they are published.
 func writeUserSessionCache(entry *userSessionCacheEntry, cacheDeadline time.Time) error {
+	return writeUserSessionCacheOwned(entry, cacheDeadline, "")
+}
+
+func writeUserSessionCacheOwned(entry *userSessionCacheEntry, cacheDeadline time.Time, expectedFenceOwner string) error {
 	if entry == nil || !common.RedisEnabled {
 		return nil
 	}
@@ -314,6 +571,10 @@ func writeUserSessionCache(entry *userSessionCacheEntry, cacheDeadline time.Time
 	const script = `
 local current_status = redis.call('HGET', KEYS[1], 'Status')
 local current_version = tonumber(redis.call('HGET', KEYS[1], 'Version') or '0')
+local current_fence_owner = redis.call('HGET', KEYS[1], 'RollbackFenceOwner')
+if ARGV[16] ~= '' and current_fence_owner ~= ARGV[16] then
+  return -1
+end
 if ARGV[5] == 'active' and (current_status == 'revoking' or current_status == 'revoked') then
   return 0
 end
@@ -326,6 +587,7 @@ redis.call('HSET', KEYS[1],
   'LoginMethod', ARGV[6], 'IP', ARGV[7], 'UserAgent', ARGV[8],
   'CreatedAt', ARGV[9], 'LastActiveAt', ARGV[10], 'ExpiresAt', ARGV[11],
   'RevokedAt', ARGV[12], 'RevokedReason', ARGV[13], 'CacheSchema', ARGV[14])
+redis.call('HDEL', KEYS[1], 'RollbackFenceOwner')
 if ARGV[5] == 'active' then
   redis.call('PEXPIREAT', KEYS[1], ARGV[15])
 else
@@ -335,13 +597,16 @@ return 1`
 	result, err := common.RDB.Eval(context.Background(), script, []string{userSessionCacheKey(entry.SID)},
 		entry.SID, entry.UserID, entry.Version, entry.UserAuthVersion, entry.Status,
 		entry.LoginMethod, entry.IP, entry.UserAgent, entry.CreatedAt, entry.LastActiveAt,
-		entry.ExpiresAt, entry.RevokedAt, entry.RevokedReason, entry.CacheSchema, redisExpiration,
+		entry.ExpiresAt, entry.RevokedAt, entry.RevokedReason, entry.CacheSchema, redisExpiration, expectedFenceOwner,
 	).Int()
 	if err != nil {
 		return err
 	}
 	if result == 0 {
 		return ErrUserSessionInactive
+	}
+	if result == -1 {
+		return errUserSessionCacheOwnershipChanged
 	}
 	if entry.Status == UserSessionStatusActive {
 		completedAt := time.Now()
@@ -390,6 +655,184 @@ func writeUserSessionDenyFence(session *UserSession, status string, now int64, r
 	entry.RevokedAt = now
 	entry.RevokedReason = reason
 	return writeUserSessionCache(entry, time.Time{})
+}
+
+func writeUserSessionDenyFenceWithSnapshot(session *UserSession, status string, now int64, reason string) (*userSessionCacheSnapshot, error) {
+	if !common.RedisEnabled {
+		return nil, nil
+	}
+	entry := session.cacheEntry()
+	entry.Status = status
+	entry.RevokedAt = now
+	entry.RevokedReason = reason
+	entry.CacheSchema = userSessionCacheSchema
+	sessionTTL := time.Until(time.Unix(entry.ExpiresAt, 0))
+	ttl := min(sessionTTL, time.Duration(userCacheTTLSeconds())*time.Second)
+	if ttl <= 0 {
+		ttl = time.Second
+	}
+	redisExpiration := ttl.Milliseconds()
+	if redisExpiration <= 0 {
+		redisExpiration = 1
+	}
+	fenceOwner := common.GetUUID()
+	if fenceOwner == "" {
+		return nil, fmt.Errorf("user session cache fence owner is invalid")
+	}
+	const script = `
+local previous_fields = redis.call('HGETALL', KEYS[1])
+local previous_ttl = redis.call('PTTL', KEYS[1])
+local captured_at = redis.call('TIME')
+local current_status = redis.call('HGET', KEYS[1], 'Status')
+local current_version = tonumber(redis.call('HGET', KEYS[1], 'Version') or '0')
+if ARGV[5] == 'active' and (current_status == 'revoking' or current_status == 'revoked') then
+  return {0}
+end
+if current_version > tonumber(ARGV[3]) then
+  return {0}
+end
+redis.call('HSET', KEYS[1],
+  'SID', ARGV[1], 'UserID', ARGV[2], 'Version', ARGV[3],
+  'UserAuthVersion', ARGV[4], 'Status', ARGV[5],
+  'LoginMethod', ARGV[6], 'IP', ARGV[7], 'UserAgent', ARGV[8],
+  'CreatedAt', ARGV[9], 'LastActiveAt', ARGV[10], 'ExpiresAt', ARGV[11],
+  'RevokedAt', ARGV[12], 'RevokedReason', ARGV[13], 'CacheSchema', ARGV[14],
+  'RollbackFenceOwner', ARGV[16])
+redis.call('PEXPIRE', KEYS[1], ARGV[15])
+local result = {1, previous_ttl, captured_at[1], captured_at[2]}
+for index = 1, #previous_fields do
+  result[#result + 1] = previous_fields[index]
+end
+return result`
+	key := userSessionCacheKey(entry.SID)
+	result, err := common.RDB.Eval(context.Background(), script, []string{key},
+		entry.SID, entry.UserID, entry.Version, entry.UserAuthVersion, entry.Status,
+		entry.LoginMethod, entry.IP, entry.UserAgent, entry.CreatedAt, entry.LastActiveAt,
+		entry.ExpiresAt, entry.RevokedAt, entry.RevokedReason, entry.CacheSchema, redisExpiration, fenceOwner,
+	).Slice()
+	if err != nil {
+		return nil, err
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("user session cache snapshot response is invalid")
+	}
+	written, ok := result[0].(int64)
+	if !ok {
+		return nil, fmt.Errorf("user session cache snapshot response is invalid")
+	}
+	if written == 0 {
+		return nil, ErrUserSessionInactive
+	}
+	if written != 1 || len(result) < 4 {
+		return nil, fmt.Errorf("user session cache snapshot response is invalid")
+	}
+	previousTTL, ok := result[1].(int64)
+	if !ok || previousTTL < -2 {
+		return nil, fmt.Errorf("user session cache snapshot TTL is invalid")
+	}
+	capturedSeconds, err := strconv.ParseInt(fmt.Sprint(result[2]), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse user session cache snapshot seconds: %w", err)
+	}
+	capturedMicroseconds, err := strconv.ParseInt(fmt.Sprint(result[3]), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse user session cache snapshot microseconds: %w", err)
+	}
+	if (len(result)-4)%2 != 0 {
+		return nil, fmt.Errorf("user session cache snapshot fields are invalid")
+	}
+	fields := make(map[string]string, (len(result)-4)/2)
+	for index := 4; index < len(result); index += 2 {
+		field, fieldOK := result[index].(string)
+		value, valueOK := result[index+1].(string)
+		if !fieldOK || !valueOK {
+			return nil, fmt.Errorf("user session cache snapshot field is invalid")
+		}
+		fields[field] = value
+	}
+	expiresAtMillis := previousTTL
+	if previousTTL >= 0 {
+		expiresAtMillis = capturedSeconds*1000 + capturedMicroseconds/1000 + previousTTL
+	}
+	expectedFenceState := make(map[string]string, len(fields)+15)
+	for field, value := range fields {
+		expectedFenceState[field] = value
+	}
+	expectedFenceState["SID"] = entry.SID
+	expectedFenceState["UserID"] = strconv.Itoa(entry.UserID)
+	expectedFenceState["Version"] = strconv.FormatInt(entry.Version, 10)
+	expectedFenceState["UserAuthVersion"] = strconv.FormatInt(entry.UserAuthVersion, 10)
+	expectedFenceState["Status"] = entry.Status
+	expectedFenceState["LoginMethod"] = entry.LoginMethod
+	expectedFenceState["IP"] = entry.IP
+	expectedFenceState["UserAgent"] = entry.UserAgent
+	expectedFenceState["CreatedAt"] = strconv.FormatInt(entry.CreatedAt, 10)
+	expectedFenceState["LastActiveAt"] = strconv.FormatInt(entry.LastActiveAt, 10)
+	expectedFenceState["ExpiresAt"] = strconv.FormatInt(entry.ExpiresAt, 10)
+	expectedFenceState["RevokedAt"] = strconv.FormatInt(entry.RevokedAt, 10)
+	expectedFenceState["RevokedReason"] = entry.RevokedReason
+	expectedFenceState["CacheSchema"] = strconv.Itoa(entry.CacheSchema)
+	expectedFenceState[userSessionRollbackFenceOwnerField] = fenceOwner
+	return &userSessionCacheSnapshot{
+		sid:                entry.SID,
+		key:                key,
+		fields:             fields,
+		expiresAtMillis:    expiresAtMillis,
+		expectedFenceState: expectedFenceState,
+		fenceOwner:         fenceOwner,
+	}, nil
+}
+
+func restoreUserSessionCacheSnapshot(snapshot *userSessionCacheSnapshot) error {
+	if !common.RedisEnabled || snapshot == nil {
+		return nil
+	}
+	args := make([]interface{}, 0, 3+2*len(snapshot.expectedFenceState)+1+2*len(snapshot.fields))
+	args = append(args, len(snapshot.expectedFenceState), snapshot.expiresAtMillis)
+	for field, value := range snapshot.expectedFenceState {
+		args = append(args, field, value)
+	}
+	args = append(args, len(snapshot.fields))
+	for field, value := range snapshot.fields {
+		args = append(args, field, value)
+	}
+	const script = `
+local expected_count = tonumber(ARGV[1])
+local original_expiry = tonumber(ARGV[2])
+local offset = 3
+if redis.call('HLEN', KEYS[1]) ~= expected_count then
+  return 0
+end
+for index = 1, expected_count do
+  if redis.call('HGET', KEYS[1], ARGV[offset]) ~= ARGV[offset + 1] then
+    return 0
+  end
+  offset = offset + 2
+end
+local original_count = tonumber(ARGV[offset])
+offset = offset + 1
+redis.call('DEL', KEYS[1])
+if original_expiry == -2 then
+  return 1
+end
+for index = 1, original_count do
+  redis.call('HSET', KEYS[1], ARGV[offset], ARGV[offset + 1])
+  offset = offset + 2
+end
+if original_expiry == -1 then
+  redis.call('PERSIST', KEYS[1])
+  return 1
+end
+local current_time = redis.call('TIME')
+local current_millis = tonumber(current_time[1]) * 1000 + math.floor(tonumber(current_time[2]) / 1000)
+local remaining_ttl = original_expiry - current_millis
+if remaining_ttl <= 0 then
+  redis.call('DEL', KEYS[1])
+else
+  redis.call('PEXPIRE', KEYS[1], remaining_ttl)
+end
+return 1`
+	return common.RDB.Eval(context.Background(), script, []string{snapshot.key}, args...).Err()
 }
 
 func ListActiveUserSessions(userID int, currentSID string, now int64) ([]UserSession, error) {

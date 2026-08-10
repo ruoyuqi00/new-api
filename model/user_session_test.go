@@ -613,6 +613,233 @@ func TestCreateUserSessionWithinLimitsRollsBackEvictionWhenInsertFails(t *testin
 	assert.Empty(t, stored.RevokedReason)
 }
 
+func TestCreateUserSessionWithinLimitsRestoresExactCacheSnapshotOnRollback(t *testing.T) {
+	tests := []struct {
+		name                string
+		userID              int
+		cacheState          string
+		interposeNewerFence bool
+	}{
+		{name: "absent", userID: 1016, cacheState: "absent"},
+		{name: "expiring", userID: 1017, cacheState: "expiring"},
+		{name: "persistent", userID: 1018, cacheState: "persistent"},
+		{name: "newer identical fence", userID: 1019, cacheState: "absent", interposeNewerFence: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupUserSessionTest(t)
+			server := useUserCacheMiniRedis(t)
+			createUserSessionTestUser(t, test.userID, 1)
+			now := time.Now().Unix()
+			existing := newTestUserSession("cache-rollback-"+test.cacheState, test.userID, now-10)
+			require.NoError(t, DB.Create(existing).Error)
+
+			cacheKey := userSessionCacheKey(existing.SID)
+			if test.cacheState != "absent" {
+				require.NoError(t, writeUserSessionCache(existing.cacheEntry(), userSessionCacheDeadline()))
+				require.NoError(t, common.RDB.HSet(context.Background(), cacheKey, "CustomState", "preserve-exactly").Err())
+				if test.cacheState == "expiring" {
+					require.NoError(t, common.RDB.PExpire(context.Background(), cacheKey, 5*time.Second).Err())
+				} else {
+					require.NoError(t, common.RDB.Persist(context.Background(), cacheKey).Err())
+				}
+			}
+			originalFields, err := common.RDB.HGetAll(context.Background(), cacheKey).Result()
+			require.NoError(t, err)
+			originalTTL, err := common.RDB.PTTL(context.Background(), cacheKey).Result()
+			require.NoError(t, err)
+
+			forcedInsertErr := errors.New("forced insert failure after cache fence")
+			callbackName := "test:fail_user_session_insert_after_cache_fence_" + test.cacheState
+			if test.interposeNewerFence {
+				callbackName += "_newer"
+			}
+			var firstFenceFields map[string]string
+			var newerFenceFields map[string]string
+			var firstFenceOwner string
+			var newerFenceOwner string
+			var newerFenceErr error
+			require.NoError(t, DB.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+				if tx.Statement == nil || tx.Statement.Table != "user_sessions" {
+					return
+				}
+				if test.interposeNewerFence {
+					firstFenceFields, newerFenceErr = common.RDB.HGetAll(context.Background(), cacheKey).Result()
+					if newerFenceErr == nil {
+						firstFenceOwner = firstFenceFields[userSessionRollbackFenceOwnerField]
+						fenceAt, fenceAtErr := common.RDB.HGet(context.Background(), cacheKey, "RevokedAt").Int64()
+						if fenceAtErr != nil {
+							newerFenceErr = fenceAtErr
+						} else {
+							_, newerFenceErr = writeUserSessionDenyFenceWithSnapshot(existing, UserSessionStatusRevoking, fenceAt, "session_limit_replaced")
+						}
+					}
+					if newerFenceErr == nil {
+						newerFenceFields, newerFenceErr = common.RDB.HGetAll(context.Background(), cacheKey).Result()
+						newerFenceOwner = newerFenceFields[userSessionRollbackFenceOwnerField]
+					}
+				}
+				tx.AddError(forcedInsertErr)
+			}))
+			t.Cleanup(func() { _ = DB.Callback().Create().Remove(callbackName) })
+
+			replacement := newTestUserSession("cache-rollback-replacement-"+test.cacheState, test.userID, now)
+			_, err = CreateUserSessionWithinLimits(replacement, 1, 100, 86400)
+			assert.ErrorIs(t, err, forcedInsertErr)
+			if test.interposeNewerFence {
+				require.NoError(t, newerFenceErr)
+				assert.NotEmpty(t, firstFenceOwner)
+				assert.NotEmpty(t, newerFenceOwner)
+				assert.NotEqual(t, firstFenceOwner, newerFenceOwner)
+				delete(firstFenceFields, userSessionRollbackFenceOwnerField)
+				delete(newerFenceFields, userSessionRollbackFenceOwnerField)
+				assert.Equal(t, firstFenceFields, newerFenceFields, "the interposed fence must differ only by ownership")
+				currentFields, currentErr := common.RDB.HGetAll(context.Background(), cacheKey).Result()
+				require.NoError(t, currentErr)
+				assert.Equal(t, UserSessionStatusRevoking, currentFields["Status"])
+				assert.Equal(t, newerFenceOwner, currentFields[userSessionRollbackFenceOwnerField])
+				_, currentErr = getUserSessionCache(existing.SID)
+				assert.ErrorIs(t, currentErr, ErrUserSessionInactive)
+				return
+			}
+
+			restoredFields, err := common.RDB.HGetAll(context.Background(), cacheKey).Result()
+			require.NoError(t, err)
+			assert.Equal(t, originalFields, restoredFields)
+			restoredTTL, err := common.RDB.PTTL(context.Background(), cacheKey).Result()
+			require.NoError(t, err)
+			switch test.cacheState {
+			case "absent":
+				assert.Equal(t, time.Duration(-2), originalTTL)
+				assert.Equal(t, time.Duration(-2), restoredTTL)
+				assert.False(t, server.Exists(cacheKey))
+			case "expiring":
+				assert.Positive(t, restoredTTL)
+				assert.LessOrEqual(t, restoredTTL, originalTTL)
+				assert.Greater(t, restoredTTL, 4*time.Second)
+			case "persistent":
+				assert.Equal(t, time.Duration(-1), originalTTL)
+				assert.Equal(t, time.Duration(-1), restoredTTL)
+			}
+		})
+	}
+}
+
+func TestCreateUserSessionWithinLimitsClearsRollbackFenceOwnerAfterCommit(t *testing.T) {
+	setupUserSessionTest(t)
+	useUserCacheMiniRedis(t)
+	const userID = 1020
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	existing := newTestUserSession("cache-fence-finalized", userID, now-10)
+	require.NoError(t, DB.Create(existing).Error)
+	require.NoError(t, writeUserSessionCache(existing.cacheEntry(), userSessionCacheDeadline()))
+
+	replacement := newTestUserSession("cache-fence-finalized-replacement", userID, now)
+	evicted, err := CreateUserSessionWithinLimits(replacement, 1, 100, 86400)
+	require.NoError(t, err)
+	require.Len(t, evicted, 1)
+	ownerExists, err := common.RDB.HExists(context.Background(), userSessionCacheKey(existing.SID), userSessionRollbackFenceOwnerField).Result()
+	require.NoError(t, err)
+	assert.False(t, ownerExists)
+	_, err = getUserSessionCache(existing.SID)
+	assert.ErrorIs(t, err, ErrUserSessionInactive)
+}
+
+func TestCreateUserSessionWithinLimitsReconcilesReportedErrorAfterCommit(t *testing.T) {
+	setupUserSessionTest(t)
+	useUserCacheMiniRedis(t)
+	const userID = 1021
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	existing := newTestUserSession("ambiguous-commit-existing", userID, now-10)
+	require.NoError(t, DB.Create(existing).Error)
+	require.NoError(t, writeUserSessionCache(existing.cacheEntry(), userSessionCacheDeadline()))
+
+	reportedCommitErr := errors.New("commit acknowledgement unavailable")
+	replacement := newTestUserSession("ambiguous-commit-replacement", userID, now)
+	evicted, err := createUserSessionWithinLimitsWithTransaction(
+		replacement,
+		1,
+		100,
+		86400,
+		func(transaction func(*gorm.DB) error) error {
+			if err := DB.Transaction(transaction); err != nil {
+				return err
+			}
+			return reportedCommitErr
+		},
+	)
+	require.NoError(t, err)
+	require.Len(t, evicted, 1)
+	assert.Equal(t, existing.SID, evicted[0].SID)
+
+	storedExisting, err := GetUserSessionBySID(existing.SID)
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusRevoked, storedExisting.Status)
+	assert.Equal(t, "session_limit_replaced", storedExisting.RevokedReason)
+	storedReplacement, err := GetUserSessionBySID(replacement.SID)
+	require.NoError(t, err)
+	assert.Equal(t, replacement.RefreshHash, storedReplacement.RefreshHash)
+	_, err = getUserSessionCache(existing.SID)
+	assert.ErrorIs(t, err, ErrUserSessionInactive)
+	cachedReplacement, err := getUserSessionCache(replacement.SID)
+	require.NoError(t, err)
+	assert.Equal(t, replacement.SID, cachedReplacement.SID)
+}
+
+func TestCreateUserSessionWithinLimitsReconcilesReportedErrorAfterCommitWithoutEviction(t *testing.T) {
+	setupUserSessionTest(t)
+	useUserCacheMiniRedis(t)
+	const userID = 1022
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	replacement := newTestUserSession("ambiguous-commit-without-eviction", userID, now)
+	reportedCommitErr := errors.New("commit acknowledgement unavailable without eviction")
+
+	evicted, err := createUserSessionWithinLimitsWithTransaction(
+		replacement,
+		3,
+		100,
+		86400,
+		func(transaction func(*gorm.DB) error) error {
+			if err := DB.Transaction(transaction); err != nil {
+				return err
+			}
+			return reportedCommitErr
+		},
+	)
+	require.NoError(t, err)
+	assert.Empty(t, evicted)
+	storedReplacement, err := GetUserSessionBySID(replacement.SID)
+	require.NoError(t, err)
+	assert.Equal(t, replacement.RefreshHash, storedReplacement.RefreshHash)
+	cachedReplacement, err := getUserSessionCache(replacement.SID)
+	require.NoError(t, err)
+	assert.Equal(t, replacement.SID, cachedReplacement.SID)
+	activeCount, err := CountActiveUserSessions(userID, now)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), activeCount)
+}
+
+func TestCreateUserSessionWithinLimitsDoesNotReconcilePreexistingExactSIDAsCommit(t *testing.T) {
+	setupUserSessionTest(t)
+	server := useUserCacheMiniRedis(t)
+	const userID = 1023
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	preexisting := newTestUserSession("preexisting-exact-replacement", userID, now)
+	require.NoError(t, DB.Create(preexisting).Error)
+
+	evicted, err := CreateUserSessionWithinLimits(preexisting, 3, 100, 86400)
+	assert.ErrorIs(t, err, gorm.ErrDuplicatedKey)
+	assert.Empty(t, evicted)
+	var count int64
+	require.NoError(t, DB.Model(&UserSession{}).Where("sid = ?", preexisting.SID).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+	assert.False(t, server.Exists(userSessionCacheKey(preexisting.SID)))
+}
+
 func TestListActiveUserSessionsKeepsCurrentAndBoundsOtherSessions(t *testing.T) {
 	setupUserSessionTest(t)
 	now := time.Now().Unix()
