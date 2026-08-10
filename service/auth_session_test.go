@@ -144,6 +144,27 @@ func TestCreateLoginSessionReplacesOldestAtActiveLimitAcrossAuthVersions(t *test
 	assert.Equal(t, int64(50), activeCount)
 }
 
+func TestCreateLoginSessionAtLimitDeniesEvictedCachedSession(t *testing.T) {
+	useTestSessionSecret(t)
+	user := setupAuthSessionTestDB(t)
+	useIndependentAuthSessionRedis(t)
+	common.UserSessionActiveLimit = 1
+	common.UserSessionIssuanceLimit = 100
+
+	first, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "first-agent")
+	require.NoError(t, err)
+	_, err = model.GetUserSessionCached(first.Session.SID)
+	require.NoError(t, err)
+
+	second, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "second-agent")
+	require.NoError(t, err)
+	_, err = model.GetUserSessionCached(first.Session.SID)
+	assert.ErrorIs(t, err, model.ErrUserSessionInactive)
+	storedSecond, err := model.GetUserSessionCached(second.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, second.Session.SID, storedSecond.SID)
+}
+
 func TestCreateLoginSessionEnforcesIssuanceLimitAcrossAllStatuses(t *testing.T) {
 	useTestSessionSecret(t)
 	user := setupAuthSessionTestDB(t)

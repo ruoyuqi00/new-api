@@ -108,31 +108,46 @@ func TestWriteAuthSessionErrorMapsSessionGrowthLimits(t *testing.T) {
 	}
 }
 
-func TestSessionLimitDoesNotRecordRejectedLoginAsSuccessful(t *testing.T) {
+func TestSessionLimitReplacementReturnsSuccessfulLogin(t *testing.T) {
 	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+	previousDatabaseType := common.MainDatabaseType()
 	previousRedis := common.RedisEnabled
+	previousSecret := common.SessionSecret
+	previousPasswordLoginEnabled := common.PasswordLoginEnabled
 	previousActiveLimit := common.UserSessionActiveLimit
 	previousIssuanceLimit := common.UserSessionIssuanceLimit
 	previousIssuanceWindow := common.UserSessionIssuanceWindowSeconds
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.TwoFA{}, &model.Log{}))
 	model.DB = db
+	model.LOG_DB = db
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
+	common.SessionSecret = "session-limit-replacement-test-secret"
+	common.PasswordLoginEnabled = true
 	common.UserSessionActiveLimit = 1
 	common.UserSessionIssuanceLimit = 100
 	common.UserSessionIssuanceWindowSeconds = int64(common.DefaultUserSessionIssuanceWindowSeconds)
 	t.Cleanup(func() {
 		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+		common.SetMainDatabaseType(previousDatabaseType)
 		common.RedisEnabled = previousRedis
+		common.SessionSecret = previousSecret
+		common.PasswordLoginEnabled = previousPasswordLoginEnabled
 		common.UserSessionActiveLimit = previousActiveLimit
 		common.UserSessionIssuanceLimit = previousIssuanceLimit
 		common.UserSessionIssuanceWindowSeconds = previousIssuanceWindow
 	})
 
 	const previousLastLoginAt = int64(123)
+	const loginPassword = "ValidPassword123"
+	hashedPassword, err := common.Password2Hash(loginPassword)
+	require.NoError(t, err)
 	user := &model.User{
-		Username: "rejected-login-audit-user", Password: "unused", Role: common.RoleCommonUser,
+		Username: "session-limit-recovery-user", Password: hashedPassword, Role: common.RoleCommonUser,
 		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, LastLoginAt: previousLastLoginAt,
 	}
 	require.NoError(t, db.Create(user).Error)
@@ -144,15 +159,71 @@ func TestSessionLimitDoesNotRecordRejectedLoginAsSuccessful(t *testing.T) {
 	}).Error)
 
 	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/user/login", Login)
+	requestBody, err := common.Marshal(LoginRequest{Username: user.Username, Password: loginPassword})
+	require.NoError(t, err)
 	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/login", nil)
-	setupLogin(user, c)
+	request := httptest.NewRequest(http.MethodPost, "/api/user/login", bytes.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
 
-	assert.Equal(t, http.StatusConflict, recorder.Code)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			AccessToken string                   `json:"access_token"`
+			TokenType   string                   `json:"token_type"`
+			Session     service.LoginSessionView `json:"session"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.NotEmpty(t, response.Data.AccessToken)
+	assert.Equal(t, "Bearer", response.Data.TokenType)
+	assert.NotEmpty(t, response.Data.Session.SID)
+
+	var refreshCookie *http.Cookie
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == service.RefreshCookieName {
+			refreshCookie = cookie
+			break
+		}
+	}
+	require.NotNil(t, refreshCookie)
+	assert.NotEmpty(t, refreshCookie.Value)
+
+	previousSession, err := model.GetUserSessionBySID("existing-active-session")
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusRevoked, previousSession.Status)
+	assert.Equal(t, "session_limit_replaced", previousSession.RevokedReason)
+	activeCount, err := model.CountActiveUserSessions(user.Id, time.Now().Unix())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), activeCount)
+	identity, err := service.ParseAccessToken(response.Data.AccessToken)
+	require.NoError(t, err)
+	assert.Equal(t, response.Data.Session.SID, identity.SessionID)
+	_, _, err = service.ValidateLoginSession(identity)
+	require.NoError(t, err)
+
 	var stored model.User
 	require.NoError(t, db.First(&stored, user.Id).Error)
-	assert.Equal(t, previousLastLoginAt, stored.LastLoginAt)
+	assert.Greater(t, stored.LastLoginAt, previousLastLoginAt)
+	var loginLog model.Log
+	require.NoError(t, db.Where("user_id = ? AND type = ?", user.Id, model.LogTypeLogin).First(&loginLog).Error)
+	var auditDetails struct {
+		LoginMethod string `json:"login_method"`
+		Operation   struct {
+			Action string `json:"action"`
+			Params struct {
+				Method string `json:"method"`
+			} `json:"params"`
+		} `json:"op"`
+	}
+	require.NoError(t, common.UnmarshalJsonStr(loginLog.Other, &auditDetails))
+	assert.Equal(t, "password", auditDetails.LoginMethod)
+	assert.Equal(t, "login", auditDetails.Operation.Action)
+	assert.Equal(t, "password", auditDetails.Operation.Params.Method)
 }
 
 func TestUpdateSelfPasswordChangeAdvancesCurrentSession(t *testing.T) {
