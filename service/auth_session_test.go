@@ -95,7 +95,7 @@ func cachedLoginSessionKey(t *testing.T, server *miniredis.Miniredis) string {
 	return ""
 }
 
-func TestCreateLoginSessionEnforcesActiveLimitAcrossAuthVersions(t *testing.T) {
+func TestCreateLoginSessionReplacesOldestAtActiveLimitAcrossAuthVersions(t *testing.T) {
 	useTestSessionSecret(t)
 	user := setupAuthSessionTestDB(t)
 	common.UserSessionActiveLimit = 50
@@ -122,14 +122,26 @@ func TestCreateLoginSessionEnforcesActiveLimitAcrossAuthVersions(t *testing.T) {
 	}
 	require.NoError(t, model.DB.Create(&rows).Error)
 
-	_, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
+	first, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
 	require.NoError(t, err, "49 active sessions must allow creation of the 50th")
 
-	_, err = CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
-	assert.ErrorIs(t, err, model.ErrUserSessionLimit)
-	var count int64
-	require.NoError(t, model.DB.Model(&model.UserSession{}).Count(&count).Error)
-	assert.Equal(t, int64(50), count)
+	second, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
+	require.NoError(t, err, "a valid login at the active-session limit must replace the oldest session")
+	assert.NotEqual(t, first.Session.SID, second.Session.SID)
+
+	oldest, err := model.GetUserSessionBySID("active-limit-48")
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusRevoked, oldest.Status)
+	assert.Equal(t, "session_limit_replaced", oldest.RevokedReason)
+
+	for _, sid := range []string{first.Session.SID, second.Session.SID} {
+		stored, getErr := model.GetUserSessionBySID(sid)
+		require.NoError(t, getErr)
+		assert.Equal(t, model.UserSessionStatusActive, stored.Status)
+	}
+	activeCount, err := model.CountActiveUserSessions(user.Id, time.Now().Unix())
+	require.NoError(t, err)
+	assert.Equal(t, int64(50), activeCount)
 }
 
 func TestCreateLoginSessionEnforcesIssuanceLimitAcrossAllStatuses(t *testing.T) {
