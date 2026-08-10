@@ -25,6 +25,7 @@ const (
 	ginKeyChannelAffinityMeta       = "channel_affinity_meta"
 	ginKeyChannelAffinityLogInfo    = "channel_affinity_log_info"
 	ginKeyChannelAffinitySkipRetry  = "channel_affinity_skip_retry_on_failure"
+	ginKeyChannelAffinitySucceeded  = "channel_affinity_request_succeeded"
 
 	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
@@ -723,8 +724,15 @@ func AppendChannelAffinityAdminInfo(c *gin.Context, adminInfo map[string]interfa
 	adminInfo["channel_affinity"] = anyInfo
 }
 
+func MarkChannelAffinityRequestSucceeded(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Set(ginKeyChannelAffinitySucceeded, true)
+}
+
 func RecordChannelAffinity(c *gin.Context, channelID int) {
-	if channelID <= 0 {
+	if c == nil || !c.GetBool(ginKeyChannelAffinitySucceeded) || channelID <= 0 {
 		return
 	}
 	setting := operation_setting.GetChannelAffinitySetting()
@@ -760,6 +768,7 @@ type ChannelAffinityUsageCacheStats struct {
 
 	Hit           int64 `json:"hit"`
 	Total         int64 `json:"total"`
+	Unknown       int64 `json:"unknown"`
 	WindowSeconds int64 `json:"window_seconds"`
 
 	PromptTokens         int64 `json:"prompt_tokens"`
@@ -775,6 +784,7 @@ type ChannelAffinityUsageCacheCounters struct {
 
 	Hit           int64 `json:"hit"`
 	Total         int64 `json:"total"`
+	Unknown       int64 `json:"unknown"`
 	WindowSeconds int64 `json:"window_seconds"`
 
 	PromptTokens         int64 `json:"prompt_tokens"`
@@ -798,6 +808,16 @@ func ObserveChannelAffinityUsageCacheFromContext(c *gin.Context, usage *dto.Usag
 		return
 	}
 	observeChannelAffinityUsageCache(statsCtx, usage, cachedTokenRateMode)
+}
+
+func ObserveChannelAffinityUsageCacheUnknownFromContext(c *gin.Context) {
+	statsCtx, ok := GetChannelAffinityStatsContext(c)
+	if !ok {
+		return
+	}
+	updateChannelAffinityUsageCache(statsCtx, func(next *ChannelAffinityUsageCacheCounters) {
+		next.Unknown++
+	})
 }
 
 func GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFp string) ChannelAffinityUsageCacheStats {
@@ -830,6 +850,7 @@ func GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFp string) Chann
 		KeyFingerprint:       keyFp,
 		Hit:                  v.Hit,
 		Total:                v.Total,
+		Unknown:              v.Unknown,
 		WindowSeconds:        v.WindowSeconds,
 		PromptTokens:         v.PromptTokens,
 		CompletionTokens:     v.CompletionTokens,
@@ -841,6 +862,29 @@ func GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFp string) Chann
 }
 
 func observeChannelAffinityUsageCache(statsCtx ChannelAffinityStatsContext, usage *dto.Usage, cachedTokenRateMode string) {
+	updateChannelAffinityUsageCache(statsCtx, func(next *ChannelAffinityUsageCacheCounters) {
+		currentMode := normalizeCachedTokenRateMode(cachedTokenRateMode)
+		if currentMode != "" {
+			if next.CachedTokenRateMode == "" {
+				next.CachedTokenRateMode = currentMode
+			} else if next.CachedTokenRateMode != currentMode && next.CachedTokenRateMode != cacheTokenRateModeMixed {
+				next.CachedTokenRateMode = cacheTokenRateModeMixed
+			}
+		}
+		next.Total++
+		hit, cachedTokens, promptCacheHitTokens := usageCacheSignals(usage)
+		if hit {
+			next.Hit++
+		}
+		next.CachedTokens += cachedTokens
+		next.PromptCacheHitTokens += promptCacheHitTokens
+		next.PromptTokens += int64(usagePromptTokens(usage))
+		next.CompletionTokens += int64(usageCompletionTokens(usage))
+		next.TotalTokens += int64(usageTotalTokens(usage))
+	})
+}
+
+func updateChannelAffinityUsageCache(statsCtx ChannelAffinityStatsContext, update func(*ChannelAffinityUsageCacheCounters)) {
 	entryKey := channelAffinityUsageCacheEntryKey(statsCtx.RuleName, statsCtx.UsingGroup, statsCtx.KeyFingerprint)
 	if entryKey == "" {
 		return
@@ -866,26 +910,9 @@ func observeChannelAffinityUsageCache(statsCtx ChannelAffinityStatsContext, usag
 	if !found {
 		next = ChannelAffinityUsageCacheCounters{}
 	}
-	currentMode := normalizeCachedTokenRateMode(cachedTokenRateMode)
-	if currentMode != "" {
-		if next.CachedTokenRateMode == "" {
-			next.CachedTokenRateMode = currentMode
-		} else if next.CachedTokenRateMode != currentMode && next.CachedTokenRateMode != cacheTokenRateModeMixed {
-			next.CachedTokenRateMode = cacheTokenRateModeMixed
-		}
-	}
-	next.Total++
-	hit, cachedTokens, promptCacheHitTokens := usageCacheSignals(usage)
-	if hit {
-		next.Hit++
-	}
+	update(&next)
 	next.WindowSeconds = windowSeconds
 	next.LastSeenAt = time.Now().Unix()
-	next.CachedTokens += cachedTokens
-	next.PromptCacheHitTokens += promptCacheHitTokens
-	next.PromptTokens += int64(usagePromptTokens(usage))
-	next.CompletionTokens += int64(usageCompletionTokens(usage))
-	next.TotalTokens += int64(usageTotalTokens(usage))
 	_ = cache.SetWithTTL(entryKey, next, ttl)
 }
 

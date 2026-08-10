@@ -361,13 +361,25 @@ func applyPreConsumedQuotaFloor(relayInfo *relaycommon.RelayInfo, calculatedQuot
 	return relayInfo.FinalPreConsumedQuota, true
 }
 
+func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if ctx != nil && ctx.Request != nil && ctx.Request.Context().Err() != nil {
+		return false
+	}
+	if relayInfo == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
+		return true
+	}
+	return relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors()
+}
+
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
 	originUsage := usage
 	if usage == nil {
 		extraContent = append(extraContent, "上游无计费信息")
 	}
-	if originUsage != nil {
+	if originUsage != nil && shouldObserveConfirmedChannelAffinityUsage(ctx, relayInfo) {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
+	} else {
+		ObserveChannelAffinityUsageCacheUnknownFromContext(ctx)
 	}
 
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)

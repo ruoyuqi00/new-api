@@ -299,6 +299,53 @@ func TestClearCurrentChannelAffinityCache(t *testing.T) {
 	require.False(t, ShouldSkipRetryAfterChannelAffinityFailure(ctx))
 }
 
+func TestRecordChannelAffinityRequiresConfirmedRelaySuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cacheKeySuffix := fmt.Sprintf("codex cli trace:default:unconfirmed-%d", time.Now().UnixNano())
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9527, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	ctx := buildChannelAffinityTemplateContextForTest(channelAffinityMeta{
+		CacheKey:   channelAffinityCacheNamespace + ":" + cacheKeySuffix,
+		TTLSeconds: 60,
+	})
+
+	RecordChannelAffinity(ctx, 9528)
+
+	channelID, found, err := cache.Get(cacheKeySuffix)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, 9527, channelID)
+}
+
+func TestRecordChannelAffinityCommitsConfirmedRelaySuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cacheKeySuffix := fmt.Sprintf("codex cli trace:default:confirmed-%d", time.Now().UnixNano())
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9527, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	ctx := buildChannelAffinityTemplateContextForTest(channelAffinityMeta{
+		CacheKey:   channelAffinityCacheNamespace + ":" + cacheKeySuffix,
+		TTLSeconds: 60,
+	})
+	MarkChannelAffinityRequestSucceeded(ctx)
+
+	RecordChannelAffinity(ctx, 9528)
+
+	channelID, found, err := cache.Get(cacheKeySuffix)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, 9528, channelID)
+}
+
 func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -396,6 +443,7 @@ func TestDefaultCodexAffinityFallsBackToSessionIDWithoutChangingBody(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, []byte(requestBody), bodyAfter)
 
+	MarkChannelAffinityRequestSucceeded(ctx)
 	RecordChannelAffinity(ctx, 2400)
 	t.Cleanup(func() { ClearCurrentChannelAffinityCache(ctx) })
 

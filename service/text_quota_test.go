@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"math"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -16,6 +18,73 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
+
+func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
+	tests := []struct {
+		name       string
+		canceled   bool
+		relayInfo  *relaycommon.RelayInfo
+		wantResult bool
+	}{
+		{
+			name:       "non-stream success",
+			relayInfo:  &relaycommon.RelayInfo{},
+			wantResult: true,
+		},
+		{
+			name:      "client canceled",
+			canceled:  true,
+			relayInfo: &relaycommon.RelayInfo{},
+		},
+		{
+			name: "stream completed",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:     true,
+				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
+			},
+			wantResult: true,
+		},
+		{
+			name: "stream client gone",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:     true,
+				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonClientGone, false),
+			},
+		},
+		{
+			name: "stream eof with incomplete error",
+			relayInfo: &relaycommon.RelayInfo{
+				IsStream:     true,
+				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonEOF, true),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			requestCtx, cancel := context.WithCancel(context.Background())
+			if tt.canceled {
+				cancel()
+			} else {
+				t.Cleanup(cancel)
+			}
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestCtx)
+
+			require.Equal(t, tt.wantResult, shouldObserveConfirmedChannelAffinityUsage(ctx, tt.relayInfo))
+		})
+	}
+}
+
+func streamStatusForAffinityUsageTest(reason relaycommon.StreamEndReason, withError bool) *relaycommon.StreamStatus {
+	status := relaycommon.NewStreamStatus()
+	status.SetEndReason(reason, nil)
+	if withError {
+		status.RecordError("upstream stream ended before completion")
+	}
+	return status
+}
 
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)

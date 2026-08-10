@@ -102,3 +102,32 @@ func TestObserveChannelAffinityUsageCacheByRelayFormat_UnsupportedModeKeepsEmpty
 	require.EqualValues(t, 25, stats.CachedTokens)
 	require.Equal(t, "", stats.CachedTokenRateMode)
 }
+
+func TestObserveChannelAffinityUsageCacheUnknownDoesNotCountAsMiss(t *testing.T) {
+	ruleName := "rule_unknown_usage"
+	usingGroup := "default"
+	keyFP := "fp_unknown_usage"
+	ctx := buildChannelAffinityStatsContextForTest(ruleName, usingGroup, keyFP)
+
+	ObserveChannelAffinityUsageCacheUnknownFromContext(ctx)
+	stats := GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFP)
+
+	require.EqualValues(t, 1, stats.Unknown)
+	require.Zero(t, stats.Total)
+	require.Zero(t, stats.Hit)
+}
+
+func TestObserveChannelAffinityUsageCacheConfirmedMissKeepsUnknownCount(t *testing.T) {
+	ruleName := "rule_unknown_then_miss"
+	usingGroup := "default"
+	keyFP := "fp_unknown_then_miss"
+	ctx := buildChannelAffinityStatsContextForTest(ruleName, usingGroup, keyFP)
+
+	ObserveChannelAffinityUsageCacheUnknownFromContext(ctx)
+	ObserveChannelAffinityUsageCacheByRelayFormat(ctx, &dto.Usage{PromptTokens: 100}, types.RelayFormatOpenAIResponses)
+	stats := GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFP)
+
+	require.EqualValues(t, 1, stats.Unknown)
+	require.EqualValues(t, 1, stats.Total)
+	require.Zero(t, stats.Hit)
+}

@@ -272,6 +272,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
+			if shouldCommitChannelAffinity(c, relayInfo) {
+				service.MarkChannelAffinityRequestSucceeded(c)
+			}
 			service.ReleaseCurrentChannelPoolLease(c)
 			return
 		}
@@ -287,10 +290,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
-		service.ClearCurrentChannelAffinityCache(c)
-		providerAccountSelected := common.GetContextKeyInt(c, constant.ContextKeyProviderAccountId) > 0 &&
-			!types.IsChannelError(newAPIError)
-		retryParam.PrepareForRetry(channel.Id, providerAccountSelected)
+		prepareRelayRetry(c, retryParam, channel.Id, !types.IsChannelError(newAPIError))
 	}
 
 	useChannel := c.GetStringSlice("use_channel")
@@ -452,6 +452,21 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func shouldCommitChannelAffinity(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		return false
+	}
+	if relayInfo == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
+		return true
+	}
+	return relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors()
+}
+
+func prepareRelayRetry(c *gin.Context, retryParam *service.RetryParam, channelID int, providerAccountRetryEligible bool) {
+	providerAccountSelected := common.GetContextKeyInt(c, constant.ContextKeyProviderAccountId) > 0 && providerAccountRetryEligible
+	retryParam.PrepareForRetry(channelID, providerAccountSelected)
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
@@ -678,6 +693,7 @@ func RelayTask(c *gin.Context) {
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
 		if taskErr == nil {
+			service.MarkChannelAffinityRequestSucceeded(c)
 			service.ReleaseCurrentChannelPoolLease(c)
 			break
 		}
@@ -696,10 +712,7 @@ func RelayTask(c *gin.Context) {
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
-		service.ClearCurrentChannelAffinityCache(c)
-		providerAccountSelected := common.GetContextKeyInt(c, constant.ContextKeyProviderAccountId) > 0 &&
-			!taskErr.LocalError
-		retryParam.PrepareForRetry(channel.Id, providerAccountSelected)
+		prepareRelayRetry(c, retryParam, channel.Id, !taskErr.LocalError)
 	}
 
 	useChannel := c.GetStringSlice("use_channel")
