@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,6 +21,18 @@ func buildChannelAffinityTemplateContextForTest(meta channelAffinityMeta) *gin.C
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 	setChannelAffinityContext(ctx, meta)
+	return ctx
+}
+
+func newChannelAffinityRequestContext(t *testing.T, body string, tokenID int) *gin.Context {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	common.SetContextKey(ctx, constant.ContextKeyTokenId, tokenID)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "gptpro")
+	common.SetContextKey(ctx, constant.ContextKeyOriginalModel, "gpt-5")
 	return ctx
 }
 
@@ -540,4 +554,57 @@ func TestDefaultCodexAffinityRequiresExplicitKey(t *testing.T) {
 	require.Zero(t, channelID)
 	_, hasMeta := getChannelAffinityMeta(ctx)
 	require.False(t, hasMeta)
+}
+
+func TestDefaultCodexAffinityUsesScopedConversationID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	conversationID := fmt.Sprintf("conv-%d", time.Now().UnixNano())
+	body := fmt.Sprintf(`{"model":"gpt-5","conversation":{"id":"%s"},"input":"hello"}`, conversationID)
+
+	first := newChannelAffinityRequestContext(t, body, 8101)
+	channelID, found := GetPreferredChannelByAffinity(first, "gpt-5", "gptpro")
+	require.False(t, found)
+	require.Zero(t, channelID)
+	MarkChannelAffinityRequestSucceeded(first)
+	RecordChannelAffinity(first, 9101)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(first) })
+
+	same := newChannelAffinityRequestContext(t, body, 8101)
+	channelID, found = GetPreferredChannelByAffinity(same, "gpt-5", "gptpro")
+	require.True(t, found)
+	assert.Equal(t, 9101, channelID)
+
+	otherToken := newChannelAffinityRequestContext(t, body, 8102)
+	channelID, found = GetPreferredChannelByAffinity(otherToken, "gpt-5", "gptpro")
+	require.False(t, found)
+	assert.Zero(t, channelID)
+}
+
+func TestDefaultCodexAffinityParsesConversationForms(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	conversationID := fmt.Sprintf("conv-forms-%d", time.Now().UnixNano())
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"scalar", fmt.Sprintf(`{"model":"gpt-5","conversation":"%s","input":"hello"}`, conversationID)},
+		{"object", fmt.Sprintf(`{"model":"gpt-5","conversation":{"id":"%s"},"input":"hello"}`, conversationID)},
+	}
+	for index, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newChannelAffinityRequestContext(t, tt.body, 8110+index)
+			_, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "gptpro")
+			require.False(t, found)
+			meta, ok := getChannelAffinityMeta(ctx)
+			require.True(t, ok)
+			assert.Equal(t, "conversation", meta.KeySourceType)
+			assert.Empty(t, meta.KeyHint)
+			assert.NotEmpty(t, meta.KeyFingerprint)
+			storage, err := common.GetBodyStorage(ctx)
+			require.NoError(t, err)
+			bodyAfter, err := storage.Bytes()
+			require.NoError(t, err)
+			assert.Equal(t, []byte(tt.body), bodyAfter)
+		})
+	}
 }

@@ -343,9 +343,52 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 		default:
 			return strings.TrimSpace(res.Raw)
 		}
+	case "conversation":
+		storage, err := common.GetBodyStorage(c)
+		if err != nil {
+			return ""
+		}
+		body, err := storage.Bytes()
+		if err != nil || len(body) == 0 {
+			return ""
+		}
+		conversation := gjson.GetBytes(body, "conversation")
+		if !conversation.Exists() {
+			return ""
+		}
+		if conversation.IsObject() {
+			return strings.TrimSpace(conversation.Get("id").String())
+		}
+		if conversation.Type == gjson.String || conversation.Type == gjson.Number {
+			return strings.TrimSpace(conversation.String())
+		}
+		return ""
 	default:
 		return ""
 	}
+}
+
+func isScopedChannelAffinitySource(sourceType string) bool {
+	switch strings.TrimSpace(sourceType) {
+	case "conversation", "response_chain":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildScopedChannelAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRule, sourceType string, tokenID int, modelName string, usingGroup string, value string) (string, bool) {
+	if tokenID <= 0 || strings.TrimSpace(value) == "" {
+		return "", false
+	}
+	payload := fmt.Sprintf("%d\x00%d:%s\x00%d:%s\x00%d:%s", tokenID, len(usingGroup), usingGroup, len(modelName), modelName, len(value), value)
+	fingerprint := fmt.Sprintf("%x", common.Sha256Raw([]byte(payload)))
+	parts := make([]string, 0, 4)
+	if rule.IncludeRuleName && rule.Name != "" {
+		parts = append(parts, rule.Name)
+	}
+	parts = append(parts, "scoped-v1", strings.TrimSpace(sourceType), fingerprint)
+	return strings.Join(parts, ":"), true
 }
 
 func buildChannelAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRule, modelName string, usingGroup string, affinityValue string) string {
@@ -606,6 +649,15 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			ttlSeconds = setting.DefaultTTLSeconds
 		}
 		cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
+		keyHint := buildChannelAffinityKeyHint(affinityValue)
+		if isScopedChannelAffinitySource(usedSource.Type) {
+			var ok bool
+			cacheKeySuffix, ok = buildScopedChannelAffinityCacheKeySuffix(rule, usedSource.Type, c.GetInt("token_id"), modelName, usingGroup, affinityValue)
+			if !ok {
+				continue
+			}
+			keyHint = ""
+		}
 		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
 		setChannelAffinityContext(c, channelAffinityMeta{
 			CacheKey:       cacheKeyFull,
@@ -616,7 +668,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			KeySourceType:  strings.TrimSpace(usedSource.Type),
 			KeySourceKey:   strings.TrimSpace(usedSource.Key),
 			KeySourcePath:  strings.TrimSpace(usedSource.Path),
-			KeyHint:        buildChannelAffinityKeyHint(affinityValue),
+			KeyHint:        keyHint,
 			KeyFingerprint: affinityFingerprint(affinityValue),
 			UsingGroup:     usingGroup,
 			ModelName:      modelName,
