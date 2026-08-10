@@ -37,6 +37,9 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	if info != nil && strings.TrimSpace(responsesResponse.ID) != "" {
+		info.ChannelAffinityResponseID = strings.TrimSpace(responsesResponse.ID)
+	}
 
 	if responsesResponse.HasImageGenerationCall() {
 		c.Set("image_generation_call", true)
@@ -182,6 +185,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+	if terminalReceived && info.StreamTerminalSuccess && strings.TrimSpace(responseID) != "" {
+		info.ChannelAffinityResponseID = strings.TrimSpace(responseID)
+	}
 
 	if !terminalReceived && c.Request.Context().Err() == nil && info.StreamStatus != nil {
 		switch info.StreamStatus.EndReason {

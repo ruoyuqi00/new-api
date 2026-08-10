@@ -180,6 +180,7 @@ type RelayInfo struct {
 	FinalRequestRelayFormat types.RelayFormat
 
 	StreamStatus                  *StreamStatus
+	ChannelAffinityResponseID     string
 	StreamTerminalMarkersRequired bool
 	StreamTerminalSuccess         bool
 	StreamTerminalUsageSeen       bool
@@ -197,6 +198,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	info.ForwardedModelName = ""
 	info.ActualResponseModel = ""
 	info.StreamStatus = nil
+	info.ChannelAffinityResponseID = ""
 	info.StreamTerminalMarkersRequired = false
 	info.StreamTerminalSuccess = false
 	info.StreamTerminalUsageSeen = false

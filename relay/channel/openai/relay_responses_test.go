@@ -150,6 +150,69 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 	}
 }
 
+func TestOaiResponsesHandlerCapturesAffinityResponseID(t *testing.T) {
+	ctx, _ := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"resp_buffered","object":"response","status":"completed","model":"upstream-model","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		)),
+	}
+	info := mappedClientResponseInfo()
+
+	_, relayErr := OaiResponsesHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "resp_buffered", info.ChannelAffinityResponseID)
+}
+
+func TestOaiResponsesStreamHandlerCapturesAffinityResponseIDOnlyOnSuccess(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	tests := []struct {
+		name   string
+		body   string
+		wantID string
+	}{
+		{
+			name: "completed",
+			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_ok\"}}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n" +
+				"data: [DONE]\n\n",
+			wantID: "resp_ok",
+		},
+		{
+			name: "incomplete",
+			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_incomplete\"}}\n\n" +
+				"data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\"}}\n\n",
+		},
+		{
+			name: "eof without terminal",
+			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_eof\"}}\n\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := clientResponseTestContext()
+			ctx.Request.URL.Path = "/v1/responses"
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(tt.body)),
+			}
+			info := mappedClientResponseInfo()
+
+			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+			require.Nil(t, relayErr)
+			require.Equal(t, tt.wantID, info.ChannelAffinityResponseID)
+		})
+	}
+}
+
 func TestSendResponsesStreamDataReturnsWriteError(t *testing.T) {
 	ctx, _ := clientResponseTestContext()
 	requestContext, cancel := context.WithCancel(ctx.Request.Context())
