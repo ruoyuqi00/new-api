@@ -353,46 +353,49 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 		default:
 			return strings.TrimSpace(res.Raw)
 		}
-	case "conversation":
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return ""
-		}
-		body, err := storage.Bytes()
-		if err != nil || len(body) == 0 {
-			return ""
-		}
-		conversation := gjson.GetBytes(body, "conversation")
-		if !conversation.Exists() {
-			return ""
-		}
-		if conversation.IsObject() {
-			return strings.TrimSpace(conversation.Get("id").String())
-		}
-		if conversation.Type == gjson.String || conversation.Type == gjson.Number {
-			return strings.TrimSpace(conversation.String())
-		}
-		return ""
-	case "response_chain":
-		path := strings.TrimSpace(src.Path)
-		if path == "" {
-			path = "previous_response_id"
-		}
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return ""
-		}
-		body, err := storage.Bytes()
-		if err != nil || len(body) == 0 {
-			return ""
-		}
-		responseID := gjson.GetBytes(body, path)
-		if !responseID.Exists() || responseID.Type != gjson.String {
-			return ""
-		}
-		return strings.TrimSpace(responseID.String())
 	default:
 		return ""
+	}
+}
+
+func scopedChannelAffinitySourceType(source operation_setting.ChannelAffinityKeySource) string {
+	if strings.TrimSpace(source.Type) != "context_string" {
+		return ""
+	}
+	switch strings.TrimSpace(source.Key) {
+	case operation_setting.ChannelAffinityConversationContextKey:
+		return "conversation"
+	case operation_setting.ChannelAffinityResponseChainContextKey:
+		return "response_chain"
+	default:
+		return ""
+	}
+}
+
+func populateResponsesChannelAffinityContext(c *gin.Context) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return
+	}
+	body, err := storage.Bytes()
+	if err != nil || len(body) == 0 {
+		return
+	}
+	conversation := gjson.GetBytes(body, "conversation")
+	if conversation.IsObject() {
+		if conversationID := strings.TrimSpace(conversation.Get("id").String()); conversationID != "" {
+			c.Set(operation_setting.ChannelAffinityConversationContextKey, conversationID)
+		}
+	} else if conversation.Type == gjson.String || conversation.Type == gjson.Number {
+		if conversationID := strings.TrimSpace(conversation.String()); conversationID != "" {
+			c.Set(operation_setting.ChannelAffinityConversationContextKey, conversationID)
+		}
+	}
+	responseID := gjson.GetBytes(body, "previous_response_id")
+	if responseID.Type == gjson.String {
+		if value := strings.TrimSpace(responseID.String()); value != "" {
+			c.Set(operation_setting.ChannelAffinityResponseChainContextKey, value)
+		}
 	}
 }
 
@@ -461,7 +464,7 @@ func getChannelAffinityRuleContext(c *gin.Context) (channelAffinityRuleContext, 
 
 func ruleHasChannelAffinitySource(rule operation_setting.ChannelAffinityRule, sourceType string) bool {
 	for _, source := range rule.KeySources {
-		if strings.TrimSpace(source.Type) == sourceType {
+		if strings.TrimSpace(source.Type) == sourceType || scopedChannelAffinitySourceType(source) == sourceType {
 			return true
 		}
 	}
@@ -684,6 +687,9 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		if len(rule.UserAgentInclude) > 0 && !matchAnyIncludeFold(rule.UserAgentInclude, userAgent) {
 			continue
 		}
+		if ruleHasChannelAffinitySource(rule, "conversation") || ruleHasChannelAffinitySource(rule, "response_chain") {
+			populateResponsesChannelAffinityContext(c)
+		}
 		if ruleHasChannelAffinitySource(rule, "response_chain") {
 			setChannelAffinityRuleContext(c, channelAffinityRuleContext{
 				Rule:        rule,
@@ -694,10 +700,15 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		}
 		var affinityValue string
 		var usedSource operation_setting.ChannelAffinityKeySource
+		var usedSourceType string
 		for _, src := range rule.KeySources {
 			affinityValue = extractChannelAffinityValue(c, src)
 			if affinityValue != "" {
 				usedSource = src
+				usedSourceType = scopedChannelAffinitySourceType(src)
+				if usedSourceType == "" {
+					usedSourceType = strings.TrimSpace(src.Type)
+				}
 				break
 			}
 		}
@@ -725,9 +736,9 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		}
 		cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
 		keyHint := buildChannelAffinityKeyHint(affinityValue)
-		if isScopedChannelAffinitySource(usedSource.Type) {
+		if isScopedChannelAffinitySource(usedSourceType) {
 			var ok bool
-			cacheKeySuffix, ok = buildScopedChannelAffinityCacheKeySuffix(rule, usedSource.Type, common.GetContextKeyInt(c, constant.ContextKeyTokenId), modelName, usingGroup, affinityValue)
+			cacheKeySuffix, ok = buildScopedChannelAffinityCacheKeySuffix(rule, usedSourceType, common.GetContextKeyInt(c, constant.ContextKeyTokenId), modelName, usingGroup, affinityValue)
 			if !ok {
 				continue
 			}
@@ -740,7 +751,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			RuleName:       rule.Name,
 			SkipRetry:      rule.SkipRetryOnFailure,
 			ParamTemplate:  cloneStringAnyMap(rule.ParamOverrideTemplate),
-			KeySourceType:  strings.TrimSpace(usedSource.Type),
+			KeySourceType:  usedSourceType,
 			KeySourceKey:   strings.TrimSpace(usedSource.Key),
 			KeySourcePath:  strings.TrimSpace(usedSource.Path),
 			KeyHint:        keyHint,

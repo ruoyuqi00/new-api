@@ -2,8 +2,13 @@ package operation_setting
 
 import "github.com/QuantumNous/new-api/setting/config"
 
+const (
+	ChannelAffinityConversationContextKey  = "channel_affinity_conversation_id"
+	ChannelAffinityResponseChainContextKey = "channel_affinity_previous_response_id"
+)
+
 type ChannelAffinityKeySource struct {
-	Type string `json:"type"` // context_int, context_string, request_header, gjson, conversation, response_chain
+	Type string `json:"type"` // context_int, context_string, request_header, gjson
 	Key  string `json:"key,omitempty"`
 	Path string `json:"path,omitempty"`
 }
@@ -90,8 +95,8 @@ var channelAffinitySetting = ChannelAffinitySetting{
 				{Type: "request_header", Key: "Session_id"},
 				{Type: "request_header", Key: "X-Codex-Turn-Metadata", Path: "session_id"},
 				{Type: "request_header", Key: "X-Codex-Turn-Metadata", Path: "thread_id"},
-				{Type: "conversation"},
-				{Type: "response_chain", Path: "previous_response_id"},
+				{Type: "context_string", Key: ChannelAffinityConversationContextKey},
+				{Type: "context_string", Key: ChannelAffinityResponseChainContextKey},
 			},
 			ValueRegex:            "",
 			TTLSeconds:            0,
