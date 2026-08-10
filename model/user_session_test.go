@@ -424,6 +424,195 @@ func TestUserSessionGrowthCountsUseBroadActiveAndStrictIssuancePredicates(t *tes
 	assert.Equal(t, issuedCount, globalCount)
 }
 
+var _ func(*UserSession, int, int, int64) ([]UserSession, error) = CreateUserSessionWithinLimits
+
+func TestCreateUserSessionWithinLimitsReplacesLeastRecentlyActive(t *testing.T) {
+	setupUserSessionTest(t)
+	const userID = 1010
+	const otherUserID = 1015
+	createUserSessionTestUser(t, userID, 1)
+	createUserSessionTestUser(t, otherUserID, 1)
+	now := time.Now().Unix()
+	rows := []*UserSession{
+		newTestUserSession("replacement-created-oldest", userID, now-40),
+		newTestUserSession("replacement-least-active", userID, now-30),
+		newTestUserSession("replacement-created-newest", userID, now-20),
+	}
+	rows[0].LastActiveAt = now - 10
+	rows[1].LastActiveAt = now - 20
+	rows[2].LastActiveAt = now - 5
+	require.NoError(t, DB.Create(rows).Error)
+	otherUserSession := newTestUserSession("replacement-other-user", otherUserID, now-100)
+	otherUserSession.LastActiveAt = now - 100
+	require.NoError(t, DB.Create(otherUserSession).Error)
+
+	replacement := newTestUserSession("replacement-current", userID, now)
+	evicted, err := CreateUserSessionWithinLimits(replacement, 3, 100, 86400)
+	require.NoError(t, err)
+	require.Len(t, evicted, 1)
+	assert.Equal(t, "replacement-least-active", evicted[0].SID)
+
+	storedLeastActive, err := GetUserSessionBySID("replacement-least-active")
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusRevoked, storedLeastActive.Status)
+	assert.Equal(t, "session_limit_replaced", storedLeastActive.RevokedReason)
+	storedCreatedOldest, err := GetUserSessionBySID("replacement-created-oldest")
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusActive, storedCreatedOldest.Status)
+	storedOtherUser, err := GetUserSessionBySID(otherUserSession.SID)
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusActive, storedOtherUser.Status)
+	activeCount, err := CountActiveUserSessions(userID, now)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), activeCount)
+}
+
+func TestCreateUserSessionWithinLimitsChecksIssuanceBeforeEviction(t *testing.T) {
+	setupUserSessionTest(t)
+	const userID = 1011
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	existing := newTestUserSession("issuance-preserved", userID, now-1)
+	require.NoError(t, DB.Create(existing).Error)
+
+	unexpectedEvictionErr := errors.New("unexpected eviction after issuance rejection")
+	evictionAttempted := false
+	const callbackName = "test:reject_user_session_eviction_after_issuance_limit"
+	callbackRegistered := false
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = DB.Callback().Update().Remove(callbackName)
+		}
+	})
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "user_sessions" {
+			evictionAttempted = true
+			tx.AddError(unexpectedEvictionErr)
+		}
+	}))
+	callbackRegistered = true
+
+	replacement := newTestUserSession("issuance-rejected", userID, now)
+	evicted, err := CreateUserSessionWithinLimits(replacement, 1, 1, 86400)
+	assert.ErrorIs(t, err, ErrUserSessionIssuanceLimit)
+	assert.NotErrorIs(t, err, unexpectedEvictionErr)
+	assert.Empty(t, evicted)
+	assert.False(t, evictionAttempted)
+
+	stored, err := GetUserSessionBySID(existing.SID)
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusActive, stored.Status)
+	var replacementCount int64
+	require.NoError(t, DB.Model(&UserSession{}).Where("sid = ?", replacement.SID).Count(&replacementCount).Error)
+	assert.Zero(t, replacementCount)
+}
+
+func TestCreateUserSessionWithinLimitsRestoresActiveInvariant(t *testing.T) {
+	setupUserSessionTest(t)
+	const userID = 1012
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	for index := range 4 {
+		session := newTestUserSession(fmt.Sprintf("over-limit-%d", index), userID, now-int64(10-index))
+		session.LastActiveAt = now - int64(100-index)
+		require.NoError(t, DB.Create(session).Error)
+	}
+	replacement := newTestUserSession("over-limit-current", userID, now)
+	evicted, err := CreateUserSessionWithinLimits(replacement, 3, 100, 86400)
+	require.NoError(t, err)
+	require.Len(t, evicted, 2)
+	assert.Equal(t, []string{"over-limit-0", "over-limit-1"}, []string{evicted[0].SID, evicted[1].SID})
+	for _, sid := range []string{"over-limit-0", "over-limit-1"} {
+		stored, getErr := GetUserSessionBySID(sid)
+		require.NoError(t, getErr)
+		assert.Equal(t, UserSessionStatusRevoked, stored.Status)
+		assert.Equal(t, "session_limit_replaced", stored.RevokedReason)
+	}
+	activeCount, err := CountActiveUserSessions(userID, now)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), activeCount)
+}
+
+func TestCreateUserSessionWithinLimitsUsesStableTieBreakers(t *testing.T) {
+	setupUserSessionTest(t)
+	const userID = 1013
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	sessions := []*UserSession{
+		newTestUserSession("tie-created-newer-a", userID, now-10),
+		newTestUserSession("tie-created-older-b", userID, now-20),
+		newTestUserSession("tie-created-older-a", userID, now-20),
+	}
+	for _, session := range sessions {
+		session.LastActiveAt = now - 30
+	}
+	require.NoError(t, DB.Create(sessions).Error)
+	replacement := newTestUserSession("tie-current", userID, now)
+	evicted, err := CreateUserSessionWithinLimits(replacement, 2, 100, 86400)
+	require.NoError(t, err)
+	require.Len(t, evicted, 2)
+	assert.Equal(t,
+		[]string{"tie-created-older-a", "tie-created-older-b"},
+		[]string{evicted[0].SID, evicted[1].SID},
+	)
+}
+
+func TestCreateUserSessionWithinLimitsRollsBackEvictionWhenInsertFails(t *testing.T) {
+	setupUserSessionTest(t)
+	const userID = 1014
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	existing := newTestUserSession("rollback-existing", userID, now-10)
+	require.NoError(t, DB.Create(existing).Error)
+
+	forcedInsertErr := errors.New("forced user session insert failure")
+	insertBeforeEvictionErr := errors.New("user session insert attempted before eviction")
+	evictionAttempted := false
+	insertAttempted := false
+	const updateCallbackName = "test:observe_user_session_eviction_before_insert"
+	const createCallbackName = "test:fail_user_session_insert_after_eviction"
+	updateCallbackRegistered := false
+	createCallbackRegistered := false
+	t.Cleanup(func() {
+		if createCallbackRegistered {
+			_ = DB.Callback().Create().Remove(createCallbackName)
+		}
+		if updateCallbackRegistered {
+			_ = DB.Callback().Update().Remove(updateCallbackName)
+		}
+	})
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(updateCallbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "user_sessions" {
+			evictionAttempted = true
+		}
+	}))
+	updateCallbackRegistered = true
+	require.NoError(t, DB.Callback().Create().Before("gorm:create").Register(createCallbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil || tx.Statement.Table != "user_sessions" {
+			return
+		}
+		insertAttempted = true
+		if !evictionAttempted {
+			tx.AddError(insertBeforeEvictionErr)
+			return
+		}
+		tx.AddError(forcedInsertErr)
+	}))
+	createCallbackRegistered = true
+
+	replacement := newTestUserSession("rollback-replacement", userID, now)
+	_, err := CreateUserSessionWithinLimits(replacement, 1, 100, 86400)
+	assert.ErrorIs(t, err, forcedInsertErr)
+	assert.NotErrorIs(t, err, insertBeforeEvictionErr)
+	assert.True(t, evictionAttempted)
+	assert.True(t, insertAttempted)
+	stored, err := GetUserSessionBySID(existing.SID)
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusActive, stored.Status)
+	assert.Zero(t, stored.RevokedAt)
+	assert.Empty(t, stored.RevokedReason)
+}
+
 func TestListActiveUserSessionsKeepsCurrentAndBoundsOtherSessions(t *testing.T) {
 	setupUserSessionTest(t)
 	now := time.Now().Unix()
