@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
@@ -107,6 +108,11 @@ func TestNormalizeYucoreMediaRequestRejectsUnsupportedOptionalParameters(t *test
 
 	_, err = NormalizeYucoreMediaRequest(veo, YucoreMediaRequestOptions{NegativePrompt: &negativePrompt})
 	require.ErrorContains(t, err, "negative prompt")
+
+	emptyNegativePrompt := "  "
+	normalized, err := NormalizeYucoreMediaRequest(veo, YucoreMediaRequestOptions{NegativePrompt: &emptyNegativePrompt})
+	require.NoError(t, err)
+	assert.Nil(t, normalized.NegativePrompt)
 }
 
 func TestNormalizeYucoreMediaRequestValidatesReferenceModeCombinations(t *testing.T) {
@@ -212,6 +218,76 @@ func TestNormalizeYucoreMediaRequestRejectsInvalidReferences(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := NormalizeYucoreMediaRequest(selected, test.options)
 			require.ErrorContains(t, err, test.error)
+		})
+	}
+}
+
+func TestNormalizeYucoreMediaRequestAcceptsSafeReferenceValues(t *testing.T) {
+	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	tests := []struct {
+		name       string
+		references []model.YucoreMediaReferenceInput
+	}{
+		{name: "http URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "http://cdn.example.com/reference.png"}}},
+		{name: "https URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "https://cdn.example.com/reference.png?size=large#preview"}}},
+		{name: "unsigned cached upload", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "/api/yucore/media/uploads/42/ref_1234567890_AbCd123456.png"}}},
+		{name: "signed cached upload", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "/api/yucore/media/uploads/42/ref_1234567890_AbCd123456.png?sig=abc123"}}},
+		{name: "legacy ref ID", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "ref_1234567890_AbCd123456"}}},
+		{name: "legacy asset ID", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "asset_1"}}},
+		{name: "image data URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "data:image/png;base64,iVBORw0KGgo="}}},
+		{name: "frame data URLs", references: []model.YucoreMediaReferenceInput{
+			{Role: "first_frame", URL: "data:image/png;base64,Zmlyc3Q="},
+			{Role: "last_frame", URL: "data:image/jpeg;base64,bGFzdA=="},
+		}},
+		{name: "mixed remote media", references: []model.YucoreMediaReferenceInput{
+			{Role: "image", URL: "https://cdn.example.com/primary.png"},
+			{Role: "video", URL: "https://cdn.example.com/reference.mp4"},
+			{Role: "audio", URL: "https://cdn.example.com/reference.mp3"},
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{References: test.references})
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestNormalizeYucoreMediaRequestRejectsUnsafeReferenceValues(t *testing.T) {
+	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	tests := []struct {
+		name      string
+		role      string
+		value     string
+		errorText string
+	}{
+		{name: "newline", role: "image", value: "https://cdn.example.com/ref.png\nheader", errorText: "control"},
+		{name: "null byte", role: "image", value: "https://cdn.example.com/ref\x00.png", errorText: "control"},
+		{name: "file scheme", role: "image", value: "file:///etc/passwd", errorText: "reference value"},
+		{name: "javascript scheme", role: "image", value: "javascript:alert(1)", errorText: "reference value"},
+		{name: "ftp scheme", role: "image", value: "ftp://cdn.example.com/ref.png", errorText: "reference value"},
+		{name: "userinfo", role: "image", value: "https://user:pass@cdn.example.com/ref.png", errorText: "userinfo"},
+		{name: "missing host", role: "image", value: "https:///ref.png", errorText: "host"},
+		{name: "invalid host", role: "image", value: "https://bad_host/ref.png", errorText: "host"},
+		{name: "encoded control", role: "image", value: "https://cdn.example.com/ref%0A.png", errorText: "control"},
+		{name: "literal space", role: "image", value: "https://cdn.example.com/ref image.png", errorText: "reference value"},
+		{name: "backslash path", role: "image", value: "https://cdn.example.com/ref\\image.png", errorText: "reference value"},
+		{name: "text data URL", role: "image", value: "data:text/plain;base64,aGVsbG8=", errorText: "image data URL"},
+		{name: "video data URL", role: "video", value: "data:image/png;base64,aGVsbG8=", errorText: "data URL"},
+		{name: "audio data URL", role: "audio", value: "data:image/png;base64,aGVsbG8=", errorText: "data URL"},
+		{name: "oversized data URL", role: "image", value: "data:image/png;base64," + strings.Repeat("A", 512*1024), errorText: "too large"},
+		{name: "local traversal", role: "image", value: "/api/yucore/media/uploads/42/../secret.png", errorText: "upload path"},
+		{name: "encoded local traversal", role: "image", value: "/api/yucore/media/uploads/42/%2e%2e/secret.png", errorText: "upload path"},
+		{name: "wrong local route", role: "image", value: "/api/yucore/media/tasks/42/ref.png", errorText: "reference value"},
+		{name: "unknown opaque ID", role: "image", value: "reference-123", errorText: "reference value"},
+		{name: "malformed ref ID", role: "image", value: "ref_x", errorText: "reference value"},
+		{name: "malformed asset ID", role: "image", value: "asset_bad", errorText: "reference value"},
+		{name: "oversized opaque ID", role: "image", value: "ref_" + strings.Repeat("a", 200), errorText: "reference value"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{References: []model.YucoreMediaReferenceInput{{Role: test.role, URL: test.value}}})
+			require.ErrorContains(t, err, test.errorText)
 		})
 	}
 }

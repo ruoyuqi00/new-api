@@ -197,6 +197,49 @@ func TestYucoreMediaCanonicalReadsLegacyMetadataWhenTopLevelIsAbsent(t *testing.
 	assert.Equal(t, "metadata value", task.NegativePrompt)
 }
 
+func TestYucoreMediaCanonicalTreatsFrontendEmptyNegativePromptAsOmitted(t *testing.T) {
+	var req yucoreMediaTaskRequest
+	require.NoError(t, common.Unmarshal([]byte(`{
+		"kind":"video",
+		"model_id":"veo-3.1",
+		"prompt":"test prompt",
+		"negative_prompt":"",
+		"inputs":[],
+		"metadata":{}
+	}`), &req))
+	task, err := buildYucoreMediaTaskFromRequest(req, 42)
+	require.NoError(t, err)
+	selected := yucoreMediaControllerTestModel("veo-3.1")
+	selected.SupportsSeed = false
+	require.NoError(t, normalizeYucoreMediaTaskWithSelection(task, selected))
+	assert.Empty(t, task.NegativePrompt)
+
+	var metadata map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal([]byte(task.Metadata), &metadata))
+	_, present := metadata["negative_prompt"]
+	assert.False(t, present)
+}
+
+func TestYucoreMediaCanonicalEnforcesSelectedPromptLimitByRunes(t *testing.T) {
+	selected := yucoreMediaControllerTestModel("operator-prompt-limit")
+	selected.InputLimits.MaxPromptChars = 4
+
+	atLimit, err := buildYucoreMediaTaskFromRequest(yucoreMediaTaskRequest{
+		Kind:   "video",
+		Prompt: "图像测试",
+	}, 42)
+	require.NoError(t, err)
+	require.NoError(t, normalizeYucoreMediaTaskWithSelection(atLimit, selected))
+
+	overLimit, err := buildYucoreMediaTaskFromRequest(yucoreMediaTaskRequest{
+		Kind:   "video",
+		Prompt: "图像测试超",
+	}, 42)
+	require.NoError(t, err)
+	err = normalizeYucoreMediaTaskWithSelection(overLimit, selected)
+	require.ErrorContains(t, err, "prompt is too long")
+}
+
 func TestYucoreMediaCanonicalRejectsFractionalReferenceDuration(t *testing.T) {
 	_, err := buildYucoreMediaTaskFromRequest(yucoreMediaTaskRequest{
 		Kind:    "video",

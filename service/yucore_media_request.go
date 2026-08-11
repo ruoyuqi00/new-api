@@ -2,9 +2,20 @@ package service
 
 import (
 	"fmt"
+	"net"
+	"net/url"
+	"path"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/model"
+)
+
+const (
+	yucoreMediaUploadReferencePrefix  = "/api/yucore/media/uploads/"
+	maxYucoreMediaReferenceValueSize  = 512 * 1024
+	maxYucoreMediaOpaqueReferenceSize = 160
 )
 
 type YucoreMediaRequestOptions struct {
@@ -43,12 +54,14 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 	}
 	if options.NegativePrompt != nil {
 		value := strings.TrimSpace(*options.NegativePrompt)
-		normalized.NegativePrompt = &value
+		if value != "" {
+			normalized.NegativePrompt = &value
+		}
 	}
 	for index, reference := range options.References {
 		normalized.References[index] = model.YucoreMediaReferenceInput{
 			Role:     strings.ToLower(strings.TrimSpace(reference.Role)),
-			URL:      strings.TrimSpace(reference.URL),
+			URL:      reference.URL,
 			MimeType: strings.ToLower(strings.TrimSpace(reference.MimeType)),
 		}
 		if reference.DurationMS != nil {
@@ -64,8 +77,13 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 	normalized.Mode = resolvedMode
 	normalized.Count = resolvedCount
 
-	_, capabilities := model.GetYucoreMediaCatalogSettings()
-	capability, _ := yucoreMediaCapabilityForModel(capabilities, selected.Id)
+	capability := model.YucoreMediaModelCapability{}
+	if selected.capability != nil {
+		capability = cloneYucoreMediaCapability(*selected.capability)
+	} else {
+		_, capabilities := model.GetYucoreMediaCatalogSettings()
+		capability, _ = yucoreMediaCapabilityForModel(capabilities, selected.Id)
+	}
 
 	durations := capability.Durations
 	if len(durations) == 0 {
@@ -130,10 +148,18 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 	audioCount := 0
 	firstFrameCount := 0
 	lastFrameCount := 0
-	for _, reference := range normalized.References {
-		if reference.URL == "" {
-			return YucoreMediaRequestOptions{}, fmt.Errorf("media reference URL is required")
+	for index := range normalized.References {
+		reference := &normalized.References[index]
+		switch reference.Role {
+		case "image", "video", "audio", "first_frame", "last_frame":
+		default:
+			return YucoreMediaRequestOptions{}, fmt.Errorf("media reference role %s is invalid", reference.Role)
 		}
+		referenceURL, err := normalizeYucoreMediaReferenceValue(reference.Role, reference.URL)
+		if err != nil {
+			return YucoreMediaRequestOptions{}, err
+		}
+		reference.URL = referenceURL
 		if reference.DurationMS != nil && *reference.DurationMS < 0 {
 			return YucoreMediaRequestOptions{}, fmt.Errorf("media reference duration must not be negative")
 		}
@@ -156,8 +182,6 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 		case "last_frame":
 			lastFrameCount++
 			imageCount++
-		default:
-			return YucoreMediaRequestOptions{}, fmt.Errorf("media reference role %s is invalid", reference.Role)
 		}
 	}
 
@@ -218,6 +242,151 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 	}
 
 	return normalized, nil
+}
+
+func normalizeYucoreMediaReferenceValue(role string, value string) (string, error) {
+	if yucoreMediaContainsControl(value) {
+		return "", fmt.Errorf("media reference value contains a control character")
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("media reference URL is required")
+	}
+	if strings.Contains(value, "\\") {
+		return "", fmt.Errorf("media reference value is invalid")
+	}
+	for _, character := range value {
+		if unicode.IsSpace(character) {
+			return "", fmt.Errorf("media reference value is invalid")
+		}
+	}
+
+	lowerValue := strings.ToLower(value)
+	if strings.HasPrefix(lowerValue, "data:") {
+		if role != "image" && role != "first_frame" && role != "last_frame" {
+			return "", fmt.Errorf("media reference role %s does not accept a data URL", role)
+		}
+		if len(value) > maxYucoreMediaReferenceValueSize {
+			return "", fmt.Errorf("media reference data URL is too large")
+		}
+		comma := strings.IndexByte(value, ',')
+		if comma < 0 {
+			return "", fmt.Errorf("media reference must be an image data URL")
+		}
+		mediaType := strings.TrimSpace(strings.SplitN(lowerValue[len("data:"):comma], ";", 2)[0])
+		if !strings.HasPrefix(mediaType, "image/") || len(mediaType) == len("image/") {
+			return "", fmt.Errorf("media reference must be an image data URL")
+		}
+		return value, nil
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("media reference value is invalid")
+	}
+	decodedQuery, err := url.QueryUnescape(parsed.RawQuery)
+	if err != nil {
+		return "", fmt.Errorf("media reference value is invalid")
+	}
+	if yucoreMediaContainsControl(parsed.Path) || yucoreMediaContainsControl(decodedQuery) || yucoreMediaContainsControl(parsed.Fragment) {
+		return "", fmt.Errorf("media reference value contains a control character")
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "" {
+		if scheme != "http" && scheme != "https" {
+			return "", fmt.Errorf("media reference value uses an unsupported scheme")
+		}
+		if parsed.User != nil {
+			return "", fmt.Errorf("media reference URL must not contain userinfo")
+		}
+		if parsed.Host == "" || !yucoreMediaValidHost(parsed.Hostname()) {
+			return "", fmt.Errorf("media reference URL requires a valid host")
+		}
+		return value, nil
+	}
+
+	if strings.HasPrefix(value, "/") {
+		if parsed.Host != "" || parsed.User != nil || parsed.Fragment != "" || !strings.HasPrefix(parsed.Path, yucoreMediaUploadReferencePrefix) {
+			return "", fmt.Errorf("media reference value is not an allowed upload path")
+		}
+		if strings.Contains(value, "\\") || path.Clean(parsed.Path) != parsed.Path {
+			return "", fmt.Errorf("media reference upload path contains traversal")
+		}
+		remainder := strings.TrimPrefix(parsed.Path, yucoreMediaUploadReferencePrefix)
+		segments := strings.Split(remainder, "/")
+		if len(segments) != 2 || segments[0] == "" || segments[1] == "" || segments[1] == "." || segments[1] == ".." {
+			return "", fmt.Errorf("media reference upload path is invalid")
+		}
+		ownerID, ownerErr := strconv.Atoi(segments[0])
+		if ownerErr != nil || ownerID <= 0 {
+			return "", fmt.Errorf("media reference upload path has an invalid owner")
+		}
+		return value, nil
+	}
+
+	if len(value) > maxYucoreMediaOpaqueReferenceSize {
+		return "", fmt.Errorf("media reference value is invalid")
+	}
+	if strings.HasPrefix(value, "ref_") {
+		parts := strings.Split(value, "_")
+		if len(parts) != 3 || len(parts[1]) < 10 || len(parts[1]) > 13 || len(parts[2]) != 10 ||
+			!yucoreMediaASCIIString(parts[1], true) || !yucoreMediaASCIIString(parts[2], false) {
+			return "", fmt.Errorf("media reference value is invalid")
+		}
+		return value, nil
+	}
+	if strings.HasPrefix(value, "asset_") {
+		identifier := strings.TrimPrefix(value, "asset_")
+		if len(identifier) == 0 || len(identifier) > 20 || !yucoreMediaASCIIString(identifier, true) {
+			return "", fmt.Errorf("media reference value is invalid")
+		}
+		return value, nil
+	}
+	return "", fmt.Errorf("media reference value is invalid")
+}
+
+func yucoreMediaContainsControl(value string) bool {
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return true
+		}
+	}
+	return false
+}
+
+func yucoreMediaValidHost(host string) bool {
+	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, character := range label {
+			if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+				(character < '0' || character > '9') && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func yucoreMediaASCIIString(value string, digitsOnly bool) bool {
+	for _, character := range value {
+		if character >= '0' && character <= '9' {
+			continue
+		}
+		if !digitsOnly && ((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func yucoreMediaIntAllowed(value int, allowed []int) bool {

@@ -441,6 +441,9 @@ func buildYucoreMediaTaskResponses(tasks []*model.YucoreMediaTask) []yucoreMedia
 }
 
 func normalizeYucoreMediaTaskWithSelection(task *model.YucoreMediaTask, selectedModel service.YucoreMediaCatalogModel) error {
+	if limit := selectedModel.InputLimits.MaxPromptChars; limit > 0 && utf8.RuneCountInString(task.Prompt) > limit {
+		return fmt.Errorf("prompt is too long for model %s (maximum %d characters)", selectedModel.Id, limit)
+	}
 	var references []model.YucoreMediaReferenceInput
 	if err := common.Unmarshal([]byte(task.Inputs), &references); err != nil {
 		return errors.New("media inputs must be a JSON array")

@@ -66,6 +66,19 @@ type YucoreMediaCatalogModel struct {
 	InputLimits    YucoreMediaCatalogInputLimits `json:"input_limits"`
 	Pricing        YucoreMediaCatalogPricing     `json:"pricing"`
 	Async          bool                          `json:"async"`
+	capability     *model.YucoreMediaModelCapability
+}
+
+func cloneYucoreMediaCapability(capability model.YucoreMediaModelCapability) model.YucoreMediaModelCapability {
+	capability.Durations = append([]int(nil), capability.Durations...)
+	capability.Resolutions = append([]string(nil), capability.Resolutions...)
+	capability.AspectRatios = append([]string(nil), capability.AspectRatios...)
+	capability.ReferenceModes = append([]string(nil), capability.ReferenceModes...)
+	capability.AllowedParameters = append([]string(nil), capability.AllowedParameters...)
+	capability.TerminalSuccessStates = append([]string(nil), capability.TerminalSuccessStates...)
+	capability.TerminalFailureStates = append([]string(nil), capability.TerminalFailureStates...)
+	capability.Notes = append([]string(nil), capability.Notes...)
+	return capability
 }
 
 func yucoreMediaCapabilityForModel(capabilities map[string]model.YucoreMediaModelCapability, modelID string) (model.YucoreMediaModelCapability, bool) {
@@ -130,10 +143,12 @@ func yucoreMediaKindsForAbility(ability model.AbilityWithChannel, capability mod
 }
 
 func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.YucoreMediaModelCapability, configured bool, groupRatio float64) YucoreMediaCatalogModel {
+	capabilitySnapshot := cloneYucoreMediaCapability(capability)
 	item := YucoreMediaCatalogModel{
-		Id:   modelID,
-		Name: modelID,
-		Kind: kind,
+		Id:         modelID,
+		Name:       modelID,
+		Kind:       kind,
+		capability: &capabilitySnapshot,
 		InputLimits: YucoreMediaCatalogInputLimits{
 			MaxPromptChars: 4000,
 			MaxFileSizeMB:  25,

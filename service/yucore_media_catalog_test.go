@@ -222,9 +222,11 @@ func TestBuildYucoreMediaCatalogCapabilityProjectionIsolated(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, first.Groups)
 	item := &first.Groups[0].Models[0]
+	require.NotNil(t, item.capability)
 	item.Durations[0] = 999
 	item.Resolutions[0] = "mutated"
 	item.ReferenceModes[0] = "mutated"
+	item.capability.AllowedParameters[0] = "mutated"
 
 	second, err := BuildYucoreMediaCatalog(9106)
 	require.NoError(t, err)
@@ -232,6 +234,8 @@ func TestBuildYucoreMediaCatalogCapabilityProjectionIsolated(t *testing.T) {
 	assert.Equal(t, []int{4, 5, 6, 8, 10, 12, 15}, second.Groups[0].Models[0].Durations)
 	assert.Equal(t, []string{"1080p"}, second.Groups[0].Models[0].Resolutions)
 	assert.Equal(t, []string{"media", "frames"}, second.Groups[0].Models[0].ReferenceModes)
+	require.NotNil(t, second.Groups[0].Models[0].capability)
+	assert.NotEqual(t, "mutated", second.Groups[0].Models[0].capability.AllowedParameters[0])
 }
 
 func TestBuildYucoreMediaCatalogExpandsAutoGroupsInConfiguredOrder(t *testing.T) {
@@ -295,6 +299,37 @@ func TestResolveYucoreMediaSelectionValidatesGroupModelAndKind(t *testing.T) {
 
 	_, _, err = ResolveYucoreMediaSelection(9103, "multimodal", "gpt-image-1", YucoreMediaKindVideo)
 	require.ErrorContains(t, err, "not available for video generation")
+}
+
+func TestResolveYucoreMediaSelectionKeepsCapabilitySnapshot(t *testing.T) {
+	db := setupYucoreMediaCatalogTest(t)
+	createYucoreMediaCatalogUser(t, db, 9108)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 35, Type: constant.ChannelTypeSora, Name: "snapshot", Key: "key-35", Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "multimodal", Model: "seedance-2.0", ChannelId: 35, Enabled: true,
+	}).Error)
+
+	_, selected, err := ResolveYucoreMediaSelection(9108, "multimodal", "seedance-2.0", YucoreMediaKindVideo)
+	require.NoError(t, err)
+	browserJSON, err := common.Marshal(selected)
+	require.NoError(t, err)
+	assert.NotContains(t, string(browserJSON), "capability")
+	assert.NotContains(t, string(browserJSON), "create_path")
+	assert.NotContains(t, string(browserJSON), "upstream_cost")
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["yucore_media.model_capabilities"] = `{"seedance-2.0":{"allowed_parameters":[]}}`
+	common.OptionMapRWMutex.Unlock()
+	_, refreshed := model.GetYucoreMediaCatalogSettings()
+	assert.NotContains(t, refreshed["seedance-2.0"].AllowedParameters, "negative_prompt")
+
+	negativePrompt := "avoid blur"
+	normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{NegativePrompt: &negativePrompt})
+	require.NoError(t, err)
+	require.NotNil(t, normalized.NegativePrompt)
+	assert.Equal(t, "avoid blur", *normalized.NegativePrompt)
 }
 
 func TestValidateYucoreMediaRequestUsesReportedCapabilities(t *testing.T) {
