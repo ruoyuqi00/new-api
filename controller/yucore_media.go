@@ -36,7 +36,8 @@ const (
 	maxYucoreMediaAudioUploadBytes   int64 = 25 << 20
 	maxYucoreMediaVideoUploadBytes   int64 = 100 << 20
 	yucoreMediaUploadRequestMaxBytes int64 = maxYucoreMediaVideoUploadBytes + (1 << 20)
-	yucoreMediaUploadSniffBytes            = 512
+	yucoreMediaUploadSniffBytes            = 1 << 20
+	yucoreMediaUploadFTYPMaxBytes          = 512
 )
 
 var errYucoreMediaUploadTooLarge = errors.New("reference upload exceeds the allowed size")
@@ -46,6 +47,13 @@ type yucoreMediaUploadPolicy struct {
 	MIMEType  string
 	Extension string
 	MaxBytes  int64
+}
+
+type yucoreMediaMPEGFrame struct {
+	Length      int
+	VersionBits byte
+	LayerBits   byte
+	SampleRate  int
 }
 
 type yucoreMediaTaskRequest struct {
@@ -1088,18 +1096,12 @@ func yucoreMediaUploadPolicyFor(prefix []byte, declaredMimeType string) (yucoreM
 		policy = yucoreMediaUploadPolicy{Kind: "image", MIMEType: "image/webp", Extension: ".webp", MaxBytes: maxYucoreMediaImageUploadBytes}
 	case bytes.HasPrefix(prefix, []byte("GIF87a")) || bytes.HasPrefix(prefix, []byte("GIF89a")):
 		policy = yucoreMediaUploadPolicy{Kind: "image", MIMEType: "image/gif", Extension: ".gif", MaxBytes: maxYucoreMediaImageUploadBytes}
-	case len(prefix) >= 12 && binary.BigEndian.Uint32(prefix[:4]) >= 12 && bytes.Equal(prefix[4:8], []byte("ftyp")):
-		brand := string(prefix[8:12])
-		if brand == "qt  " {
-			policy = yucoreMediaUploadPolicy{Kind: "video", MIMEType: "video/quicktime", Extension: ".mov", MaxBytes: maxYucoreMediaVideoUploadBytes}
-			break
-		}
-		switch brand {
-		case "avc1", "iso2", "iso3", "iso4", "iso5", "iso6", "isom", "mp41", "mp42", "M4V ", "MSNV", "dash", "cmfc", "cmfs":
-			policy = yucoreMediaUploadPolicy{Kind: "video", MIMEType: "video/mp4", Extension: ".mp4", MaxBytes: maxYucoreMediaVideoUploadBytes}
-		}
+	case len(prefix) >= 8 && bytes.Equal(prefix[4:8], []byte("ftyp")):
+		policy, _ = yucoreMediaBMFFUploadPolicy(prefix)
 	case bytes.HasPrefix(prefix, []byte("ID3")) || yucoreMediaHasMPEGFrameSync(prefix):
-		policy = yucoreMediaUploadPolicy{Kind: "audio", MIMEType: "audio/mpeg", Extension: ".mp3", MaxBytes: maxYucoreMediaAudioUploadBytes}
+		if yucoreMediaHasMP3Structure(prefix) {
+			policy = yucoreMediaUploadPolicy{Kind: "audio", MIMEType: "audio/mpeg", Extension: ".mp3", MaxBytes: maxYucoreMediaAudioUploadBytes}
+		}
 	case len(prefix) >= 12 && bytes.Equal(prefix[:4], []byte("RIFF")) && bytes.Equal(prefix[8:12], []byte("WAVE")):
 		policy = yucoreMediaUploadPolicy{Kind: "audio", MIMEType: "audio/wav", Extension: ".wav", MaxBytes: maxYucoreMediaAudioUploadBytes}
 	}
@@ -1123,14 +1125,130 @@ func yucoreMediaUploadPolicyFor(prefix []byte, declaredMimeType string) (yucoreM
 }
 
 func yucoreMediaHasMPEGFrameSync(prefix []byte) bool {
-	if len(prefix) < 4 || prefix[0] != 0xff || prefix[1]&0xe0 != 0xe0 {
+	return len(prefix) >= 2 && prefix[0] == 0xff && prefix[1]&0xe0 == 0xe0
+}
+
+func yucoreMediaBMFFUploadPolicy(prefix []byte) (yucoreMediaUploadPolicy, bool) {
+	if len(prefix) < 16 || !bytes.Equal(prefix[4:8], []byte("ftyp")) {
+		return yucoreMediaUploadPolicy{}, false
+	}
+	boxSize := int(binary.BigEndian.Uint32(prefix[:4]))
+	if boxSize < 16 || boxSize > yucoreMediaUploadFTYPMaxBytes || boxSize > len(prefix) || (boxSize-16)%4 != 0 {
+		return yucoreMediaUploadPolicy{}, false
+	}
+
+	mimeType := yucoreMediaBMFFBrandMIMEType(string(prefix[8:12]))
+	for offset := 16; offset < boxSize; offset += 4 {
+		compatibleMimeType := yucoreMediaBMFFBrandMIMEType(string(prefix[offset : offset+4]))
+		if compatibleMimeType == "" {
+			continue
+		}
+		if mimeType != "" && mimeType != compatibleMimeType {
+			return yucoreMediaUploadPolicy{}, false
+		}
+		mimeType = compatibleMimeType
+	}
+	switch mimeType {
+	case "video/mp4":
+		return yucoreMediaUploadPolicy{Kind: "video", MIMEType: mimeType, Extension: ".mp4", MaxBytes: maxYucoreMediaVideoUploadBytes}, true
+	case "video/quicktime":
+		return yucoreMediaUploadPolicy{Kind: "video", MIMEType: mimeType, Extension: ".mov", MaxBytes: maxYucoreMediaVideoUploadBytes}, true
+	default:
+		return yucoreMediaUploadPolicy{}, false
+	}
+}
+
+func yucoreMediaBMFFBrandMIMEType(brand string) string {
+	if brand == "qt  " {
+		return "video/quicktime"
+	}
+	switch brand {
+	case "avc1", "iso2", "iso3", "iso4", "iso5", "iso6", "isom", "mp41", "mp42", "M4V ", "MSNV", "dash", "cmfc", "cmfs":
+		return "video/mp4"
+	default:
+		return ""
+	}
+}
+
+func yucoreMediaHasMP3Structure(prefix []byte) bool {
+	audioOffset := 0
+	if bytes.HasPrefix(prefix, []byte("ID3")) {
+		if len(prefix) < 10 {
+			return false
+		}
+		version := prefix[3]
+		if version < 2 || version > 4 || prefix[4] == 0xff {
+			return false
+		}
+		allowedFlags := byte(0xc0)
+		if version == 3 {
+			allowedFlags = 0xe0
+		} else if version == 4 {
+			allowedFlags = 0xf0
+		}
+		if prefix[5]&^allowedFlags != 0 {
+			return false
+		}
+		for _, sizeByte := range prefix[6:10] {
+			if sizeByte&0x80 != 0 {
+				return false
+			}
+		}
+		tagSize := int(prefix[6])<<21 | int(prefix[7])<<14 | int(prefix[8])<<7 | int(prefix[9])
+		audioOffset = 10 + tagSize
+		if version == 4 && prefix[5]&0x10 != 0 {
+			footerEnd := audioOffset + 10
+			if footerEnd > len(prefix) || !bytes.Equal(prefix[audioOffset:audioOffset+3], []byte("3DI")) ||
+				!bytes.Equal(prefix[3:10], prefix[audioOffset+3:footerEnd]) {
+				return false
+			}
+			audioOffset = footerEnd
+		}
+		if audioOffset > len(prefix) {
+			return false
+		}
+	}
+
+	firstFrame, ok := yucoreMediaParseMPEGFrame(prefix[audioOffset:])
+	if !ok || audioOffset+firstFrame.Length >= len(prefix) {
 		return false
 	}
-	versionBits := prefix[1] & 0x18
-	layerBits := prefix[1] & 0x06
-	bitrateBits := prefix[2] & 0xf0
-	sampleRateBits := prefix[2] & 0x0c
-	return versionBits != 0x08 && layerBits != 0 && bitrateBits != 0 && bitrateBits != 0xf0 && sampleRateBits != 0x0c
+	// A lone header or truncated tiny file is not enough to classify arbitrary bytes as MP3.
+	secondFrame, ok := yucoreMediaParseMPEGFrame(prefix[audioOffset+firstFrame.Length:])
+	return ok && firstFrame.VersionBits == secondFrame.VersionBits && firstFrame.LayerBits == secondFrame.LayerBits && firstFrame.SampleRate == secondFrame.SampleRate
+}
+
+func yucoreMediaParseMPEGFrame(data []byte) (yucoreMediaMPEGFrame, bool) {
+	if !yucoreMediaHasMPEGFrameSync(data) || len(data) < 4 {
+		return yucoreMediaMPEGFrame{}, false
+	}
+	versionBits := (data[1] >> 3) & 0x03
+	layerBits := (data[1] >> 1) & 0x03
+	bitrateIndex := (data[2] >> 4) & 0x0f
+	sampleRateIndex := (data[2] >> 2) & 0x03
+	if versionBits == 1 || layerBits != 1 || bitrateIndex == 0 || bitrateIndex == 15 || sampleRateIndex == 3 || data[3]&0x03 == 2 {
+		return yucoreMediaMPEGFrame{}, false
+	}
+
+	mpeg1Bitrates := [...]int{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320}
+	mpeg2Bitrates := [...]int{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160}
+	sampleRates := [...]int{44100, 48000, 32000}
+	bitrate := mpeg2Bitrates[bitrateIndex]
+	sampleRate := sampleRates[sampleRateIndex]
+	coefficient := 72
+	if versionBits == 3 {
+		bitrate = mpeg1Bitrates[bitrateIndex]
+		coefficient = 144
+	} else if versionBits == 2 {
+		sampleRate /= 2
+	} else {
+		sampleRate /= 4
+	}
+	frameLength := coefficient*bitrate*1000/sampleRate + int((data[2]>>1)&0x01)
+	if frameLength < 4 {
+		return yucoreMediaMPEGFrame{}, false
+	}
+	return yucoreMediaMPEGFrame{Length: frameLength, VersionBits: versionBits, LayerBits: layerBits, SampleRate: sampleRate}, true
 }
 
 func storeYucoreMediaUpload(reader io.Reader, finalPath string, maxBytes int64) (written int64, returnErr error) {

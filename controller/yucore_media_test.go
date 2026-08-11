@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -278,6 +279,8 @@ func TestYucoreMediaCanonicalPreservesExistingRequestContracts(t *testing.T) {
 }
 
 func yucoreMediaUploadTestContent() map[string][]byte {
+	mpegFrames := yucoreMediaTestMPEGFrames(2)
+	id3Audio := yucoreMediaTestID3Audio(4, mpegFrames)
 	return map[string][]byte{
 		"image/png":       append([]byte("\x89PNG\r\n\x1a\n"), []byte("payload")...),
 		"image/jpeg":      {0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'},
@@ -285,9 +288,42 @@ func yucoreMediaUploadTestContent() map[string][]byte {
 		"image/gif":       []byte("GIF89a\x01\x00\x01\x00"),
 		"video/mp4":       append([]byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isommp41"), []byte("payload")...),
 		"video/quicktime": append([]byte("\x00\x00\x00\x14ftypqt  \x00\x00\x00\x00qt  "), []byte("payload")...),
-		"audio/mpeg":      append([]byte("ID3\x04\x00\x00\x00\x00\x00\x00"), []byte("payload")...),
+		"audio/mpeg":      id3Audio,
 		"audio/wav":       append([]byte("RIFF\x08\x00\x00\x00WAVE"), []byte("payload")...),
 	}
+}
+
+func yucoreMediaTestMPEGFrames(count int) []byte {
+	return yucoreMediaTestMPEGFramesWithHeader(count, 417, []byte{0xff, 0xfb, 0x90, 0x64})
+}
+
+func yucoreMediaTestMPEGFramesWithHeader(count int, frameLength int, header []byte) []byte {
+	frames := make([]byte, frameLength*count)
+	for index := 0; index < count; index++ {
+		copy(frames[index*frameLength:], header)
+	}
+	return frames
+}
+
+func yucoreMediaTestID3Audio(tagSize int, frames []byte) []byte {
+	header := []byte("ID3\x04\x00\x00\x00\x00\x00\x00")
+	header[6] = byte(tagSize>>21) & 0x7f
+	header[7] = byte(tagSize>>14) & 0x7f
+	header[8] = byte(tagSize>>7) & 0x7f
+	header[9] = byte(tagSize) & 0x7f
+	content := append(header, make([]byte, tagSize)...)
+	return append(content, frames...)
+}
+
+func yucoreMediaTestFTYP(majorBrand string, compatibleBrands ...string) []byte {
+	box := make([]byte, 16+4*len(compatibleBrands))
+	binary.BigEndian.PutUint32(box[:4], uint32(len(box)))
+	copy(box[4:8], "ftyp")
+	copy(box[8:12], majorBrand)
+	for index, brand := range compatibleBrands {
+		copy(box[16+index*4:], brand)
+	}
+	return box
 }
 
 func performYucoreMediaUpload(t *testing.T, uploadRoot string, fileName string, declaredMimeType string, content []byte) *httptest.ResponseRecorder {
@@ -410,12 +446,106 @@ func TestYucoreMediaUploadRejectsUnsafeEmptyAndSpoofedContent(t *testing.T) {
 	}
 }
 
-func TestYucoreMediaUploadAcceptsMPEGFrameSync(t *testing.T) {
-	policy, err := yucoreMediaUploadPolicyFor([]byte{0xff, 0xfb, 0x90, 0x64}, "audio/mpeg")
-	require.NoError(t, err)
-	assert.Equal(t, "audio", policy.Kind)
-	assert.Equal(t, "audio/mpeg", policy.MIMEType)
-	assert.Equal(t, ".mp3", policy.Extension)
+func TestYucoreMediaUploadValidatesMP3Structure(t *testing.T) {
+	validTests := []struct {
+		name    string
+		content []byte
+	}{
+		{name: "ID3 followed by audio", content: yucoreMediaUploadTestContent()["audio/mpeg"]},
+		{name: "two consecutive MPEG frames", content: yucoreMediaTestMPEGFrames(2)},
+	}
+	for _, test := range validTests {
+		t.Run(test.name, func(t *testing.T) {
+			policy, err := yucoreMediaUploadPolicyFor(test.content, "audio/mpeg")
+			require.NoError(t, err)
+			assert.Equal(t, "audio", policy.Kind)
+			assert.Equal(t, "audio/mpeg", policy.MIMEType)
+			assert.Equal(t, ".mp3", policy.Extension)
+		})
+	}
+
+	invalidTests := []struct {
+		name    string
+		content []byte
+	}{
+		{name: "ID3 script prefix", content: []byte("ID3<script>alert(1)</script>")},
+		{name: "truncated ID3 header", content: []byte("ID3\x04\x00")},
+		{name: "invalid ID3 version", content: []byte("ID3\xff\x00\x00\x00\x00\x00\x00")},
+		{name: "invalid synchsafe size", content: []byte("ID3\x04\x00\x00\x80\x00\x00\x00")},
+		{name: "ID3 tag exceeds prefix", content: []byte("ID3\x04\x00\x00\x00\x00\x01\x00payload")},
+		{name: "ID3 without audio", content: []byte("ID3\x04\x00\x00\x00\x00\x00\x04TESTarbitrary")},
+		{name: "single MPEG sync", content: []byte{0xff, 0xfb, 0x90, 0x64}},
+		{name: "one MPEG frame plus arbitrary data", content: append(yucoreMediaTestMPEGFrames(1), []byte("not another frame")...)},
+	}
+	for _, test := range invalidTests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := yucoreMediaUploadPolicyFor(test.content, "audio/mpeg")
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestYucoreMediaUploadAcceptsBoundedLegitimateMP3Prefixes(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+	}{
+		{name: "bounded ID3 tag", content: yucoreMediaTestID3Audio(600, yucoreMediaTestMPEGFrames(2))},
+		{name: "high bitrate frames", content: yucoreMediaTestMPEGFramesWithHeader(2, 1044, []byte{0xff, 0xfb, 0xe0, 0x64})},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := performYucoreMediaUpload(t, t.TempDir(), "reference.mp3", "audio/mpeg", test.content)
+			var response struct {
+				Success bool   `json:"success"`
+				Message string `json:"message"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.True(t, response.Success, response.Message)
+		})
+	}
+}
+
+func TestYucoreMediaUploadValidatesFTYPStructureAndBrands(t *testing.T) {
+	validTests := []struct {
+		name     string
+		content  []byte
+		mimeType string
+	}{
+		{name: "MP4 major brand", content: yucoreMediaTestFTYP("isom", "mp41"), mimeType: "video/mp4"},
+		{name: "MOV major brand", content: yucoreMediaTestFTYP("qt  ", "qt  "), mimeType: "video/quicktime"},
+		{name: "MP4 compatible brand", content: yucoreMediaTestFTYP("zzzz", "isom"), mimeType: "video/mp4"},
+		{name: "MOV compatible brand", content: yucoreMediaTestFTYP("zzzz", "qt  "), mimeType: "video/quicktime"},
+	}
+	for _, test := range validTests {
+		t.Run(test.name, func(t *testing.T) {
+			policy, err := yucoreMediaUploadPolicyFor(test.content, test.mimeType)
+			require.NoError(t, err)
+			assert.Equal(t, test.mimeType, policy.MIMEType)
+		})
+	}
+
+	const ftypSniffLimit = 512
+	oversizedBox := make([]byte, ftypSniffLimit)
+	binary.BigEndian.PutUint32(oversizedBox[:4], uint32(ftypSniffLimit+4))
+	copy(oversizedBox[4:8], "ftyp")
+	copy(oversizedBox[8:12], "isom")
+	invalidTests := []struct {
+		name    string
+		content []byte
+	}{
+		{name: "twelve byte box", content: []byte("\x00\x00\x00\x0cftypisom")},
+		{name: "truncated box", content: []byte("\x00\x00\x00\x18ftypisom\x00\x00\x00\x00")},
+		{name: "oversized box", content: oversizedBox},
+		{name: "misaligned compatible brands", content: []byte("\x00\x00\x00\x11ftypisom\x00\x00\x00\x00x")},
+		{name: "unknown brands", content: yucoreMediaTestFTYP("zzzz", "yyyy")},
+	}
+	for _, test := range invalidTests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := yucoreMediaUploadPolicyFor(test.content, "video/mp4")
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestYucoreMediaUploadSizePolicyAndCleanup(t *testing.T) {
