@@ -80,18 +80,26 @@ func (YucoreMediaAssets) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
 }
 
 type YucoreMediaAsset struct {
-	Id         string         `json:"id"`
-	Kind       string         `json:"kind"`
-	Url        string         `json:"url"`
-	ThumbUrl   string         `json:"thumb_url,omitempty"`
-	CachedUrl  string         `json:"cached_url,omitempty"`
-	SourceUrl  string         `json:"source_url,omitempty"`
-	Label      string         `json:"label"`
-	Width      int            `json:"width,omitempty"`
-	Height     int            `json:"height,omitempty"`
-	DurationMs int            `json:"duration_ms,omitempty"`
-	MimeType   string         `json:"mime_type,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
+	Id             string         `json:"id"`
+	Kind           string         `json:"kind"`
+	Url            string         `json:"url"`
+	ThumbUrl       string         `json:"thumb_url,omitempty"`
+	CachedUrl      string         `json:"-"`
+	SourceUrl      string         `json:"-"`
+	SourceThumbUrl string         `json:"-"`
+	Label          string         `json:"label"`
+	Width          int            `json:"width,omitempty"`
+	Height         int            `json:"height,omitempty"`
+	DurationMs     int            `json:"duration_ms,omitempty"`
+	MimeType       string         `json:"mime_type,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+}
+
+type yucoreMediaPersistedAsset struct {
+	YucoreMediaAsset
+	CachedUrl      string `json:"cached_url,omitempty"`
+	SourceUrl      string `json:"source_url,omitempty"`
+	SourceThumbUrl string `json:"source_thumb_url,omitempty"`
 }
 
 type openAICompatibleImageResponse struct {
@@ -774,14 +782,35 @@ func buildYucoreMediaAssets(task *YucoreMediaTask) []YucoreMediaAsset {
 }
 
 func YucoreMediaTaskAssets(task *YucoreMediaTask) []YucoreMediaAsset {
-	var assets []YucoreMediaAsset
 	if task == nil || task.Assets == "" {
-		return assets
+		return nil
 	}
-	if err := common.Unmarshal([]byte(task.Assets), &assets); err != nil {
+	var persistedAssets []yucoreMediaPersistedAsset
+	if err := common.Unmarshal([]byte(task.Assets), &persistedAssets); err != nil {
 		return []YucoreMediaAsset{}
 	}
+	assets := make([]YucoreMediaAsset, 0, len(persistedAssets))
+	for _, persistedAsset := range persistedAssets {
+		asset := persistedAsset.YucoreMediaAsset
+		asset.CachedUrl = persistedAsset.CachedUrl
+		asset.SourceUrl = persistedAsset.SourceUrl
+		asset.SourceThumbUrl = persistedAsset.SourceThumbUrl
+		assets = append(assets, asset)
+	}
 	return assets
+}
+
+func marshalYucoreMediaAssets(assets []YucoreMediaAsset) ([]byte, error) {
+	persistedAssets := make([]yucoreMediaPersistedAsset, 0, len(assets))
+	for _, asset := range assets {
+		persistedAssets = append(persistedAssets, yucoreMediaPersistedAsset{
+			YucoreMediaAsset: asset,
+			CachedUrl:        asset.CachedUrl,
+			SourceUrl:        asset.SourceUrl,
+			SourceThumbUrl:   asset.SourceThumbUrl,
+		})
+	}
+	return common.Marshal(persistedAssets)
 }
 
 func YucoreMediaAssetSource(asset YucoreMediaAsset) string {
@@ -865,7 +894,7 @@ func optionalYucoreMediaRawQuery(parsed *url.URL) string {
 
 func settleYucoreMediaTaskWithAssets(task *YucoreMediaTask, assets []YucoreMediaAsset) error {
 	now := common.GetTimestamp()
-	rawAssets, _ := common.Marshal(assets)
+	rawAssets, _ := marshalYucoreMediaAssets(assets)
 	task.Status = YucoreMediaTaskStatusCompleted
 	task.Progress = 100
 	task.Assets = YucoreMediaAssets(rawAssets)
@@ -1685,7 +1714,7 @@ func uagProxyHistoryTask(row map[string]any, userId int) (*YucoreMediaTask, bool
 		task.Cost = yucoreMediaIntValue(row["cost"])
 	}
 	assets := buildUAGProxyHistoryAssets(task, row)
-	rawAssets, _ := common.Marshal(assets)
+	rawAssets, _ := marshalYucoreMediaAssets(assets)
 	task.Assets = YucoreMediaAssets(rawAssets)
 	task.Metadata = mergeYucoreMediaMetadata(task.Metadata, map[string]any{
 		"adapter":          YucoreMediaAdapterUAGProxy,

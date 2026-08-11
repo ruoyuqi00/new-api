@@ -769,7 +769,8 @@ func TestOpenAICompatibleTaskPollsAcceptedIDOnly(t *testing.T) {
 	assets := YucoreMediaTaskAssets(task)
 	require.Len(t, assets, 1)
 	assert.Equal(t, "media/results/final clip.mp4", assets[0].SourceUrl)
-	assert.Equal(t, "media/thumbs/final.jpg", assets[0].ThumbUrl)
+	assert.Equal(t, "media/thumbs/final.jpg", assets[0].SourceThumbUrl)
+	assert.Equal(t, "/api/yucore/media/tasks/"+task.TaskId+"/assets/0", assets[0].ThumbUrl)
 	assert.Equal(t, "video/webm", assets[0].MimeType)
 	assert.Equal(t, 4321, assets[0].DurationMs)
 	assert.Equal(t, 1280, assets[0].Width)
@@ -787,6 +788,71 @@ func TestOpenAICompatibleTaskPollsAcceptedIDOnly(t *testing.T) {
 	for _, requestedPath := range getPaths {
 		assert.False(t, strings.Contains(requestedPath, "noisy"))
 	}
+}
+
+func TestOpenAICompatibleTaskPollsNestedRoutedAcceptedID(t *testing.T) {
+	require.NoError(t, DB.AutoMigrate(&Task{}, &YucoreMediaTask{}))
+	routedTask := &Task{
+		TaskID:    "accepted_public_id",
+		UserId:    84,
+		CreatedAt: common.GetTimestamp(),
+		Properties: Properties{
+			OriginModelName: "routed-video-model",
+		},
+		PrivateData: TaskPrivateData{UpstreamTaskID: "provider_private_id"},
+	}
+	require.NoError(t, DB.Create(routedTask).Error)
+	t.Cleanup(func() { DB.Unscoped().Delete(routedTask) })
+
+	postCount := 0
+	getPaths := make([]string, 0, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			postCount++
+			_, _ = w.Write([]byte(`{"data":{"task":{"task_id":"provider_private_id","status":"queued"}},"task_id":"noisy_top_level_id"}`))
+			return
+		}
+		getPaths = append(getPaths, r.URL.EscapedPath())
+		_, _ = w.Write([]byte(`{"data":{"task":{"task_id":"noisy_poll_id","status":"running","progress":40}}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	task := &YucoreMediaTask{
+		TaskId:      fmt.Sprintf("yu_routed_poll_%d", time.Now().UnixNano()),
+		UserId:      84,
+		Kind:        "video",
+		ModelId:     "routed-video-model",
+		Prompt:      "animate",
+		Status:      YucoreMediaTaskStatusProcessing,
+		Metadata:    `{"adapter":"yuapi-channel"}`,
+		CreatedTime: common.GetTimestamp(),
+		UpdatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(task).Error)
+	t.Cleanup(func() { DB.Unscoped().Delete(task) })
+	config := yucoreMediaAdapterConfig{
+		BaseURL: server.URL, APIKey: "test-key", TimeoutSeconds: 5,
+		ModelCapabilities: map[string]YucoreMediaModelCapability{
+			"routed-video-model": {
+				Transport: yucoreMediaTransportAsyncTask, CreatePath: "/v1/videos",
+				StatusPath: "/v1/videos/{task_id}", PollIntervalSeconds: 1,
+			},
+		},
+	}
+	capability := yucoreMediaCapabilityForTask(task, config)
+	require.NoError(t, runOpenAICompatibleAsyncTask(task, config, capability))
+	metadata := yucoreMediaMetadataMap(task.Metadata)
+	assert.Equal(t, "accepted_public_id", metadata["upstream_task_id"])
+	assert.Equal(t, "provider_private_id", metadata["provider_task_id"])
+
+	task.Metadata = mergeYucoreMediaMetadata(task.Metadata, map[string]any{"last_status_at": 0})
+	require.NoError(t, refreshOpenAICompatibleYucoreTask(task, config))
+	metadata = yucoreMediaMetadataMap(task.Metadata)
+	assert.Equal(t, "accepted_public_id", metadata["upstream_task_id"])
+	assert.Equal(t, "provider_private_id", metadata["provider_task_id"])
+	assert.Equal(t, 1, postCount)
+	assert.Equal(t, []string{"/v1/videos/accepted_public_id"}, getPaths)
 }
 
 func TestOpenAICompatibleTaskResultMetadata(t *testing.T) {
@@ -811,42 +877,121 @@ func TestOpenAICompatibleTaskResultMetadata(t *testing.T) {
 					},
 				}},
 			}}},
-			want:       YucoreMediaAsset{SourceUrl: "relative/videos/final.mp4", ThumbUrl: "relative/thumbs/final.jpg", DurationMs: 6100, Width: 1920, Height: 1080, MimeType: "video/mp4"},
+			want:       YucoreMediaAsset{SourceUrl: "relative/videos/final.mp4", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0", DurationMs: 6100, Width: 1920, Height: 1080, MimeType: "video/mp4"},
 			wantStatus: "succeeded",
 		},
 		{
 			name: "nested content URL and camel case metadata",
 			payload: map[string]any{"data": map[string]any{"task": map[string]any{
 				"state": "completed",
-				"result": map[string]any{"content": map[string]any{
-					"url":          "/v1/videos/provider-task/content",
+				"result": map[string]any{
 					"thumbnailUrl": "/v1/videos/provider-task/thumbnail",
 					"durationMs":   float64(4321),
 					"width":        "1280",
 					"height":       "720",
 					"contentType":  "video/webm",
-				}},
+					"content": map[string]any{
+						"url": "/v1/videos/provider-task/content",
+					},
+				},
 			}}},
-			want:       YucoreMediaAsset{SourceUrl: "/v1/videos/provider-task/content", ThumbUrl: "/v1/videos/provider-task/thumbnail", DurationMs: 4321, Width: 1280, Height: 720, MimeType: "video/webm"},
+			want:       YucoreMediaAsset{SourceUrl: "/v1/videos/provider-task/content", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0", DurationMs: 4321, Width: 1280, Height: 720, MimeType: "video/webm"},
 			wantStatus: "completed",
+		},
+		{
+			name: "multiple nested content results keep enclosing metadata",
+			payload: map[string]any{"data": map[string]any{"task": map[string]any{
+				"status": "succeeded",
+				"results": []any{
+					map[string]any{"thumbnail_url": "signed/thumb-one", "mime_type": "video/mp4", "duration_ms": 1001, "width": 640, "height": 360, "content": map[string]any{"url": "signed/video-one"}},
+					map[string]any{"thumbnail_url": "signed/thumb-two", "mime_type": "video/webm", "duration_ms": 2002, "width": 1280, "height": 720, "content": map[string]any{"url": "signed/video-two"}},
+					map[string]any{"thumbnail_url": "signed/duplicate-thumb", "mime_type": "video/duplicate", "duration_ms": 9999, "content": map[string]any{"url": "signed/video-one"}},
+				},
+			}}},
+			want:       YucoreMediaAsset{SourceUrl: "signed/video-one", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0", DurationMs: 1001, Width: 640, Height: 360, MimeType: "video/mp4"},
+			wantStatus: "succeeded",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			task := &YucoreMediaTask{TaskId: "yu_result", Kind: "video", ModelId: "video-model"}
+			before, err := common.Marshal(tt.payload)
+			require.NoError(t, err)
 			assets := buildOpenAICompatibleTaskAssets(task, tt.payload)
-			require.Len(t, assets, 1)
+			wantLen := 1
+			if tt.name == "multiple nested content results keep enclosing metadata" {
+				wantLen = 2
+			}
+			require.Len(t, assets, wantLen)
 			assert.Equal(t, "/api/yucore/media/tasks/yu_result/assets/0", assets[0].Url)
 			assert.Equal(t, tt.want.SourceUrl, assets[0].SourceUrl)
+			if tt.name == "nested video result aliases" {
+				assert.Equal(t, "relative/thumbs/final.jpg", assets[0].SourceThumbUrl)
+			}
+			if tt.name == "nested content URL and camel case metadata" {
+				assert.Equal(t, "/v1/videos/provider-task/thumbnail", assets[0].SourceThumbUrl)
+			}
 			assert.Equal(t, tt.want.ThumbUrl, assets[0].ThumbUrl)
 			assert.Equal(t, tt.want.DurationMs, assets[0].DurationMs)
 			assert.Equal(t, tt.want.Width, assets[0].Width)
 			assert.Equal(t, tt.want.Height, assets[0].Height)
 			assert.Equal(t, tt.want.MimeType, assets[0].MimeType)
 			assert.Equal(t, tt.wantStatus, assets[0].Metadata["upstream_status"])
+			after, err := common.Marshal(tt.payload)
+			require.NoError(t, err)
+			assert.Equal(t, string(before), string(after))
+			if wantLen == 2 {
+				assert.Equal(t, "signed/thumb-one", assets[0].SourceThumbUrl)
+				assert.Equal(t, "signed/video-two", assets[1].SourceUrl)
+				assert.Equal(t, "signed/thumb-two", assets[1].SourceThumbUrl)
+				assert.Equal(t, "/api/yucore/media/tasks/yu_result/assets/1", assets[1].ThumbUrl)
+				assert.Equal(t, 2002, assets[1].DurationMs)
+				assert.Equal(t, 1280, assets[1].Width)
+				assert.Equal(t, 720, assets[1].Height)
+				assert.Equal(t, "video/webm", assets[1].MimeType)
+			}
 		})
 	}
+}
+
+func TestOpenAICompatibleTaskSerializationKeepsSourcesInternal(t *testing.T) {
+	task := &YucoreMediaTask{TaskId: "yu_private_sources", Kind: "video", ModelId: "video-model"}
+	payload := map[string]any{"status": "succeeded", "result": map[string]any{
+		"thumbnail_url": "https://signed.example/private-thumb.jpg?token=secret-thumb",
+		"url":           "https://signed.example/private-video.mp4?token=secret-content",
+	}}
+	assets := buildOpenAICompatibleTaskAssets(task, payload)
+	require.Len(t, assets, 1)
+	assets[0].CachedUrl = "https://signed.example/private-cache.mp4?token=secret-cache"
+	responseJSON, err := common.Marshal(map[string]any{"assets": assets})
+	require.NoError(t, err)
+	serialized := string(responseJSON)
+	assert.NotContains(t, serialized, "signed.example")
+	assert.NotContains(t, serialized, "secret-content")
+	assert.NotContains(t, serialized, "secret-thumb")
+	assert.NotContains(t, serialized, "secret-cache")
+	assert.NotContains(t, serialized, "source_url")
+	assert.Contains(t, serialized, `"url":"/api/yucore/media/tasks/yu_private_sources/assets/0"`)
+	assert.Contains(t, serialized, `"thumb_url":"/api/yucore/media/tasks/yu_private_sources/assets/0"`)
+}
+
+func TestOpenAICompatibleTaskResultMetadataKeepsNestedURLDistinct(t *testing.T) {
+	task := &YucoreMediaTask{TaskId: "yu_nested_urls", Kind: "video", ModelId: "video-model"}
+	payload := map[string]any{"status": "succeeded", "result": map[string]any{
+		"video_url":   "relative/parent.mp4",
+		"duration_ms": 1000,
+		"content": map[string]any{
+			"url":         "relative/nested.mp4",
+			"duration_ms": 2000,
+		},
+	}}
+	assets := buildOpenAICompatibleTaskAssets(task, payload)
+	require.Len(t, assets, 2)
+	assert.Equal(t, "relative/parent.mp4", assets[0].SourceUrl)
+	assert.Equal(t, 1000, assets[0].DurationMs)
+	assert.Equal(t, "relative/nested.mp4", assets[1].SourceUrl)
+	assert.Equal(t, 2000, assets[1].DurationMs)
 }
 
 func TestYucoreMediaRunnableAdapters(t *testing.T) {

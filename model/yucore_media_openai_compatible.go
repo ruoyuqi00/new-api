@@ -497,35 +497,64 @@ func appendOpenAICompatibleResultURL(urls []string, seen map[string]struct{}, va
 	return append(urls, resultURL)
 }
 
-func collectOpenAICompatibleResultRows(resultRows []map[string]any, row map[string]any, depth int) []map[string]any {
+func mergeOpenAICompatibleResultRow(inherited map[string]any, row map[string]any) map[string]any {
+	merged := make(map[string]any, len(inherited)+len(row))
+	for key, value := range inherited {
+		switch key {
+		case "video_url", "videoUrl", "image_url", "imageUrl", "content_url", "contentUrl", "url",
+			"result", "content", "output", "outputs", "results", "images", "videos":
+			continue
+		}
+		merged[key] = value
+	}
+	for key, value := range row {
+		if key != "metadata" {
+			merged[key] = value
+		}
+	}
+	metadata := map[string]any{}
+	for key, value := range yucoreMediaMapValue(inherited["metadata"]) {
+		metadata[key] = value
+	}
+	for key, value := range yucoreMediaMapValue(row["metadata"]) {
+		metadata[key] = value
+	}
+	if len(metadata) > 0 {
+		merged["metadata"] = metadata
+	}
+	return merged
+}
+
+func collectOpenAICompatibleResultRows(resultRows []map[string]any, inherited map[string]any, row map[string]any, depth int) []map[string]any {
 	if row == nil || depth > 4 {
 		return resultRows
 	}
-	if yucoreMediaFirstString(row, "video_url", "videoUrl", "image_url", "imageUrl", "content_url", "contentUrl", "url") != "" {
-		resultRows = append(resultRows, row)
+	mergedRow := mergeOpenAICompatibleResultRow(inherited, row)
+	if yucoreMediaFirstString(mergedRow, "video_url", "videoUrl", "image_url", "imageUrl", "content_url", "contentUrl", "url") != "" {
+		resultRows = append(resultRows, mergedRow)
 	}
 	for _, key := range []string{"result", "content", "output", "outputs", "results", "images", "videos"} {
 		value := row[key]
 		if nested := yucoreMediaMapValue(value); nested != nil {
-			resultRows = collectOpenAICompatibleResultRows(resultRows, nested, depth+1)
+			resultRows = collectOpenAICompatibleResultRows(resultRows, mergedRow, nested, depth+1)
 			continue
 		}
 		for _, item := range yucoreMediaSliceValue(value) {
 			if nested := yucoreMediaMapValue(item); nested != nil {
-				resultRows = collectOpenAICompatibleResultRows(resultRows, nested, depth+1)
+				resultRows = collectOpenAICompatibleResultRows(resultRows, mergedRow, nested, depth+1)
 			} else if resultURL := yucoreMediaStringValue(item); resultURL != "" {
-				resultRows = append(resultRows, map[string]any{"url": resultURL})
+				resultRows = append(resultRows, mergeOpenAICompatibleResultRow(mergedRow, map[string]any{"url": resultURL}))
 			}
 		}
 		if resultURL := yucoreMediaStringValue(value); resultURL != "" {
-			resultRows = append(resultRows, map[string]any{"url": resultURL})
+			resultRows = append(resultRows, mergeOpenAICompatibleResultRow(mergedRow, map[string]any{"url": resultURL}))
 		}
 	}
 	if metadata := yucoreMediaMapValue(row["metadata"]); metadata != nil {
-		resultRows = collectOpenAICompatibleResultRows(resultRows, metadata, depth+1)
+		resultRows = collectOpenAICompatibleResultRows(resultRows, mergedRow, metadata, depth+1)
 		for _, item := range yucoreMediaSliceValue(metadata["result_urls"]) {
 			if resultURL := yucoreMediaStringValue(item); resultURL != "" {
-				resultRows = append(resultRows, map[string]any{"url": resultURL})
+				resultRows = append(resultRows, mergeOpenAICompatibleResultRow(mergedRow, map[string]any{"url": resultURL}))
 			}
 		}
 	}
@@ -543,7 +572,7 @@ func openAICompatibleResultRows(payload map[string]any) []map[string]any {
 	}
 	resultRows := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		resultRows = collectOpenAICompatibleResultRows(resultRows, row, 0)
+		resultRows = collectOpenAICompatibleResultRows(resultRows, nil, row, 0)
 	}
 	return resultRows
 }
@@ -628,10 +657,8 @@ func buildOpenAICompatibleTaskAssets(task *YucoreMediaTask, payload map[string]a
 		if normalizedMimeType := openAICompatibleResultString(resultRow, "mime_type", "mimeType", "content_type", "contentType"); normalizedMimeType != "" {
 			mimeType = normalizedMimeType
 		}
-		thumbnailURL := openAICompatibleResultString(resultRow, "thumbnail_url", "thumbnailUrl", "thumb_url", "thumbUrl")
-		if thumbnailURL == "" {
-			thumbnailURL = fmt.Sprintf("/api/yucore/media/tasks/%s/assets/%d", task.TaskId, index)
-		}
+		assetURL := fmt.Sprintf("/api/yucore/media/tasks/%s/assets/%d", task.TaskId, index)
+		sourceThumbnailURL := openAICompatibleResultString(resultRow, "thumbnail_url", "thumbnailUrl", "thumb_url", "thumbUrl")
 		metadata := map[string]any{
 			"adapter": YucoreMediaAdapterOpenAICompatible,
 		}
@@ -639,17 +666,18 @@ func buildOpenAICompatibleTaskAssets(task *YucoreMediaTask, payload map[string]a
 			metadata["upstream_status"] = upstreamStatus
 		}
 		assets = append(assets, YucoreMediaAsset{
-			Id:         fmt.Sprintf("%s_asset_%d", task.TaskId, index),
-			Kind:       task.Kind,
-			Url:        fmt.Sprintf("/api/yucore/media/tasks/%s/assets/%d", task.TaskId, index),
-			ThumbUrl:   thumbnailURL,
-			SourceUrl:  resultURL,
-			Label:      fmt.Sprintf("%s result %d", task.ModelId, index+1),
-			Width:      openAICompatibleResultInt(resultRow, "width"),
-			Height:     openAICompatibleResultInt(resultRow, "height"),
-			DurationMs: openAICompatibleResultInt(resultRow, "duration_ms", "durationMs"),
-			MimeType:   mimeType,
-			Metadata:   metadata,
+			Id:             fmt.Sprintf("%s_asset_%d", task.TaskId, index),
+			Kind:           task.Kind,
+			Url:            assetURL,
+			ThumbUrl:       assetURL,
+			SourceUrl:      resultURL,
+			SourceThumbUrl: sourceThumbnailURL,
+			Label:          fmt.Sprintf("%s result %d", task.ModelId, index+1),
+			Width:          openAICompatibleResultInt(resultRow, "width"),
+			Height:         openAICompatibleResultInt(resultRow, "height"),
+			DurationMs:     openAICompatibleResultInt(resultRow, "duration_ms", "durationMs"),
+			MimeType:       mimeType,
+			Metadata:       metadata,
 		})
 	}
 	return assets
@@ -669,12 +697,6 @@ func applyOpenAICompatibleTaskPayload(task *YucoreMediaTask, payload map[string]
 		}
 	}
 	task.Metadata = mergeYucoreMediaMetadata(task.Metadata, metadataPatch)
-	if upstreamTaskID := openAICompatibleTaskID(payload); upstreamTaskID != "" {
-		metadata := yucoreMediaMetadataMap(task.Metadata)
-		if yucoreMediaStringValue(metadata["upstream_task_id"]) == "" {
-			task.Metadata = mergeYucoreMediaMetadata(task.Metadata, map[string]any{"upstream_task_id": upstreamTaskID})
-		}
-	}
 	if status == YucoreMediaTaskStatusCompleted {
 		assets := buildOpenAICompatibleTaskAssets(task, payload)
 		if len(assets) == 0 {
@@ -712,14 +734,17 @@ func runOpenAICompatibleAsyncTask(task *YucoreMediaTask, config yucoreMediaAdapt
 	if providerTaskID == "" {
 		return errors.New("YuCore media upstream returned no task ID")
 	}
-	if routedTaskID := yucoreMediaRoutedTaskID(task, providerTaskID); routedTaskID != providerTaskID {
-		task.Metadata = mergeYucoreMediaMetadata(task.Metadata, map[string]any{"provider_task_id": providerTaskID})
-		payload["id"] = routedTaskID
-		payload["task_id"] = routedTaskID
-		if data := yucoreMediaMapValue(payload["data"]); data != nil {
-			data["id"] = routedTaskID
-			data["task_id"] = routedTaskID
-		}
+	acceptedTaskID := yucoreMediaRoutedTaskID(task, providerTaskID)
+	metadata := yucoreMediaMetadataMap(task.Metadata)
+	metadataPatch := map[string]any{}
+	if yucoreMediaStringValue(metadata["upstream_task_id"]) == "" {
+		metadataPatch["upstream_task_id"] = acceptedTaskID
+	}
+	if acceptedTaskID != providerTaskID && yucoreMediaStringValue(metadata["provider_task_id"]) == "" {
+		metadataPatch["provider_task_id"] = providerTaskID
+	}
+	if len(metadataPatch) > 0 {
+		task.Metadata = mergeYucoreMediaMetadata(task.Metadata, metadataPatch)
 	}
 	return applyOpenAICompatibleTaskPayload(task, payload, capability)
 }
