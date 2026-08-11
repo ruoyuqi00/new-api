@@ -352,6 +352,7 @@ func TestYucoreMediaRunnableAdapters(t *testing.T) {
 }
 
 func TestYucoreMediaConfiguredModelIDs(t *testing.T) {
+	t.Setenv("YUCORE_MEDIA_MODEL_CAPABILITIES", "")
 	common.OptionMapRWMutex.Lock()
 	originalOptions := common.OptionMap
 	common.OptionMap = map[string]string{
@@ -369,9 +370,13 @@ func TestYucoreMediaConfiguredModelIDs(t *testing.T) {
 	})
 
 	configured := YucoreMediaConfiguredModelIDs()
-	require.Len(t, configured, 2)
+	require.Len(t, configured, 40)
 	assert.Contains(t, configured, "grok-imagine-image")
 	assert.Contains(t, configured, "gpt-image-2-adobe")
+	assert.Contains(t, configured, "gpt-image-2-2k")
+	assert.Contains(t, configured, "veo-3.1")
+	assert.NotContains(t, configured, "seedance-2.0-mini-8s")
+	assert.NotContains(t, configured, "veo-clean")
 
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap["yucore_media.adapter"] = YucoreMediaAdapterUAGProxy

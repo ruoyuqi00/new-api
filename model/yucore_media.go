@@ -245,9 +245,6 @@ func YucoreMediaConfiguredModelIDs() map[string]struct{} {
 		return nil
 	}
 	capabilities := config.ModelCapabilities
-	if raw := getYucoreMediaOptionString("yucore_media.model_capabilities", "YUCORE_MEDIA_MODEL_CAPABILITIES", ""); raw != "" {
-		capabilities = parseYucoreMediaModelCapabilities(raw)
-	}
 	if len(capabilities) == 0 {
 		return nil
 	}
