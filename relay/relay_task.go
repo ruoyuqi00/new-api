@@ -333,7 +333,10 @@ func classifyTaskSubmissionState(wroteRequest bool, statusCode int, acceptedResp
 		http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests:
 		return dto.TaskSubmissionRejected
 	}
-	if statusCode != 0 || wroteRequest {
+	if statusCode == http.StatusRequestTimeout {
+		return dto.TaskSubmissionAmbiguous
+	}
+	if wroteRequest {
 		return dto.TaskSubmissionAmbiguous
 	}
 	return dto.TaskSubmissionNotSent

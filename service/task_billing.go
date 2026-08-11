@@ -40,7 +40,7 @@ func FinalizeTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, 
 
 	quota := successfulQuota
 	if taskErr != nil {
-		quota = frozenTaskSubmissionQuota(info)
+		quota = FrozenTaskSubmissionQuota(info)
 	}
 	info.PriceData.Quota = quota
 	settleErr := SettleBilling(c, info, quota)
@@ -48,22 +48,26 @@ func FinalizeTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, 
 	return settleErr
 }
 
-func frozenTaskSubmissionQuota(info *relaycommon.RelayInfo) int {
+func FrozenTaskSubmissionQuota(info *relaycommon.RelayInfo) int {
 	if info == nil {
 		return 0
 	}
+	if info.PriceData.FreeModel {
+		return 0
+	}
+	quota := 0
 	if info.Billing != nil {
-		if quota := info.Billing.GetPreConsumedQuota(); quota > 0 || info.PriceData.FreeModel {
-			return quota
+		if preConsumed := info.Billing.GetPreConsumedQuota(); preConsumed > quota {
+			quota = preConsumed
 		}
 	}
-	if info.FinalPreConsumedQuota > 0 {
-		return info.FinalPreConsumedQuota
+	if info.FinalPreConsumedQuota > quota {
+		quota = info.FinalPreConsumedQuota
 	}
-	if !info.PriceData.FreeModel && info.PriceData.Quota > 0 {
-		return info.PriceData.Quota
+	if info.PriceData.Quota > quota {
+		quota = info.PriceData.Quota
 	}
-	return 0
+	return quota
 }
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。

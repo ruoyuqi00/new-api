@@ -31,8 +31,8 @@ func (e *TaskError) WithSubmissionState(state TaskSubmissionState) *TaskError {
 }
 
 func (e *TaskError) SubmissionState() TaskSubmissionState {
-	if e == nil {
-		return ""
+	if e == nil || e.submissionState == "" {
+		return TaskSubmissionNotSent
 	}
 	return e.submissionState
 }

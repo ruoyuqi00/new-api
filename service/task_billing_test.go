@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +58,24 @@ func TestTaskSubmissionRefundability(t *testing.T) {
 			assert.Equal(t, tt.want, ShouldRefundTaskSubmission(taskErr))
 		})
 	}
+}
+
+func TestTaskErrorSubmissionStateDefaultsAndOverrides(t *testing.T) {
+	var nilTaskErr *dto.TaskError
+	assert.Equal(t, dto.TaskSubmissionNotSent, nilTaskErr.SubmissionState())
+	assert.False(t, ShouldRefundTaskSubmission(nilTaskErr))
+
+	direct := &dto.TaskError{LocalError: true}
+	assert.Equal(t, dto.TaskSubmissionNotSent, direct.SubmissionState())
+	assert.True(t, ShouldRefundTaskSubmission(direct))
+	assert.Equal(t, dto.TaskSubmissionAccepted, direct.WithSubmissionState(dto.TaskSubmissionAccepted).SubmissionState())
+
+	wrapped := TaskErrorWrapper(errors.New("local failure"), "local_failure", http.StatusInternalServerError)
+	assert.Equal(t, dto.TaskSubmissionNotSent, wrapped.SubmissionState())
+	local := TaskErrorWrapperLocal(errors.New("controller failure"), "controller_failure", http.StatusBadRequest)
+	assert.Equal(t, dto.TaskSubmissionNotSent, local.SubmissionState())
+	fromAPI := TaskErrorFromAPIError(types.NewErrorWithStatusCode(errors.New("preconsume failure"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError))
+	assert.Equal(t, dto.TaskSubmissionNotSent, fromAPI.SubmissionState())
 }
 
 func TestTaskSubmissionStateDoesNotLeakThroughJSON(t *testing.T) {
@@ -123,8 +142,23 @@ func TestFrozenTaskSubmissionQuotaNeverRetainsZeroForPaidSubmission(t *testing.T
 	}{
 		{
 			name: "billing session reservation",
-			info: &relaycommon.RelayInfo{Billing: &recordingTaskBillingSettler{preConsumed: 300_000}, PriceData: types.PriceData{Quota: 999_999}},
+			info: &relaycommon.RelayInfo{Billing: &recordingTaskBillingSettler{preConsumed: 300_000}, PriceData: types.PriceData{Quota: 100}},
 			want: 300_000,
+		},
+		{
+			name: "below cost session reservation",
+			info: &relaycommon.RelayInfo{Billing: &recordingTaskBillingSettler{preConsumed: 1}, FinalPreConsumedQuota: 2, PriceData: types.PriceData{Quota: 300_000}},
+			want: 300_000,
+		},
+		{
+			name: "negative values are ignored",
+			info: &relaycommon.RelayInfo{Billing: &recordingTaskBillingSettler{preConsumed: -3}, FinalPreConsumedQuota: -2, PriceData: types.PriceData{Quota: -1}},
+			want: 0,
+		},
+		{
+			name: "maximum integer is preserved",
+			info: &relaycommon.RelayInfo{Billing: &recordingTaskBillingSettler{preConsumed: math.MaxInt}, PriceData: types.PriceData{Quota: 300_000}},
+			want: math.MaxInt,
 		},
 		{
 			name: "legacy frozen reservation",
@@ -144,7 +178,7 @@ func TestFrozenTaskSubmissionQuotaNeverRetainsZeroForPaidSubmission(t *testing.T
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, frozenTaskSubmissionQuota(tt.info))
+			assert.Equal(t, tt.want, FrozenTaskSubmissionQuota(tt.info))
 		})
 	}
 }

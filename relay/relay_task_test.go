@@ -72,6 +72,8 @@ func TestTaskSubmissionClassification(t *testing.T) {
 		{name: "explicit rejection", wrote: true, statusCode: http.StatusUnprocessableEntity, want: dto.TaskSubmissionRejected},
 		{name: "timeout after write", wrote: true, statusCode: http.StatusRequestTimeout, want: dto.TaskSubmissionAmbiguous},
 		{name: "server error after write", wrote: true, statusCode: http.StatusBadGateway, want: dto.TaskSubmissionAmbiguous},
+		{name: "server error before write", statusCode: http.StatusBadGateway, want: dto.TaskSubmissionNotSent},
+		{name: "request timeout is ambiguous without trace", statusCode: http.StatusRequestTimeout, want: dto.TaskSubmissionAmbiguous},
 		{name: "unparseable success", wrote: true, statusCode: http.StatusOK, accepted: true, want: dto.TaskSubmissionAccepted},
 		{name: "unspecified response after write", wrote: true, statusCode: http.StatusTeapot, want: dto.TaskSubmissionAmbiguous},
 	}

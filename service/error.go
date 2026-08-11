@@ -214,7 +214,7 @@ func TaskErrorWrapper(err error, code string, statusCode int) *dto.TaskError {
 		Error:      err,
 	}
 
-	return taskError
+	return taskError.WithSubmissionState(dto.TaskSubmissionNotSent)
 }
 
 // TaskErrorFromAPIError 将 PreConsumeBilling 返回的 NewAPIError 转换为 TaskError。
@@ -222,10 +222,10 @@ func TaskErrorFromAPIError(apiErr *types.NewAPIError) *dto.TaskError {
 	if apiErr == nil {
 		return nil
 	}
-	return &dto.TaskError{
+	return (&dto.TaskError{
 		Code:       string(apiErr.GetErrorCode()),
 		Message:    apiErr.Err.Error(),
 		StatusCode: apiErr.StatusCode,
 		Error:      apiErr.Err,
-	}
+	}).WithSubmissionState(dto.TaskSubmissionNotSent)
 }
