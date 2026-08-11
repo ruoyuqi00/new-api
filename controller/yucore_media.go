@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,12 +28,25 @@ import (
 )
 
 const (
-	maxYucoreMediaPromptLength   = 6000
-	maxYucoreMediaMetadataBytes  = 256 * 1024
-	maxYucoreMediaInputsBytes    = 512 * 1024
-	maxYucoreMediaSessionIdRunes = 96
-	maxYucoreMediaUploadBytes    = 25 << 20
+	maxYucoreMediaPromptLength             = 6000
+	maxYucoreMediaMetadataBytes            = 256 * 1024
+	maxYucoreMediaInputsBytes              = 512 * 1024
+	maxYucoreMediaSessionIdRunes           = 96
+	maxYucoreMediaImageUploadBytes   int64 = 25 << 20
+	maxYucoreMediaAudioUploadBytes   int64 = 25 << 20
+	maxYucoreMediaVideoUploadBytes   int64 = 100 << 20
+	yucoreMediaUploadRequestMaxBytes int64 = maxYucoreMediaVideoUploadBytes + (1 << 20)
+	yucoreMediaUploadSniffBytes            = 512
 )
+
+var errYucoreMediaUploadTooLarge = errors.New("reference upload exceeds the allowed size")
+
+type yucoreMediaUploadPolicy struct {
+	Kind      string
+	MIMEType  string
+	Extension string
+	MaxBytes  int64
+}
 
 type yucoreMediaTaskRequest struct {
 	Group          string          `json:"group"`
@@ -1062,28 +1077,99 @@ func yucoreMediaUploadRoot() string {
 	return filepath.Join("data", "yucore-media", "uploads")
 }
 
-func yucoreMediaUploadExtension(mimeType string, fileName string) string {
-	switch strings.ToLower(strings.TrimSpace(mimeType)) {
-	case "image/jpeg", "image/jpg":
-		return ".jpg"
-	case "image/png":
-		return ".png"
-	case "image/webp":
-		return ".webp"
-	case "image/gif":
-		return ".gif"
-	case "image/avif":
-		return ".avif"
-	case "image/svg+xml":
-		return ".svg"
+func yucoreMediaUploadPolicyFor(prefix []byte, declaredMimeType string) (yucoreMediaUploadPolicy, error) {
+	var policy yucoreMediaUploadPolicy
+	switch {
+	case bytes.HasPrefix(prefix, []byte("\x89PNG\r\n\x1a\n")):
+		policy = yucoreMediaUploadPolicy{Kind: "image", MIMEType: "image/png", Extension: ".png", MaxBytes: maxYucoreMediaImageUploadBytes}
+	case len(prefix) >= 3 && prefix[0] == 0xff && prefix[1] == 0xd8 && prefix[2] == 0xff:
+		policy = yucoreMediaUploadPolicy{Kind: "image", MIMEType: "image/jpeg", Extension: ".jpg", MaxBytes: maxYucoreMediaImageUploadBytes}
+	case len(prefix) >= 12 && bytes.Equal(prefix[:4], []byte("RIFF")) && bytes.Equal(prefix[8:12], []byte("WEBP")):
+		policy = yucoreMediaUploadPolicy{Kind: "image", MIMEType: "image/webp", Extension: ".webp", MaxBytes: maxYucoreMediaImageUploadBytes}
+	case bytes.HasPrefix(prefix, []byte("GIF87a")) || bytes.HasPrefix(prefix, []byte("GIF89a")):
+		policy = yucoreMediaUploadPolicy{Kind: "image", MIMEType: "image/gif", Extension: ".gif", MaxBytes: maxYucoreMediaImageUploadBytes}
+	case len(prefix) >= 12 && binary.BigEndian.Uint32(prefix[:4]) >= 12 && bytes.Equal(prefix[4:8], []byte("ftyp")):
+		brand := string(prefix[8:12])
+		if brand == "qt  " {
+			policy = yucoreMediaUploadPolicy{Kind: "video", MIMEType: "video/quicktime", Extension: ".mov", MaxBytes: maxYucoreMediaVideoUploadBytes}
+			break
+		}
+		switch brand {
+		case "avc1", "iso2", "iso3", "iso4", "iso5", "iso6", "isom", "mp41", "mp42", "M4V ", "MSNV", "dash", "cmfc", "cmfs":
+			policy = yucoreMediaUploadPolicy{Kind: "video", MIMEType: "video/mp4", Extension: ".mp4", MaxBytes: maxYucoreMediaVideoUploadBytes}
+		}
+	case bytes.HasPrefix(prefix, []byte("ID3")) || yucoreMediaHasMPEGFrameSync(prefix):
+		policy = yucoreMediaUploadPolicy{Kind: "audio", MIMEType: "audio/mpeg", Extension: ".mp3", MaxBytes: maxYucoreMediaAudioUploadBytes}
+	case len(prefix) >= 12 && bytes.Equal(prefix[:4], []byte("RIFF")) && bytes.Equal(prefix[8:12], []byte("WAVE")):
+		policy = yucoreMediaUploadPolicy{Kind: "audio", MIMEType: "audio/wav", Extension: ".wav", MaxBytes: maxYucoreMediaAudioUploadBytes}
 	}
-	extension := strings.ToLower(filepath.Ext(fileName))
-	switch extension {
-	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".svg":
-		return extension
-	default:
-		return ".img"
+	if policy.MIMEType == "" {
+		return yucoreMediaUploadPolicy{}, errors.New("reference upload uses an unsupported media format")
 	}
+
+	declaredMimeType = strings.ToLower(strings.TrimSpace(strings.Split(declaredMimeType, ";")[0]))
+	switch declaredMimeType {
+	case "", "application/octet-stream":
+		return policy, nil
+	case "image/jpg":
+		declaredMimeType = "image/jpeg"
+	case "audio/x-wav":
+		declaredMimeType = "audio/wav"
+	}
+	if declaredMimeType != policy.MIMEType {
+		return yucoreMediaUploadPolicy{}, errors.New("reference upload content does not match its declared media type")
+	}
+	return policy, nil
+}
+
+func yucoreMediaHasMPEGFrameSync(prefix []byte) bool {
+	if len(prefix) < 4 || prefix[0] != 0xff || prefix[1]&0xe0 != 0xe0 {
+		return false
+	}
+	versionBits := prefix[1] & 0x18
+	layerBits := prefix[1] & 0x06
+	bitrateBits := prefix[2] & 0xf0
+	sampleRateBits := prefix[2] & 0x0c
+	return versionBits != 0x08 && layerBits != 0 && bitrateBits != 0 && bitrateBits != 0xf0 && sampleRateBits != 0x0c
+}
+
+func storeYucoreMediaUpload(reader io.Reader, finalPath string, maxBytes int64) (written int64, returnErr error) {
+	ownerDir := filepath.Dir(finalPath)
+	if err := os.MkdirAll(ownerDir, 0o700); err != nil {
+		return 0, err
+	}
+	if err := os.Chmod(ownerDir, 0o700); err != nil {
+		return 0, err
+	}
+	tempFile, err := os.CreateTemp(ownerDir, ".yucore-media-*.part")
+	if err != nil {
+		return 0, err
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = tempFile.Close()
+		if returnErr != nil {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := tempFile.Chmod(0o600); err != nil {
+		return 0, err
+	}
+
+	written, err = io.Copy(tempFile, io.LimitReader(reader, maxBytes+1))
+	if err != nil {
+		return written, err
+	}
+	if written > maxBytes {
+		return written, errYucoreMediaUploadTooLarge
+	}
+	if err := tempFile.Close(); err != nil {
+		return written, err
+	}
+	if err := os.Rename(tempPath, finalPath); err != nil {
+		return written, err
+	}
+	return written, nil
 }
 
 func yucoreMediaUploadSignature(userId int, fileName string) string {
@@ -1141,14 +1227,17 @@ func yucoreMediaSafeUploadPath(userId int, fileName string) (string, error) {
 }
 
 func UploadYucoreMediaReference(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxYucoreMediaUploadBytes+(1<<20))
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, yucoreMediaUploadRequestMaxBytes)
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if fileHeader.Size > maxYucoreMediaUploadBytes {
-		common.ApiErrorMsg(c, "reference image must be 25MB or smaller")
+	if c.Request.MultipartForm != nil {
+		defer c.Request.MultipartForm.RemoveAll()
+	}
+	if fileHeader.Size <= 0 {
+		common.ApiErrorMsg(c, "reference upload is empty")
 		return
 	}
 	file, err := fileHeader.Open()
@@ -1158,32 +1247,21 @@ func UploadYucoreMediaReference(c *gin.Context) {
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, maxYucoreMediaUploadBytes+1))
-	if err != nil {
+	prefix := make([]byte, yucoreMediaUploadSniffBytes)
+	prefixLength, err := io.ReadFull(file, prefix)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		common.ApiError(c, err)
 		return
 	}
-	if len(data) == 0 {
-		common.ApiErrorMsg(c, "reference image is empty")
+	prefix = prefix[:prefixLength]
+	policy, err := yucoreMediaUploadPolicyFor(prefix, fileHeader.Header.Get("Content-Type"))
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
 		return
 	}
-	if len(data) > maxYucoreMediaUploadBytes {
-		common.ApiErrorMsg(c, "reference image must be 25MB or smaller")
+	if fileHeader.Size > policy.MaxBytes {
+		common.ApiErrorMsg(c, fmt.Sprintf("reference %s must be %dMB or smaller", policy.Kind, policy.MaxBytes>>20))
 		return
-	}
-
-	declaredMimeType := strings.ToLower(strings.TrimSpace(fileHeader.Header.Get("Content-Type")))
-	detectedMimeType := strings.ToLower(strings.TrimSpace(http.DetectContentType(data)))
-	mimeType := declaredMimeType
-	if !strings.HasPrefix(mimeType, "image/") {
-		mimeType = detectedMimeType
-	}
-	if !strings.HasPrefix(mimeType, "image/") {
-		common.ApiErrorMsg(c, "reference upload only accepts image files")
-		return
-	}
-	if strings.Contains(mimeType, ";") {
-		mimeType = strings.TrimSpace(strings.Split(mimeType, ";")[0])
 	}
 
 	name := strings.TrimSpace(path.Base(strings.ReplaceAll(fileHeader.Filename, "\\", "/")))
@@ -1195,17 +1273,18 @@ func UploadYucoreMediaReference(c *gin.Context) {
 		key = strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
 	id := fmt.Sprintf("ref_%d_%s", common.GetTimestamp(), key)
-	fileName := id + yucoreMediaUploadExtension(mimeType, name)
+	fileName := id + policy.Extension
 	fullPath, err := yucoreMediaSafeUploadPath(c.GetInt("id"), fileName)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
-		common.ApiError(c, err)
+	size, err := storeYucoreMediaUpload(io.MultiReader(bytes.NewReader(prefix), file), fullPath, policy.MaxBytes)
+	if errors.Is(err, errYucoreMediaUploadTooLarge) {
+		common.ApiErrorMsg(c, fmt.Sprintf("reference %s must be %dMB or smaller", policy.Kind, policy.MaxBytes>>20))
 		return
 	}
-	if err := os.WriteFile(fullPath, data, 0o600); err != nil {
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -1220,9 +1299,10 @@ func UploadYucoreMediaReference(c *gin.Context) {
 		"id":         id,
 		"name":       name,
 		"fileName":   name,
-		"size":       len(data),
-		"mime_type":  mimeType,
-		"mimeType":   mimeType,
+		"kind":       policy.Kind,
+		"size":       size,
+		"mime_type":  policy.MIMEType,
+		"mimeType":   policy.MIMEType,
 		"cached_url": cachedURL,
 		"cachedUrl":  cachedURL,
 		"source_url": sourceURL,

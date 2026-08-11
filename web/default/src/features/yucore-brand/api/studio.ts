@@ -222,10 +222,12 @@ export interface YucoreMediaHealth {
 export interface YucoreMediaReferenceUpload {
   id: string
   name: string
+  kind: 'image' | 'video' | 'audio'
   fileName?: string
   size: number
   mime_type: string
   mimeType?: string
+  duration_ms?: number
   data_url?: string
   dataUrl?: string
   cached_url?: string

@@ -1,13 +1,22 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -266,4 +275,206 @@ func TestYucoreMediaCanonicalPreservesExistingRequestContracts(t *testing.T) {
 	task.Mode = "text-to-image"
 	err = normalizeYucoreMediaTaskWithSelection(task, yucoreMediaControllerTestModel("seedance-2.0"))
 	require.ErrorContains(t, err, "mode")
+}
+
+func yucoreMediaUploadTestContent() map[string][]byte {
+	return map[string][]byte{
+		"image/png":       append([]byte("\x89PNG\r\n\x1a\n"), []byte("payload")...),
+		"image/jpeg":      {0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'},
+		"image/webp":      append([]byte("RIFF\x08\x00\x00\x00WEBPVP8 "), []byte("payload")...),
+		"image/gif":       []byte("GIF89a\x01\x00\x01\x00"),
+		"video/mp4":       append([]byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isommp41"), []byte("payload")...),
+		"video/quicktime": append([]byte("\x00\x00\x00\x14ftypqt  \x00\x00\x00\x00qt  "), []byte("payload")...),
+		"audio/mpeg":      append([]byte("ID3\x04\x00\x00\x00\x00\x00\x00"), []byte("payload")...),
+		"audio/wav":       append([]byte("RIFF\x08\x00\x00\x00WAVE"), []byte("payload")...),
+	}
+}
+
+func performYucoreMediaUpload(t *testing.T, uploadRoot string, fileName string, declaredMimeType string, content []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	t.Setenv("YUCORE_MEDIA_UPLOAD_DIR", uploadRoot)
+
+	body := bytes.NewBuffer(nil)
+	writer := multipart.NewWriter(body)
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", `form-data; name="file"; filename="`+fileName+`"`)
+	header.Set("Content-Type", declaredMimeType)
+	part, err := writer.CreatePart(header)
+	require.NoError(t, err)
+	_, err = part.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/yucore/media/uploads", body)
+	context.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	context.Set("id", 42)
+	UploadYucoreMediaReference(context)
+	return recorder
+}
+
+func TestYucoreMediaUploadCanonicalKinds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	content := yucoreMediaUploadTestContent()
+	tests := []struct {
+		name         string
+		declaredMIME string
+		detectedMIME string
+		kind         string
+		extension    string
+	}{
+		{name: "png", declaredMIME: "image/png", detectedMIME: "image/png", kind: "image", extension: ".png"},
+		{name: "jpeg", declaredMIME: "image/jpeg", detectedMIME: "image/jpeg", kind: "image", extension: ".jpg"},
+		{name: "webp", declaredMIME: "image/webp", detectedMIME: "image/webp", kind: "image", extension: ".webp"},
+		{name: "gif", declaredMIME: "image/gif", detectedMIME: "image/gif", kind: "image", extension: ".gif"},
+		{name: "mp4", declaredMIME: "video/mp4", detectedMIME: "video/mp4", kind: "video", extension: ".mp4"},
+		{name: "mov", declaredMIME: "video/quicktime", detectedMIME: "video/quicktime", kind: "video", extension: ".mov"},
+		{name: "mp3", declaredMIME: "audio/mpeg", detectedMIME: "audio/mpeg", kind: "audio", extension: ".mp3"},
+		{name: "wav", declaredMIME: "audio/wav", detectedMIME: "audio/wav", kind: "audio", extension: ".wav"},
+		{name: "x-wav alias", declaredMIME: "audio/x-wav", detectedMIME: "audio/wav", kind: "audio", extension: ".wav"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy, err := yucoreMediaUploadPolicyFor(content[test.detectedMIME], test.declaredMIME)
+			require.NoError(t, err)
+			assert.Equal(t, test.kind, policy.Kind)
+			assert.Equal(t, test.detectedMIME, policy.MIMEType)
+			assert.Equal(t, test.extension, policy.Extension)
+
+			uploadRoot := t.TempDir()
+			recorder := performYucoreMediaUpload(t, uploadRoot, "spoofed.exe", test.declaredMIME, content[test.detectedMIME])
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			var response struct {
+				Success bool   `json:"success"`
+				Message string `json:"message"`
+				Data    struct {
+					Kind      string `json:"kind"`
+					MIMEType  string `json:"mime_type"`
+					CachedURL string `json:"cached_url"`
+					Size      int64  `json:"size"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.True(t, response.Success, response.Message)
+			assert.Equal(t, test.kind, response.Data.Kind)
+			assert.Equal(t, test.detectedMIME, response.Data.MIMEType)
+			assert.Equal(t, test.extension, filepath.Ext(response.Data.CachedURL))
+			assert.Equal(t, int64(len(content[test.detectedMIME])), response.Data.Size)
+
+			storedFiles, err := os.ReadDir(filepath.Join(uploadRoot, "42"))
+			require.NoError(t, err)
+			require.Len(t, storedFiles, 1)
+			assert.Equal(t, test.extension, filepath.Ext(storedFiles[0].Name()))
+			assert.False(t, strings.HasSuffix(storedFiles[0].Name(), ".part"))
+			if runtime.GOOS != "windows" {
+				info, err := storedFiles[0].Info()
+				require.NoError(t, err)
+				assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			}
+		})
+	}
+}
+
+func TestYucoreMediaUploadRejectsUnsafeEmptyAndSpoofedContent(t *testing.T) {
+	content := yucoreMediaUploadTestContent()
+	tests := []struct {
+		name         string
+		declaredMIME string
+		content      []byte
+	}{
+		{name: "empty", declaredMIME: "image/png", content: nil},
+		{name: "executable", declaredMIME: "application/octet-stream", content: []byte("MZ\x90\x00executable")},
+		{name: "html", declaredMIME: "text/html", content: []byte("<!doctype html><script>alert(1)</script>")},
+		{name: "scripted svg", declaredMIME: "image/svg+xml", content: []byte(`<svg><script>alert(1)</script></svg>`)},
+		{name: "unknown binary", declaredMIME: "application/octet-stream", content: []byte{0x00, 0x01, 0x02, 0x03}},
+		{name: "declared mime spoof", declaredMIME: "image/jpeg", content: content["image/png"]},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			uploadRoot := t.TempDir()
+			recorder := performYucoreMediaUpload(t, uploadRoot, "reference.bin", test.declaredMIME, test.content)
+			var response struct {
+				Success bool   `json:"success"`
+				Message string `json:"message"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.False(t, response.Success)
+			assert.NotEmpty(t, response.Message)
+			entries, err := os.ReadDir(uploadRoot)
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+func TestYucoreMediaUploadAcceptsMPEGFrameSync(t *testing.T) {
+	policy, err := yucoreMediaUploadPolicyFor([]byte{0xff, 0xfb, 0x90, 0x64}, "audio/mpeg")
+	require.NoError(t, err)
+	assert.Equal(t, "audio", policy.Kind)
+	assert.Equal(t, "audio/mpeg", policy.MIMEType)
+	assert.Equal(t, ".mp3", policy.Extension)
+}
+
+func TestYucoreMediaUploadSizePolicyAndCleanup(t *testing.T) {
+	content := yucoreMediaUploadTestContent()
+	tests := []struct {
+		mimeType string
+		want     int64
+	}{
+		{mimeType: "image/png", want: 25 << 20},
+		{mimeType: "audio/mpeg", want: 25 << 20},
+		{mimeType: "video/mp4", want: 100 << 20},
+	}
+	for _, test := range tests {
+		policy, err := yucoreMediaUploadPolicyFor(content[test.mimeType], test.mimeType)
+		require.NoError(t, err)
+		assert.Equal(t, test.want, policy.MaxBytes)
+	}
+	assert.GreaterOrEqual(t, yucoreMediaUploadRequestMaxBytes, int64((100<<20)+(1<<20)))
+
+	ownerDir := filepath.Join(t.TempDir(), "42")
+	finalPath := filepath.Join(ownerDir, "oversized.png")
+	_, err := storeYucoreMediaUpload(bytes.NewReader([]byte("12345")), finalPath, 4)
+	require.Error(t, err)
+	entries, err := os.ReadDir(ownerDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+	_, err = os.Stat(finalPath)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestServeYucoreMediaUploadedReferencePreservesOwnerAndSignatureAccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	uploadRoot := t.TempDir()
+	t.Setenv("YUCORE_MEDIA_UPLOAD_DIR", uploadRoot)
+	ownerID := 42
+	fileName := "ref_test.png"
+	fullPath := filepath.Join(uploadRoot, "42", fileName)
+	require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o700))
+	require.NoError(t, os.WriteFile(fullPath, yucoreMediaUploadTestContent()["image/png"], 0o600))
+
+	serve := func(requestURL string, authenticatedUserID int) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
+		context.Params = gin.Params{{Key: "user_id", Value: "42"}, {Key: "file", Value: fileName}}
+		context.Set("id", authenticatedUserID)
+		ServeYucoreMediaUploadedReference(context)
+		return recorder
+	}
+
+	ownerResponse := serve("/api/yucore/media/uploads/42/"+fileName, ownerID)
+	assert.Equal(t, http.StatusOK, ownerResponse.Code)
+	assert.Equal(t, "nosniff", ownerResponse.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "private, max-age=86400", ownerResponse.Header().Get("Cache-Control"))
+	assert.Equal(t, yucoreMediaUploadTestContent()["image/png"], ownerResponse.Body.Bytes())
+
+	signedResponse := serve("/api/yucore/media/uploads/42/"+fileName+"?sig="+yucoreMediaUploadSignature(ownerID, fileName), 7)
+	assert.Equal(t, http.StatusOK, signedResponse.Code)
+
+	unauthorizedResponse := serve("/api/yucore/media/uploads/42/"+fileName, 7)
+	assert.Equal(t, http.StatusUnauthorized, unauthorizedResponse.Code)
 }
