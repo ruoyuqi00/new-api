@@ -19,7 +19,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
 	// 支持任务仅按次计费
-	if model.YucoreMediaModelUsesPerCallPricing(info.OriginModelName) {
+	if info.TaskPerCallBilling {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
 	} else {
 		if len(info.PriceData.OtherRatios) > 0 {

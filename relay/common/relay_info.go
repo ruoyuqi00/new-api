@@ -158,6 +158,9 @@ type RelayInfo struct {
 	ParamOverrideAudit                    []string
 
 	PriceData types.PriceData
+	// TaskPricingResolved freezes async task billing mode before retries or later request stages can observe changed settings.
+	TaskPricingResolved bool
+	TaskPerCallBilling  bool
 	// TaskQuotaClamp records quota saturation metadata for async task billing logs.
 	TaskQuotaClamp *common.QuotaClamp
 

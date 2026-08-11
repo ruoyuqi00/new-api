@@ -184,6 +184,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
 	}
 	info.PriceData = priceData
+	resolveTaskPerCallBilling(info, modelName)
 
 	// 5. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）
 	//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
@@ -195,7 +196,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度
-	if !model.YucoreMediaModelUsesPerCallPricing(modelName) {
+	if !info.TaskPerCallBilling {
 		quota, clamp := applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, info.PriceData.OtherRatios)
 		noteTaskQuotaClamp(info, clamp, "task_submit_other_ratios")
 		info.PriceData.Quota = quota
@@ -256,6 +257,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+func resolveTaskPerCallBilling(info *relaycommon.RelayInfo, modelName string) {
+	if info.TaskPricingResolved {
+		return
+	}
+	info.TaskPerCallBilling = model.YucoreMediaModelUsesPerCallPricing(modelName)
+	info.TaskPricingResolved = true
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

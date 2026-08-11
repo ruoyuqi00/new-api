@@ -183,7 +183,8 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 		}
 	}
 
-	pricingUnit, explicitPricingUnit := model.YucoreMediaModelPricingUnit(modelID)
+	pricingUnit := strings.ToLower(strings.TrimSpace(capability.PricingUnit))
+	explicitPricingUnit := pricingUnit != ""
 	if !explicitPricingUnit {
 		pricingUnit = "per_call"
 		if kind == YucoreMediaKindVideo && !model.YucoreMediaModelUsesPerCallPricing(modelID) {

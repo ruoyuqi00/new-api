@@ -74,6 +74,38 @@ func TestNoteTaskQuotaClampStoresFirstOnly(t *testing.T) {
 	require.Equal(t, "overflow", info.TaskQuotaClamp.Kind)
 }
 
+func TestResolveTaskPerCallBillingSnapshotsConfiguredPricing(t *testing.T) {
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.model_capabilities": `{"snapshot-video":{"kind":"video","pricing_unit":"per_second"}}`,
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	info := &relaycommon.RelayInfo{PriceData: types.PriceData{UsePrice: true, Quota: 1000, OtherRatios: map[string]float64{"seconds": 3}}}
+	resolveTaskPerCallBilling(info, "snapshot-video")
+	require.True(t, info.TaskPricingResolved)
+	assert.False(t, info.TaskPerCallBilling)
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["yucore_media.model_capabilities"] = `{"snapshot-video":{"kind":"video","pricing_unit":"per_call"}}`
+	common.OptionMapRWMutex.Unlock()
+	resolveTaskPerCallBilling(info, "snapshot-video")
+	assert.False(t, info.TaskPerCallBilling, "retry must retain the first pricing decision")
+
+	quota := info.PriceData.Quota
+	if !info.TaskPerCallBilling {
+		quota = applyTaskOtherRatiosQuota(quota, info.PriceData.OtherRatios)
+	}
+	assert.Equal(t, 3000, quota)
+	assert.False(t, model.TaskBillingContext{PerCallBilling: info.TaskPerCallBilling}.PerCallBilling)
+}
+
 func TestTaskModel2UserDtoHidesMappedModelDetails(t *testing.T) {
 	originalData := json.RawMessage(`{
 		"model":"internal-upstream-model",
