@@ -548,6 +548,22 @@ func YucoreMediaUAGProxyAuthorizationHeader() string {
 	return "Bearer " + config.APIKey
 }
 
+func YucoreMediaAssetProxyHeaders(task *YucoreMediaTask) (YucoreMediaUAGProxyHeaders, error) {
+	adapter := yucoreMediaTaskAdapter(task)
+	if adapter != YucoreMediaAdapterOpenAICompatible && adapter != YucoreMediaAdapterYuAPIChannel {
+		return YucoreMediaUAGProxyHeaders{}, nil
+	}
+	config, err := getYucoreMediaAdapterConfigChecked()
+	if err != nil {
+		return nil, errors.New("YuCore media asset credentials are unavailable")
+	}
+	config, err = yucoreMediaOpenAIConfigForTask(task, config)
+	if err != nil || strings.TrimSpace(config.APIKey) == "" {
+		return nil, errors.New("YuCore media asset credentials are unavailable")
+	}
+	return YucoreMediaUAGProxyHeaders{"Authorization": "Bearer " + config.APIKey}, nil
+}
+
 func normalizeYucoreMediaUAGProxyHeaders(headers YucoreMediaUAGProxyHeaders) YucoreMediaUAGProxyHeaders {
 	normalized := YucoreMediaUAGProxyHeaders{}
 	for key, value := range headers {

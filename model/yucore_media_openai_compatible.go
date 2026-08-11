@@ -109,7 +109,13 @@ func getOrCreateYucoreMediaManagedToken(userID int, group string) (*Token, error
 	}
 	var token Token
 	now := common.GetTimestamp()
-	err := DB.Where("user_id = ? AND name = ? AND "+commonGroupCol+" = ? AND status = ? AND (expired_time = -1 OR expired_time > ?)", userID, "yucore-studio-managed", group, common.TokenStatusEnabled, now).
+	tokenIdentity := map[string]any{
+		"user_id": userID,
+		"name":    "yucore-studio-managed",
+		"group":   group,
+		"status":  common.TokenStatusEnabled,
+	}
+	err := DB.Where(tokenIdentity).Where("expired_time = -1 OR expired_time > ?", now).
 		Order("id DESC").First(&token).Error
 	if err == nil {
 		return &token, nil
@@ -134,7 +140,7 @@ func getOrCreateYucoreMediaManagedToken(userID int, group string) (*Token, error
 	}
 	if err := token.Insert(); err != nil {
 		var existing Token
-		lookupErr := DB.Where("user_id = ? AND name = ? AND "+commonGroupCol+" = ? AND status = ?", userID, "yucore-studio-managed", group, common.TokenStatusEnabled).
+		lookupErr := DB.Where(tokenIdentity).
 			Order("id DESC").First(&existing).Error
 		if lookupErr == nil {
 			return &existing, nil
@@ -696,7 +702,14 @@ func applyOpenAICompatibleTaskPayload(task *YucoreMediaTask, payload map[string]
 			break
 		}
 	}
-	task.Metadata = mergeYucoreMediaMetadata(task.Metadata, metadataPatch)
+	metadata := yucoreMediaMetadataMap(task.Metadata)
+	delete(metadata, "last_status_error")
+	for key, value := range metadataPatch {
+		metadata[key] = value
+	}
+	if rawMetadata, err := common.Marshal(metadata); err == nil {
+		task.Metadata = string(rawMetadata)
+	}
 	if status == YucoreMediaTaskStatusCompleted {
 		assets := buildOpenAICompatibleTaskAssets(task, payload)
 		if len(assets) == 0 {

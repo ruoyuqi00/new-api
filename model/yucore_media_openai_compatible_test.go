@@ -766,6 +766,7 @@ func TestOpenAICompatibleTaskPollsAcceptedIDOnly(t *testing.T) {
 	metadata = yucoreMediaMetadataMap(task.Metadata)
 	assert.Equal(t, acceptedTaskID, metadata["upstream_task_id"])
 	assert.Equal(t, "succeeded", metadata["upstream_status"])
+	assert.NotContains(t, metadata, "last_status_error")
 	assets := YucoreMediaTaskAssets(task)
 	require.Len(t, assets, 1)
 	assert.Equal(t, "media/results/final clip.mp4", assets[0].SourceUrl)
@@ -788,6 +789,25 @@ func TestOpenAICompatibleTaskPollsAcceptedIDOnly(t *testing.T) {
 	for _, requestedPath := range getPaths {
 		assert.False(t, strings.Contains(requestedPath, "noisy"))
 	}
+}
+
+func TestApplyOpenAICompatibleTaskPayloadClearsStaleErrorFromMalformedMetadata(t *testing.T) {
+	require.NoError(t, DB.AutoMigrate(&YucoreMediaTask{}))
+	task := &YucoreMediaTask{
+		TaskId: fmt.Sprintf("yu_malformed_metadata_%d", time.Now().UnixNano()), UserId: 42,
+		Kind: "video", ModelId: "video-model", Status: YucoreMediaTaskStatusProcessing,
+		Metadata: "not-json", CreatedTime: common.GetTimestamp(), UpdatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(task).Error)
+	t.Cleanup(func() { DB.Unscoped().Delete(task) })
+
+	require.NoError(t, applyOpenAICompatibleTaskPayload(task, map[string]any{
+		"status": "processing", "progress": 50,
+	}, YucoreMediaModelCapability{Transport: yucoreMediaTransportAsyncTask}))
+	metadata := yucoreMediaMetadataMap(task.Metadata)
+	assert.NotContains(t, metadata, "last_status_error")
+	assert.Equal(t, "processing", metadata["upstream_status"])
+	assert.Equal(t, 50, task.Progress)
 }
 
 func TestOpenAICompatibleTaskPollsNestedRoutedAcceptedID(t *testing.T) {

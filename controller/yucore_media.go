@@ -1655,7 +1655,8 @@ func ServeYucoreMediaTaskAsset(c *gin.Context) {
 		return
 	}
 	source := model.YucoreMediaAssetSource(asset)
-	if c.Query("variant") == model.YucoreMediaAssetVariantThumbnail {
+	isThumbnail := c.Query("variant") == model.YucoreMediaAssetVariantThumbnail
+	if isThumbnail {
 		source = model.YucoreMediaAssetThumbnailSource(asset)
 	}
 	if source == "" {
@@ -1667,15 +1668,25 @@ func ServeYucoreMediaTaskAsset(c *gin.Context) {
 		c.String(http.StatusBadGateway, "invalid provider media asset source")
 		return
 	}
+	fallbackMimeType := asset.MimeType
+	if isThumbnail {
+		fallbackMimeType = ""
+	}
 	if strings.HasPrefix(resolvedSource, "data:") {
-		serveYucoreMediaDataURL(c, resolvedSource, asset.MimeType)
+		serveYucoreMediaDataURL(c, resolvedSource, fallbackMimeType)
 		return
 	}
 	assetHeaders := model.YucoreMediaUAGProxyHeaders{}
 	if model.IsYucoreMediaUAGProxyTask(task) {
 		assetHeaders = yucoreMediaUAGProxyHeadersWithConfiguredAuth(upstreamHeaders)
+	} else {
+		assetHeaders, err = model.YucoreMediaAssetProxyHeaders(task)
+		if err != nil {
+			c.String(http.StatusBadGateway, "provider media asset authorization unavailable")
+			return
+		}
 	}
-	serveYucoreMediaRemoteAsset(c, resolvedSource, asset.MimeType, assetHeaders)
+	serveYucoreMediaRemoteAsset(c, resolvedSource, fallbackMimeType, assetHeaders)
 }
 
 func serveYucoreMediaDataURL(c *gin.Context, dataURL string, fallbackMimeType string) {
@@ -1737,9 +1748,23 @@ func serveYucoreMediaRemoteAsset(c *gin.Context, source string, fallbackMimeType
 		c.String(http.StatusBadGateway, "provider media asset returned %d", resp.StatusCode)
 		return
 	}
+	const maxAssetBytes int64 = 256 << 20
+	limitedBody := &io.LimitedReader{R: resp.Body, N: maxAssetBytes}
+	var responseBody io.Reader = limitedBody
 	mimeType := strings.TrimSpace(resp.Header.Get("Content-Type"))
 	if mimeType == "" {
-		mimeType = fallbackMimeType
+		prefix := make([]byte, 512)
+		prefixLength, readErr := io.ReadFull(limitedBody, prefix)
+		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+			c.String(http.StatusBadGateway, "failed to read provider media asset")
+			return
+		}
+		prefix = prefix[:prefixLength]
+		mimeType = http.DetectContentType(prefix)
+		if mimeType == "application/octet-stream" && fallbackMimeType != "" {
+			mimeType = fallbackMimeType
+		}
+		responseBody = io.MultiReader(bytes.NewReader(prefix), limitedBody)
 	}
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
@@ -1748,13 +1773,15 @@ func serveYucoreMediaRemoteAsset(c *gin.Context, source string, fallbackMimeType
 	c.Header("Cache-Control", "private, max-age=300")
 	c.Header("X-Content-Type-Options", "nosniff")
 	if length := strings.TrimSpace(resp.Header.Get("Content-Length")); length != "" {
-		c.Header("Content-Length", length)
+		if parsedLength, parseErr := strconv.ParseInt(length, 10, 64); parseErr == nil && parsedLength >= 0 && parsedLength <= maxAssetBytes {
+			c.Header("Content-Length", length)
+		}
 	}
 	if contentRange := strings.TrimSpace(resp.Header.Get("Content-Range")); contentRange != "" {
 		c.Header("Content-Range", contentRange)
 	}
 	c.Status(resp.StatusCode)
-	_, _ = io.Copy(c.Writer, io.LimitReader(resp.Body, 256<<20))
+	_, _ = io.Copy(c.Writer, responseBody)
 }
 
 func buildYucoreMediaAssetSVG(task *model.YucoreMediaTask, index int) string {
