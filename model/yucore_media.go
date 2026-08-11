@@ -208,13 +208,24 @@ func getYucoreMediaAdapterConfig() yucoreMediaAdapterConfig {
 	if adapter == YucoreMediaAdapterUAGProxy && baseURL == "" {
 		baseURL = strings.TrimRight(strings.TrimSpace(common.GetEnvOrDefaultString("YUCORE_MEDIA_UAG_BASE_URL", "")), "/")
 	}
+	embeddedCapabilities, _ := loadCangyuanMediaCatalog()
+	modelCapabilities := mergeYucoreMediaModelCapabilities(
+		embeddedCapabilities,
+		common.GetEnvOrDefaultString("YUCORE_MEDIA_MODEL_CAPABILITIES", ""),
+	)
+	common.OptionMapRWMutex.RLock()
+	operatorCapabilities, hasOperatorCapabilities := common.OptionMap["yucore_media.model_capabilities"]
+	common.OptionMapRWMutex.RUnlock()
+	if hasOperatorCapabilities {
+		modelCapabilities = mergeYucoreMediaModelCapabilities(modelCapabilities, operatorCapabilities)
+	}
 	return yucoreMediaAdapterConfig{
 		Adapter:             adapter,
 		BaseURL:             baseURL,
 		APIKey:              getYucoreMediaOptionString("yucore_media.api_key", "YUCORE_MEDIA_API_KEY", ""),
 		TimeoutSeconds:      timeout,
 		RequireRealAssets:   getYucoreMediaOptionBool("yucore_media.require_real_assets", "YUCORE_MEDIA_REQUIRE_REAL_ASSETS", false),
-		ModelCapabilities:   parseYucoreMediaModelCapabilities(getYucoreMediaOptionString("yucore_media.model_capabilities", "YUCORE_MEDIA_MODEL_CAPABILITIES", "")),
+		ModelCapabilities:   modelCapabilities,
 		ManagedTokenGroup:   getYucoreMediaOptionString("yucore_media.managed_token_group", "YUCORE_MEDIA_MANAGED_TOKEN_GROUP", ""),
 		UAGModelMap:         parseYucoreMediaUAGModelMap(getYucoreMediaOptionString("yucore_media.uag_model_map", "YUCORE_MEDIA_UAG_MODEL_MAP", "")),
 		UAGAllowedProviders: parseYucoreMediaUAGAllowlist(getYucoreMediaOptionString("yucore_media.uag_allowed_providers", "YUCORE_MEDIA_UAG_ALLOWED_PROVIDERS", "")),
@@ -225,12 +236,7 @@ func getYucoreMediaAdapterConfig() yucoreMediaAdapterConfig {
 
 func GetYucoreMediaCatalogSettings() (string, map[string]YucoreMediaModelCapability) {
 	config := getYucoreMediaAdapterConfig()
-	capabilities := make(map[string]YucoreMediaModelCapability, len(config.ModelCapabilities))
-	for modelID, capability := range config.ModelCapabilities {
-		capability.AllowedParameters = append([]string(nil), capability.AllowedParameters...)
-		capabilities[modelID] = capability
-	}
-	return config.ManagedTokenGroup, capabilities
+	return config.ManagedTokenGroup, cloneYucoreMediaModelCapabilities(config.ModelCapabilities)
 }
 
 func YucoreMediaConfiguredModelIDs() map[string]struct{} {
@@ -238,11 +244,18 @@ func YucoreMediaConfiguredModelIDs() map[string]struct{} {
 	if config.Adapter != YucoreMediaAdapterOpenAICompatible && config.Adapter != YucoreMediaAdapterYuAPIChannel {
 		return nil
 	}
-	if len(config.ModelCapabilities) == 0 {
+	capabilities := config.ModelCapabilities
+	if raw := getYucoreMediaOptionString("yucore_media.model_capabilities", "YUCORE_MEDIA_MODEL_CAPABILITIES", ""); raw != "" {
+		capabilities = parseYucoreMediaModelCapabilities(raw)
+	}
+	if len(capabilities) == 0 {
 		return nil
 	}
-	configured := make(map[string]struct{}, len(config.ModelCapabilities))
-	for modelId := range config.ModelCapabilities {
+	configured := make(map[string]struct{}, len(capabilities))
+	for modelId, capability := range capabilities {
+		if capability.Availability == YucoreMediaAvailabilityProbe {
+			continue
+		}
 		configured[strings.ToLower(strings.TrimSpace(modelId))] = struct{}{}
 	}
 	return configured

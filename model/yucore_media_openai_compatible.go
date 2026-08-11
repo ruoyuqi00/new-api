@@ -20,107 +20,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	yucoreMediaTransportSyncImage = "sync-image"
-	yucoreMediaTransportAsyncTask = "async-task"
-
-	yucoreMediaDurationPolicyDuration = "duration"
-	yucoreMediaDurationPolicySeconds  = "seconds"
-	yucoreMediaDurationPolicyFixed    = "fixed"
-	yucoreMediaDurationPolicyNone     = "none"
-)
-
-type YucoreMediaModelCapability struct {
-	Model                string   `json:"model,omitempty"`
-	UpstreamModel        string   `json:"upstream_model,omitempty"`
-	Transport            string   `json:"transport,omitempty"`
-	CreatePath           string   `json:"create_path,omitempty"`
-	EditPath             string   `json:"edit_path,omitempty"`
-	StatusPath           string   `json:"status_path,omitempty"`
-	DurationPolicy       string   `json:"duration_policy,omitempty"`
-	FixedDurationSeconds int      `json:"fixed_duration_seconds,omitempty"`
-	PollIntervalSeconds  int      `json:"poll_interval_seconds,omitempty"`
-	MaxReferenceImages   int      `json:"max_reference_images,omitempty"`
-	AllowedParameters    []string `json:"allowed_parameters,omitempty"`
-	ResponseFormat       string   `json:"response_format,omitempty"`
-}
-
-func parseYucoreMediaModelCapabilities(raw string) map[string]YucoreMediaModelCapability {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-
-	capabilities := map[string]YucoreMediaModelCapability{}
-	if strings.HasPrefix(raw, "[") {
-		var rows []YucoreMediaModelCapability
-		if err := common.Unmarshal([]byte(raw), &rows); err != nil {
-			return nil
-		}
-		for _, row := range rows {
-			modelID := strings.TrimSpace(row.Model)
-			if modelID != "" {
-				capabilities[modelID] = row
-			}
-		}
-		return capabilities
-	}
-
-	if err := common.Unmarshal([]byte(raw), &capabilities); err != nil {
-		return nil
-	}
-	for modelID, capability := range capabilities {
-		normalizedID := strings.TrimSpace(modelID)
-		if normalizedID == "" {
-			delete(capabilities, modelID)
-			continue
-		}
-		if normalizedID != modelID {
-			delete(capabilities, modelID)
-			capabilities[normalizedID] = capability
-		}
-	}
-	return capabilities
-}
-
-func validateYucoreMediaModelCapabilities(raw string) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	capabilities := parseYucoreMediaModelCapabilities(raw)
-	if capabilities == nil {
-		return errors.New("YuCore media model capabilities must be a JSON object or array")
-	}
-	for modelID, capability := range capabilities {
-		transport := strings.ToLower(strings.TrimSpace(capability.Transport))
-		switch transport {
-		case "", yucoreMediaTransportSyncImage, yucoreMediaTransportAsyncTask, "async-image-task", "async-video-task":
-		default:
-			return fmt.Errorf("YuCore media model %s has an invalid transport", modelID)
-		}
-		policy := strings.ToLower(strings.TrimSpace(capability.DurationPolicy))
-		switch policy {
-		case "", yucoreMediaDurationPolicyDuration, yucoreMediaDurationPolicySeconds, yucoreMediaDurationPolicyFixed, yucoreMediaDurationPolicyNone:
-		default:
-			return fmt.Errorf("YuCore media model %s has an invalid duration policy", modelID)
-		}
-		if policy == yucoreMediaDurationPolicyFixed && capability.FixedDurationSeconds <= 0 {
-			return fmt.Errorf("YuCore media model %s requires a positive fixed duration", modelID)
-		}
-		if capability.PollIntervalSeconds < 0 || capability.PollIntervalSeconds > 3600 {
-			return fmt.Errorf("YuCore media model %s has an invalid poll interval", modelID)
-		}
-		if capability.MaxReferenceImages < 0 || capability.MaxReferenceImages > 32 {
-			return fmt.Errorf("YuCore media model %s has an invalid reference image limit", modelID)
-		}
-		if transport != yucoreMediaTransportSyncImage && strings.TrimSpace(capability.StatusPath) != "" && !strings.Contains(capability.StatusPath, "{task_id}") {
-			return fmt.Errorf("YuCore media model %s status path must contain {task_id}", modelID)
-		}
-	}
-	return nil
-}
-
 func yucoreMediaCapabilityForTask(task *YucoreMediaTask, config yucoreMediaAdapterConfig) YucoreMediaModelCapability {
 	capability, ok := config.ModelCapabilities[task.ModelId]
 	if !ok {
@@ -173,7 +72,9 @@ func yucoreMediaCapabilityForTask(task *YucoreMediaTask, config yucoreMediaAdapt
 		capability.PollIntervalSeconds = 5
 	}
 	if capability.MaxReferenceImages <= 0 {
-		if task.Kind == "video" {
+		if capability.ReferenceLimits.Images > 0 {
+			capability.MaxReferenceImages = capability.ReferenceLimits.Images
+		} else if task.Kind == "video" {
 			capability.MaxReferenceImages = 8
 		} else {
 			capability.MaxReferenceImages = 16
