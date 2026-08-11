@@ -250,7 +250,7 @@ func YucoreMediaConfiguredModelIDs() map[string]struct{} {
 	}
 	configured := make(map[string]struct{}, len(capabilities))
 	for modelId, capability := range capabilities {
-		if capability.Availability == YucoreMediaAvailabilityProbe {
+		if strings.EqualFold(strings.TrimSpace(capability.Availability), YucoreMediaAvailabilityProbe) {
 			continue
 		}
 		configured[strings.ToLower(strings.TrimSpace(modelId))] = struct{}{}

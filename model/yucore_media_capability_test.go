@@ -109,6 +109,13 @@ func TestCangyuanMediaCatalogAuditedFamilyContracts(t *testing.T) {
 	assert.Equal(t, 4, seedance25.Durations[0])
 	assert.Equal(t, 29, seedance25.Durations[len(seedance25.Durations)-1])
 	assert.Equal(t, YucoreMediaReferenceLimits{Images: 30, Videos: 10, Audios: 10}, seedance25.ReferenceLimits)
+	for _, modelID := range []string{"seedance-2.0-mini", "seedance-2.0-mini-480p", "seedance-2.0-mini-720p"} {
+		mini := catalog[modelID]
+		assert.True(t, mini.SupportsAudio, modelID)
+		assert.Contains(t, mini.AllowedParameters, "video", modelID)
+		assert.Contains(t, mini.AllowedParameters, "audio", modelID)
+		assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8}, mini.ReferenceLimits, modelID)
+	}
 
 	veo := catalog["veo-3.1"]
 	assert.Equal(t, []int{4, 6, 8}, veo.Durations)
@@ -199,7 +206,7 @@ func TestYucoreMediaConfiguredModelIDsKeepsEmbeddedCatalogForPartialOverride(t *
 	originalOptions := common.OptionMap
 	common.OptionMap = map[string]string{
 		"yucore_media.adapter":            YucoreMediaAdapterYuAPIChannel,
-		"yucore_media.model_capabilities": `{"seedance-2.0":{"poll_interval_seconds":0},"operator-video":{"kind":"video"}}`,
+		"yucore_media.model_capabilities": `{"seedance-2.0":{"poll_interval_seconds":0},"operator-video":{"kind":"video"},"veo-clean":{"availability":" PROBE "}}`,
 	}
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {

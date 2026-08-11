@@ -1,9 +1,7 @@
 package model
 
 import (
-	"bytes"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -99,8 +97,12 @@ func cloneYucoreMediaModelCapabilities(source map[string]YucoreMediaModelCapabil
 }
 
 func decodeYucoreMediaCapabilityDocument(raw []byte) (map[string]map[string]any, error) {
-	if err := rejectDuplicateYucoreMediaModelKeys(raw); err != nil {
-		return nil, err
+	if err := common.ValidateJSONTopLevelObjectUniqueKeys(raw); err != nil {
+		var duplicate *common.DuplicateJSONTopLevelKeyError
+		if errors.As(err, &duplicate) {
+			return nil, fmt.Errorf("YuCore media model capabilities contain duplicate model %s", strings.TrimSpace(duplicate.Key))
+		}
+		return nil, errors.New("YuCore media model capabilities must be a JSON object or array")
 	}
 	var document any
 	if err := common.Unmarshal(raw, &document); err != nil {
@@ -156,70 +158,6 @@ func decodeYucoreMediaCapabilityDocument(raw []byte) (map[string]map[string]any,
 		return nil, errors.New("YuCore media model capabilities must be a JSON object or array")
 	}
 	return rows, nil
-}
-
-func rejectDuplicateYucoreMediaModelKeys(raw []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	first, err := decoder.Token()
-	if err != nil {
-		return nil
-	}
-	delimiter, ok := first.(json.Delim)
-	if !ok || delimiter != '{' {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return nil
-		}
-		modelID, ok := token.(string)
-		if !ok {
-			return nil
-		}
-		modelID = strings.TrimSpace(modelID)
-		if _, duplicate := seen[modelID]; duplicate {
-			return fmt.Errorf("YuCore media model capabilities contain duplicate model %s", modelID)
-		}
-		seen[modelID] = struct{}{}
-		if err := consumeYucoreMediaCapabilityJSONValue(decoder); err != nil {
-			return nil
-		}
-	}
-	return nil
-}
-
-func consumeYucoreMediaCapabilityJSONValue(decoder *json.Decoder) error {
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-	delimiter, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delimiter {
-	case '{':
-		for decoder.More() {
-			if _, err := decoder.Token(); err != nil {
-				return err
-			}
-			if err := consumeYucoreMediaCapabilityJSONValue(decoder); err != nil {
-				return err
-			}
-		}
-	case '[':
-		for decoder.More() {
-			if err := consumeYucoreMediaCapabilityJSONValue(decoder); err != nil {
-				return err
-			}
-		}
-	default:
-		return nil
-	}
-	_, err = decoder.Token()
-	return err
 }
 
 func decodeYucoreMediaModelCapabilities(raw []byte) (map[string]YucoreMediaModelCapability, error) {
