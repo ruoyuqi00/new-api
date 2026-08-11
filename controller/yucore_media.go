@@ -1617,7 +1617,7 @@ func ServeYucoreMediaUpstreamAsset(c *gin.Context) {
 		serveYucoreMediaDataURL(c, resolvedSource, "")
 		return
 	}
-	serveYucoreMediaRemoteAsset(c, resolvedSource, "", yucoreMediaUAGProxyHeadersWithConfiguredAuth(yucoreMediaUAGProxyHeadersFromRequest(c)))
+	serveYucoreMediaRemoteAsset(c, resolvedSource, "", yucoreMediaUAGProxyHeadersWithConfiguredAuth(yucoreMediaUAGProxyHeadersFromRequest(c)), nil)
 }
 
 func ServeYucoreMediaTaskAsset(c *gin.Context) {
@@ -1677,16 +1677,22 @@ func ServeYucoreMediaTaskAsset(c *gin.Context) {
 		return
 	}
 	assetHeaders := model.YucoreMediaUAGProxyHeaders{}
+	var redirectHeaders func(string) (model.YucoreMediaUAGProxyHeaders, error)
 	if model.IsYucoreMediaUAGProxyTask(task) {
 		assetHeaders = yucoreMediaUAGProxyHeadersWithConfiguredAuth(upstreamHeaders)
 	} else {
-		assetHeaders, err = model.YucoreMediaAssetProxyHeaders(task)
+		assetHeaders, err = model.YucoreMediaAssetProxyHeaders(task, resolvedSource)
 		if err != nil {
 			c.String(http.StatusBadGateway, "provider media asset authorization unavailable")
 			return
 		}
+		if len(assetHeaders) > 0 {
+			redirectHeaders = func(target string) (model.YucoreMediaUAGProxyHeaders, error) {
+				return model.YucoreMediaAssetProxyHeaders(task, target)
+			}
+		}
 	}
-	serveYucoreMediaRemoteAsset(c, resolvedSource, fallbackMimeType, assetHeaders)
+	serveYucoreMediaRemoteAsset(c, resolvedSource, fallbackMimeType, assetHeaders, redirectHeaders)
 }
 
 func serveYucoreMediaDataURL(c *gin.Context, dataURL string, fallbackMimeType string) {
@@ -1721,7 +1727,7 @@ func serveYucoreMediaDataURL(c *gin.Context, dataURL string, fallbackMimeType st
 	c.Data(http.StatusOK, mimeType, data)
 }
 
-func serveYucoreMediaRemoteAsset(c *gin.Context, source string, fallbackMimeType string, upstreamHeaders model.YucoreMediaUAGProxyHeaders) {
+func serveYucoreMediaRemoteAsset(c *gin.Context, source string, fallbackMimeType string, upstreamHeaders model.YucoreMediaUAGProxyHeaders, redirectHeaders func(string) (model.YucoreMediaUAGProxyHeaders, error)) {
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, source, nil)
 	if err != nil {
 		c.String(http.StatusBadGateway, "invalid provider media asset source")
@@ -1738,6 +1744,23 @@ func serveYucoreMediaRemoteAsset(c *gin.Context, source string, fallbackMimeType
 		req.Header.Set("Range", rangeHeader)
 	}
 	client := &http.Client{Timeout: 90 * time.Second}
+	if redirectHeaders != nil {
+		client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+			for key := range upstreamHeaders {
+				req.Header.Del(key)
+			}
+			nextHeaders, err := redirectHeaders(req.URL.String())
+			if err != nil {
+				return err
+			}
+			for key, value := range nextHeaders {
+				if value = strings.TrimSpace(value); value != "" {
+					req.Header.Set(key, value)
+				}
+			}
+			return nil
+		}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		c.String(http.StatusBadGateway, "failed to fetch provider media asset")

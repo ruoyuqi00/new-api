@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -723,6 +724,202 @@ func TestServeYucoreMediaTaskAssetSelectsPrivateThumbnailSource(t *testing.T) {
 	assert.Contains(t, string(responseJSON), `"thumb_url":"/api/yucore/media/tasks/yu_thumbnail/assets/0?variant=thumbnail"`)
 }
 
+func TestServeYucoreMediaTaskAssetScopesOpenAIAuthToConfiguredOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const configuredAPIKey = "configured-openai-origin-key"
+	upstreamAuthorizations := make([]string, 0, 5)
+	upstreamRequests := make([]string, 0, 5)
+	cdnURL := ""
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAuthorizations = append(upstreamAuthorizations, r.Header.Get("Authorization"))
+		upstreamRequests = append(upstreamRequests, r.URL.RequestURI())
+		if r.Header.Get("Authorization") != "Bearer "+configuredAPIKey {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/v1/redirect" {
+			http.Redirect(w, r, cdnURL+"/signed?asset=redirect", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(strings.TrimPrefix(r.URL.Path, "/v1/") + "-bytes"))
+	}))
+	t.Cleanup(upstream.Close)
+	cdnAuthorizations := make([]string, 0, 4)
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cdnAuthorizations = append(cdnAuthorizations, r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.URL.Path == "/to-upstream" {
+			http.Redirect(w, r, upstream.URL+"/v1/content?from=cdn", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("signed-cdn-bytes"))
+	}))
+	t.Cleanup(cdn.Close)
+	cdnURL = cdn.URL
+
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":  model.YucoreMediaAdapterOpenAICompatible,
+		"yucore_media.api_key":  configuredAPIKey,
+		"yucore_media.base_url": upstream.URL + "/v1",
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	originalDB := model.DB
+	db, err := gorm.Open(sqlite.Open("file:yucore_media_openai_asset_origin?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.YucoreMediaTask{}))
+	model.DB = db
+	t.Cleanup(func() { model.DB = originalDB })
+	persistedAssets, err := common.Marshal([]map[string]any{
+		{
+			"id": "origin_asset_0", "kind": "video",
+			"source_url": upstream.URL + "/v1/content?absolute=1", "source_thumb_url": "thumbnail?relative=1",
+			"mime_type": "video/mp4",
+		},
+		{
+			"id": "origin_asset_1", "kind": "video",
+			"source_url": cdn.URL + "/signed?asset=content", "source_thumb_url": cdn.URL + "/signed?asset=thumbnail",
+			"mime_type": "video/mp4",
+		},
+		{
+			"id": "origin_asset_2", "kind": "video",
+			"source_url": "/v1/content?root-relative=1", "mime_type": "video/mp4",
+		},
+		{
+			"id": "origin_asset_3", "kind": "video",
+			"source_url": upstream.URL + "/v1/redirect", "mime_type": "video/mp4",
+		},
+		{
+			"id": "origin_asset_4", "kind": "video",
+			"source_url": cdn.URL + "/to-upstream", "mime_type": "video/mp4",
+		},
+	})
+	require.NoError(t, err)
+	task := &model.YucoreMediaTask{
+		TaskId: "yu_origin_scope", UserId: 42, Kind: "video", ModelId: "video-model",
+		Status: model.YucoreMediaTaskStatusCompleted, Assets: model.YucoreMediaAssets(persistedAssets),
+		Metadata: `{"adapter":"openai-compatible"}`, CreatedTime: common.GetTimestamp(), UpdatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	serve := func(index int, thumbnail bool) *httptest.ResponseRecorder {
+		requestURL := "/api/yucore/media/tasks/yu_origin_scope/assets/" + strconv.Itoa(index)
+		if thumbnail {
+			requestURL += "?variant=thumbnail"
+		}
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
+		context.Request.Header.Set("Authorization", "Bearer browser-token-must-not-forward")
+		context.Params = gin.Params{{Key: "task_id", Value: task.TaskId}, {Key: "index", Value: strconv.Itoa(index)}}
+		context.Set("id", task.UserId)
+		ServeYucoreMediaTaskAsset(context)
+		return recorder
+	}
+
+	assert.Equal(t, http.StatusOK, serve(0, false).Code)
+	assert.Equal(t, http.StatusOK, serve(0, true).Code)
+	assert.Equal(t, http.StatusOK, serve(2, false).Code)
+	assert.Equal(t, http.StatusOK, serve(1, false).Code)
+	assert.Equal(t, http.StatusOK, serve(1, true).Code)
+	assert.Equal(t, http.StatusOK, serve(3, false).Code)
+	assert.Equal(t, http.StatusBadGateway, serve(4, false).Code)
+	assert.Equal(t, []string{
+		"/v1/content?absolute=1",
+		"/v1/thumbnail?relative=1",
+		"/v1/content?root-relative=1",
+		"/v1/redirect",
+		"/v1/content?from=cdn",
+	}, upstreamRequests)
+	assert.Equal(t, []string{
+		"Bearer " + configuredAPIKey,
+		"Bearer " + configuredAPIKey,
+		"Bearer " + configuredAPIKey,
+		"Bearer " + configuredAPIKey,
+		"",
+	}, upstreamAuthorizations)
+	assert.Equal(t, []string{"", "", "", ""}, cdnAuthorizations)
+}
+
+func TestServeYucoreMediaTaskAssetDoesNotUseChangedAdapterCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const changedAdapterAPIKey = "changed-uag-key"
+	upstreamRequestCount := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamRequestCount++
+		assert.NotEqual(t, "Bearer "+changedAdapterAPIKey, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte("unexpected-upstream-request"))
+	}))
+	t.Cleanup(upstream.Close)
+	cdnAuthorizations := make([]string, 0, 1)
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cdnAuthorizations = append(cdnAuthorizations, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte("old-signed-url-bytes"))
+	}))
+	t.Cleanup(cdn.Close)
+
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":  model.YucoreMediaAdapterUAGProxy,
+		"yucore_media.api_key":  changedAdapterAPIKey,
+		"yucore_media.base_url": upstream.URL + "/v1",
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	originalDB := model.DB
+	db, err := gorm.Open(sqlite.Open("file:yucore_media_changed_asset_adapter?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.YucoreMediaTask{}))
+	model.DB = db
+	t.Cleanup(func() { model.DB = originalDB })
+	persistedAssets, err := common.Marshal([]map[string]any{
+		{"id": "changed_asset_0", "kind": "video", "source_url": "content", "mime_type": "video/mp4"},
+		{"id": "changed_asset_1", "kind": "video", "source_url": cdn.URL + "/signed", "mime_type": "video/mp4"},
+	})
+	require.NoError(t, err)
+	task := &model.YucoreMediaTask{
+		TaskId: "yu_changed_adapter", UserId: 42, Kind: "video", ModelId: "video-model",
+		Status: model.YucoreMediaTaskStatusCompleted, Assets: model.YucoreMediaAssets(persistedAssets),
+		Metadata: `{"adapter":"openai-compatible"}`, CreatedTime: common.GetTimestamp(), UpdatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	serve := func(index int) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodGet, "/api/yucore/media/tasks/yu_changed_adapter/assets/"+strconv.Itoa(index), nil)
+		context.Request.Header.Set("Authorization", "Bearer browser-token-must-not-forward")
+		context.Params = gin.Params{{Key: "task_id", Value: task.TaskId}, {Key: "index", Value: strconv.Itoa(index)}}
+		context.Set("id", task.UserId)
+		ServeYucoreMediaTaskAsset(context)
+		return recorder
+	}
+
+	relativeResponse := serve(0)
+	assert.Equal(t, http.StatusBadGateway, relativeResponse.Code)
+	assert.NotContains(t, relativeResponse.Body.String(), changedAdapterAPIKey)
+	assert.Equal(t, 0, upstreamRequestCount)
+	absoluteResponse := serve(1)
+	assert.Equal(t, http.StatusOK, absoluteResponse.Code)
+	assert.Equal(t, "old-signed-url-bytes", absoluteResponse.Body.String())
+	assert.Equal(t, []string{""}, cdnAuthorizations)
+}
+
 func TestServeYucoreMediaTaskAssetUsesManagedYuAPIAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstreamAuthorizations := make([]string, 0, 2)
@@ -734,15 +931,25 @@ func TestServeYucoreMediaTaskAssetUsesManagedYuAPIAuth(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
-		_, _ = w.Write([]byte(strings.TrimPrefix(r.URL.Path, "/") + "-bytes"))
+		_, _ = w.Write([]byte(strings.TrimPrefix(r.URL.Path, "/v1/") + "-bytes"))
 	}))
 	t.Cleanup(upstream.Close)
+	cdnAuthorizations := make([]string, 0, 1)
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cdnAuthorizations = append(cdnAuthorizations, r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte("managed-signed-cdn-bytes"))
+	}))
+	t.Cleanup(cdn.Close)
 
 	common.OptionMapRWMutex.Lock()
 	originalOptions := common.OptionMap
 	common.OptionMap = map[string]string{
 		"yucore_media.adapter":             model.YucoreMediaAdapterYuAPIChannel,
-		"yucore_media.base_url":            upstream.URL,
+		"yucore_media.base_url":            upstream.URL + "/v1",
 		"yucore_media.managed_token_group": "managed-media",
 	}
 	common.OptionMapRWMutex.Unlock()
@@ -758,13 +965,19 @@ func TestServeYucoreMediaTaskAssetUsesManagedYuAPIAuth(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.YucoreMediaTask{}, &model.Token{}))
 	model.DB = db
 	t.Cleanup(func() { model.DB = originalDB })
-	persistedAssets, err := common.Marshal([]map[string]any{{
-		"id": "yu_managed_asset_0", "kind": "video",
-		"url":        "/api/yucore/media/tasks/yu_managed/assets/0",
-		"thumb_url":  "/api/yucore/media/tasks/yu_managed/assets/0?variant=thumbnail",
-		"source_url": upstream.URL + "/content", "source_thumb_url": upstream.URL + "/thumbnail",
-		"label": "managed result", "mime_type": "video/mp4",
-	}})
+	persistedAssets, err := common.Marshal([]map[string]any{
+		{
+			"id": "yu_managed_asset_0", "kind": "video",
+			"url":        "/api/yucore/media/tasks/yu_managed/assets/0",
+			"thumb_url":  "/api/yucore/media/tasks/yu_managed/assets/0?variant=thumbnail",
+			"source_url": "content", "source_thumb_url": "/v1/thumbnail",
+			"label": "managed result", "mime_type": "video/mp4",
+		},
+		{
+			"id": "yu_managed_asset_1", "kind": "video",
+			"source_url": cdn.URL + "/signed", "mime_type": "video/mp4",
+		},
+	})
 	require.NoError(t, err)
 	task := &model.YucoreMediaTask{
 		TaskId: "yu_managed", UserId: 77, BillingGroup: "managed-media", Kind: "video", ModelId: "video-model",
@@ -773,26 +986,34 @@ func TestServeYucoreMediaTaskAssetUsesManagedYuAPIAuth(t *testing.T) {
 	}
 	require.NoError(t, model.DB.Create(task).Error)
 
-	serve := func(requestURL string) *httptest.ResponseRecorder {
+	serve := func(index int, thumbnail bool) *httptest.ResponseRecorder {
+		requestURL := "/api/yucore/media/tasks/yu_managed/assets/" + strconv.Itoa(index)
+		if thumbnail {
+			requestURL += "?variant=thumbnail"
+		}
 		recorder := httptest.NewRecorder()
 		context, _ := gin.CreateTestContext(recorder)
 		context.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
 		context.Request.Header.Set("Authorization", "Bearer browser-token-must-not-forward")
-		context.Params = gin.Params{{Key: "task_id", Value: task.TaskId}, {Key: "index", Value: "0"}}
+		context.Params = gin.Params{{Key: "task_id", Value: task.TaskId}, {Key: "index", Value: strconv.Itoa(index)}}
 		context.Set("id", task.UserId)
 		ServeYucoreMediaTaskAsset(context)
 		return recorder
 	}
 
-	contentResponse := serve("/api/yucore/media/tasks/yu_managed/assets/0")
+	contentResponse := serve(0, false)
 	assert.Equal(t, http.StatusOK, contentResponse.Code)
 	assert.Equal(t, "content-bytes", contentResponse.Body.String())
-	thumbnailResponse := serve("/api/yucore/media/tasks/yu_managed/assets/0?variant=thumbnail")
+	thumbnailResponse := serve(0, true)
 	assert.Equal(t, http.StatusOK, thumbnailResponse.Code)
 	assert.Equal(t, "thumbnail-bytes", thumbnailResponse.Body.String())
+	cdnResponse := serve(1, false)
+	assert.Equal(t, http.StatusOK, cdnResponse.Code)
+	assert.Equal(t, "managed-signed-cdn-bytes", cdnResponse.Body.String())
 	require.Len(t, upstreamAuthorizations, 2)
 	assert.Equal(t, upstreamAuthorizations[0], upstreamAuthorizations[1])
 	assert.NotEqual(t, "Bearer browser-token-must-not-forward", upstreamAuthorizations[0])
+	assert.Equal(t, []string{""}, cdnAuthorizations)
 
 	var tokens []model.Token
 	require.NoError(t, model.DB.Where("user_id = ?", task.UserId).Find(&tokens).Error)

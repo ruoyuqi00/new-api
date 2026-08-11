@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -548,13 +549,57 @@ func YucoreMediaUAGProxyAuthorizationHeader() string {
 	return "Bearer " + config.APIKey
 }
 
-func YucoreMediaAssetProxyHeaders(task *YucoreMediaTask) (YucoreMediaUAGProxyHeaders, error) {
+func YucoreMediaAssetProxyHeaders(task *YucoreMediaTask, resolvedSource string) (YucoreMediaUAGProxyHeaders, error) {
 	adapter := yucoreMediaTaskAdapter(task)
 	if adapter != YucoreMediaAdapterOpenAICompatible && adapter != YucoreMediaAdapterYuAPIChannel {
 		return YucoreMediaUAGProxyHeaders{}, nil
 	}
-	config, err := getYucoreMediaAdapterConfigChecked()
-	if err != nil {
+	target, err := url.Parse(strings.TrimSpace(resolvedSource))
+	if err != nil || !target.IsAbs() || target.User != nil {
+		return nil, errors.New("YuCore media asset source is invalid")
+	}
+	config, configErr := getYucoreMediaAdapterConfigChecked()
+	base, err := url.Parse(config.BaseURL)
+	if err != nil || !base.IsAbs() || base.User != nil {
+		return YucoreMediaUAGProxyHeaders{}, nil
+	}
+	targetScheme := strings.ToLower(target.Scheme)
+	baseScheme := strings.ToLower(base.Scheme)
+	targetHost := strings.ToLower(target.Hostname())
+	baseHost := strings.ToLower(base.Hostname())
+	if (targetScheme != "http" && targetScheme != "https") || targetHost == "" || baseHost == "" {
+		return nil, errors.New("YuCore media asset source is invalid")
+	}
+	targetPort := target.Port()
+	if targetPort == "" {
+		if targetScheme == "http" {
+			targetPort = "80"
+		} else {
+			targetPort = "443"
+		}
+	}
+	basePort := base.Port()
+	if basePort == "" {
+		if baseScheme == "http" {
+			basePort = "80"
+		} else if baseScheme == "https" {
+			basePort = "443"
+		}
+	}
+	basePath := path.Clean(base.Path)
+	if basePath == "." {
+		basePath = "/"
+	}
+	targetPath := path.Clean(target.Path)
+	if targetPath == "." {
+		targetPath = "/"
+	}
+	sameOrigin := targetScheme == baseScheme && targetHost == baseHost && targetPort == basePort
+	withinBasePath := basePath == "/" || targetPath == basePath || strings.HasPrefix(targetPath, basePath+"/")
+	if !sameOrigin || !withinBasePath {
+		return YucoreMediaUAGProxyHeaders{}, nil
+	}
+	if configErr != nil || config.Adapter != adapter {
 		return nil, errors.New("YuCore media asset credentials are unavailable")
 	}
 	config, err = yucoreMediaOpenAIConfigForTask(task, config)
@@ -866,6 +911,9 @@ func ResolveYucoreMediaAssetSourceURL(source string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if parsed.User != nil {
+		return "", errors.New("YuCore media asset source URL must not contain userinfo")
+	}
 	if parsed.IsAbs() {
 		if parsed.Scheme != "http" && parsed.Scheme != "https" {
 			return "", errors.New("unsupported YuCore media asset source URL scheme")
@@ -879,6 +927,9 @@ func ResolveYucoreMediaAssetSourceURL(source string) (string, error) {
 	base, err := url.Parse(config.BaseURL + "/")
 	if err != nil {
 		return "", err
+	}
+	if base.User != nil {
+		return "", errors.New("YuCore media asset source URL must not contain userinfo")
 	}
 	return base.ResolveReference(parsed).String(), nil
 }

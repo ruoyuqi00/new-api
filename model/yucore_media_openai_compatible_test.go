@@ -609,6 +609,50 @@ func TestYucoreMediaManagedTokenIsStablePerUserAndGroup(t *testing.T) {
 	assert.Equal(t, "selected-group", config.ManagedTokenGroup)
 }
 
+func TestYucoreMediaAssetProxyHeadersBindToNormalizedOriginAndBasePath(t *testing.T) {
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":  YucoreMediaAdapterOpenAICompatible,
+		"yucore_media.api_key":  "origin-scoped-key",
+		"yucore_media.base_url": "https://Example.COM:443/v1",
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+	task := &YucoreMediaTask{Metadata: `{"adapter":"openai-compatible"}`}
+
+	for _, target := range []string{
+		"https://example.com/v1/content",
+		"https://EXAMPLE.com:443/v1/content?signature=one",
+	} {
+		headers, err := YucoreMediaAssetProxyHeaders(task, target)
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer origin-scoped-key", headers["Authorization"])
+	}
+	for _, target := range []string{
+		"http://example.com/v1/content",
+		"https://example.com:444/v1/content",
+		"https://example.com/v10/content",
+		"https://cdn.example.com/v1/content",
+	} {
+		headers, err := YucoreMediaAssetProxyHeaders(task, target)
+		require.NoError(t, err)
+		assert.Empty(t, headers)
+	}
+
+	_, err := YucoreMediaAssetProxyHeaders(task, "https://user:password@example.com/v1/content")
+	assert.EqualError(t, err, "YuCore media asset source is invalid")
+}
+
+func TestResolveYucoreMediaAssetSourceURLRejectsUserinfo(t *testing.T) {
+	_, err := ResolveYucoreMediaAssetSourceURL("https://user:password@example.com/content")
+	assert.EqualError(t, err, "YuCore media asset source URL must not contain userinfo")
+}
+
 func TestYucoreMediaRoutedTaskIDUsesPublicTaskID(t *testing.T) {
 	require.NoError(t, DB.AutoMigrate(&Task{}))
 	require.NoError(t, DB.Exec("DELETE FROM tasks").Error)
