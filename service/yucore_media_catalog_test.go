@@ -132,6 +132,86 @@ func TestBuildYucoreMediaCatalogUsesOnlyActiveMediaRoutes(t *testing.T) {
 	assert.Equal(t, YucoreMediaKindVideo, catalog.Groups[0].Models[1].Kind)
 }
 
+func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
+	db := setupYucoreMediaCatalogTest(t)
+	createYucoreMediaCatalogUser(t, db, 9104)
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["yucore_media.model_capabilities"] = `{"SD6-seedance-2.0-1080p":{"reference_limits":{"max_video_duration_ms":15000,"max_audio_duration_ms":6000}}}`
+	common.OptionMapRWMutex.Unlock()
+
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 31, Type: constant.ChannelTypeSora, Name: "seedance", Key: "key-31", Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "multimodal", Model: "sd6-seedance-2.0-1080p", ChannelId: 31, Enabled: true,
+	}).Error)
+
+	catalog, err := BuildYucoreMediaCatalog(9104)
+	require.NoError(t, err)
+	require.NotEmpty(t, catalog.Groups)
+	require.Len(t, catalog.Groups[0].Models, 1)
+	item := catalog.Groups[0].Models[0]
+
+	assert.Equal(t, []int{4, 5, 6, 8, 10, 12, 15}, item.Durations)
+	assert.Equal(t, []string{"1080p"}, item.Resolutions)
+	assert.Equal(t, []string{"media", "frames"}, item.ReferenceModes)
+	assert.True(t, item.SupportsAudio)
+	assert.True(t, item.SupportsSeed)
+	assert.Equal(t, 9, item.InputLimits.MaxReferenceImages)
+	assert.Equal(t, 3, item.InputLimits.MaxReferenceVideos)
+	assert.Equal(t, 1, item.InputLimits.MaxReferenceAudios)
+	assert.Equal(t, 12, item.InputLimits.MaxReferences)
+	assert.Equal(t, 15000, item.InputLimits.MaxReferenceVideoDurationMS)
+	assert.Equal(t, 6000, item.InputLimits.MaxReferenceAudioDurationMS)
+	assert.Equal(t, "per_second", item.Pricing.Unit)
+}
+
+func TestBuildYucoreMediaCatalogHidesProbeModels(t *testing.T) {
+	db := setupYucoreMediaCatalogTest(t)
+	createYucoreMediaCatalogUser(t, db, 9105)
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["yucore_media.model_capabilities"] = `{"seedance-2.0-mini-8s":{"availability":" PrObE "}}`
+	common.OptionMapRWMutex.Unlock()
+
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 32, Type: constant.ChannelTypeSora, Name: "probe", Key: "key-32", Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "multimodal", Model: "seedance-2.0-mini-8s", ChannelId: 32, Enabled: true,
+	}).Error)
+
+	catalog, err := BuildYucoreMediaCatalog(9105)
+	require.NoError(t, err)
+	assert.Empty(t, catalog.Groups)
+}
+
+func TestBuildYucoreMediaCatalogCapabilityProjectionIsolated(t *testing.T) {
+	db := setupYucoreMediaCatalogTest(t)
+	createYucoreMediaCatalogUser(t, db, 9106)
+
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 33, Type: constant.ChannelTypeSora, Name: "seedance", Key: "key-33", Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "multimodal", Model: "sd6-seedance-2.0-1080p", ChannelId: 33, Enabled: true,
+	}).Error)
+
+	first, err := BuildYucoreMediaCatalog(9106)
+	require.NoError(t, err)
+	require.NotEmpty(t, first.Groups)
+	item := &first.Groups[0].Models[0]
+	item.Durations[0] = 999
+	item.Resolutions[0] = "mutated"
+	item.ReferenceModes[0] = "mutated"
+
+	second, err := BuildYucoreMediaCatalog(9106)
+	require.NoError(t, err)
+	require.NotEmpty(t, second.Groups)
+	assert.Equal(t, []int{4, 5, 6, 8, 10, 12, 15}, second.Groups[0].Models[0].Durations)
+	assert.Equal(t, []string{"1080p"}, second.Groups[0].Models[0].Resolutions)
+	assert.Equal(t, []string{"media", "frames"}, second.Groups[0].Models[0].ReferenceModes)
+}
+
 func TestBuildYucoreMediaCatalogExpandsAutoGroupsInConfiguredOrder(t *testing.T) {
 	db := setupYucoreMediaCatalogTest(t)
 	createYucoreMediaCatalogUser(t, db, 9102)

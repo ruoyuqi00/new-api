@@ -37,26 +37,35 @@ type YucoreMediaCatalogPricing struct {
 }
 
 type YucoreMediaCatalogInputLimits struct {
-	MaxPromptChars     int `json:"max_prompt_chars,omitempty"`
-	MaxReferenceImages int `json:"max_reference_images,omitempty"`
-	MaxFileSizeMB      int `json:"max_file_size_mb,omitempty"`
+	MaxPromptChars              int `json:"max_prompt_chars,omitempty"`
+	MaxReferenceImages          int `json:"max_reference_images,omitempty"`
+	MaxReferenceVideos          int `json:"max_reference_videos,omitempty"`
+	MaxReferenceAudios          int `json:"max_reference_audios,omitempty"`
+	MaxReferences               int `json:"max_references,omitempty"`
+	MaxReferenceVideoDurationMS int `json:"max_reference_video_duration_ms,omitempty"`
+	MaxReferenceAudioDurationMS int `json:"max_reference_audio_duration_ms,omitempty"`
+	MaxFileSizeMB               int `json:"max_file_size_mb,omitempty"`
 }
 
 type YucoreMediaCatalogModel struct {
-	Id           string                        `json:"id"`
-	Name         string                        `json:"name"`
-	Description  string                        `json:"description,omitempty"`
-	Kind         string                        `json:"kind"`
-	Modes        []string                      `json:"modes"`
-	Sizes        []string                      `json:"sizes,omitempty"`
-	AspectRatios []string                      `json:"aspect_ratios,omitempty"`
-	Qualities    []string                      `json:"qualities,omitempty"`
-	Formats      []string                      `json:"formats,omitempty"`
-	Counts       []int                         `json:"counts,omitempty"`
-	Durations    []int                         `json:"durations,omitempty"`
-	InputLimits  YucoreMediaCatalogInputLimits `json:"input_limits"`
-	Pricing      YucoreMediaCatalogPricing     `json:"pricing"`
-	Async        bool                          `json:"async"`
+	Id             string                        `json:"id"`
+	Name           string                        `json:"name"`
+	Description    string                        `json:"description,omitempty"`
+	Kind           string                        `json:"kind"`
+	Modes          []string                      `json:"modes"`
+	Sizes          []string                      `json:"sizes,omitempty"`
+	AspectRatios   []string                      `json:"aspect_ratios,omitempty"`
+	Qualities      []string                      `json:"qualities,omitempty"`
+	Formats        []string                      `json:"formats,omitempty"`
+	Counts         []int                         `json:"counts,omitempty"`
+	Durations      []int                         `json:"durations,omitempty"`
+	Resolutions    []string                      `json:"resolutions,omitempty"`
+	ReferenceModes []string                      `json:"reference_modes,omitempty"`
+	SupportsAudio  bool                          `json:"supports_audio"`
+	SupportsSeed   bool                          `json:"supports_seed"`
+	InputLimits    YucoreMediaCatalogInputLimits `json:"input_limits"`
+	Pricing        YucoreMediaCatalogPricing     `json:"pricing"`
+	Async          bool                          `json:"async"`
 }
 
 func yucoreMediaCapabilityForModel(capabilities map[string]model.YucoreMediaModelCapability, modelID string) (model.YucoreMediaModelCapability, bool) {
@@ -129,18 +138,34 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 			MaxFileSizeMB:  25,
 		},
 	}
+	if configured {
+		item.Durations = append([]int(nil), capability.Durations...)
+		item.Resolutions = append([]string(nil), capability.Resolutions...)
+		item.AspectRatios = append([]string(nil), capability.AspectRatios...)
+		item.ReferenceModes = append([]string(nil), capability.ReferenceModes...)
+		item.SupportsAudio = capability.SupportsAudio
+		item.SupportsSeed = capability.SupportsSeed
+		item.InputLimits.MaxReferenceImages = capability.ReferenceLimits.Images
+		item.InputLimits.MaxReferenceVideos = capability.ReferenceLimits.Videos
+		item.InputLimits.MaxReferenceAudios = capability.ReferenceLimits.Audios
+		item.InputLimits.MaxReferences = capability.ReferenceLimits.Total
+		item.InputLimits.MaxReferenceVideoDurationMS = capability.ReferenceLimits.MaxVideoDurationMS
+		item.InputLimits.MaxReferenceAudioDurationMS = capability.ReferenceLimits.MaxAudioDurationMS
+	}
 	if kind == YucoreMediaKindVideo {
 		item.Modes = []string{"text-to-video"}
 		item.Async = true
 		item.InputLimits.MaxPromptChars = 2000
 		if configured && (yucoreMediaCapabilityAllows(capability, "image") || yucoreMediaCapabilityAllows(capability, "image_url") || yucoreMediaCapabilityAllows(capability, "image_urls") || yucoreMediaCapabilityAllows(capability, "images")) {
 			item.Modes = append(item.Modes, "image-to-video")
-			item.InputLimits.MaxReferenceImages = capability.MaxReferenceImages
 			if item.InputLimits.MaxReferenceImages <= 0 {
-				item.InputLimits.MaxReferenceImages = 1
+				item.InputLimits.MaxReferenceImages = capability.MaxReferenceImages
+				if item.InputLimits.MaxReferenceImages <= 0 {
+					item.InputLimits.MaxReferenceImages = 1
+				}
 			}
 		}
-		if configured && capability.FixedDurationSeconds > 0 {
+		if configured && len(item.Durations) == 0 && capability.FixedDurationSeconds > 0 {
 			item.Durations = []int{capability.FixedDurationSeconds}
 		}
 	} else {
@@ -148,25 +173,32 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 		item.Counts = []int{1}
 		if configured && strings.TrimSpace(capability.EditPath) != "" {
 			item.Modes = append(item.Modes, "image-to-image")
-			item.InputLimits.MaxReferenceImages = capability.MaxReferenceImages
 			if item.InputLimits.MaxReferenceImages <= 0 {
-				item.InputLimits.MaxReferenceImages = 16
+				item.InputLimits.MaxReferenceImages = capability.MaxReferenceImages
+				if item.InputLimits.MaxReferenceImages <= 0 {
+					item.InputLimits.MaxReferenceImages = 16
+				}
 			}
 		}
 	}
 
+	pricingUnit := strings.ToLower(strings.TrimSpace(capability.PricingUnit))
+	if pricingUnit == "" {
+		pricingUnit = "per_call"
+		if kind == YucoreMediaKindVideo && !model.YucoreMediaModelUsesPerCallPricing(modelID) {
+			pricingUnit = "per_second"
+		}
+	}
 	if price, ok := ratio_setting.GetModelPrice(modelID, false); ok {
 		price *= groupRatio
-		unit := "per_call"
-		if kind == YucoreMediaKindVideo && !model.YucoreMediaModelUsesPerCallPricing(modelID) {
-			unit = "per_second"
-		}
 		item.Pricing = YucoreMediaCatalogPricing{
-			Unit:     unit,
+			Unit:     pricingUnit,
 			Amount:   price,
 			Currency: "CNY",
 			Display:  fmt.Sprintf("CNY %g", price),
 		}
+	} else if configured && strings.TrimSpace(capability.PricingUnit) != "" {
+		item.Pricing.Unit = pricingUnit
 	}
 	return item
 }
@@ -226,6 +258,9 @@ func BuildYucoreMediaCatalog(userID int) (*YucoreMediaCatalog, error) {
 		seenModels := make(map[string]struct{})
 		for _, ability := range abilities {
 			capability, configured := yucoreMediaCapabilityForModel(capabilities, ability.Model)
+			if configured && strings.EqualFold(strings.TrimSpace(capability.Availability), model.YucoreMediaAvailabilityProbe) {
+				continue
+			}
 			for _, kind := range yucoreMediaKindsForAbility(ability, capability, configured) {
 				key := strings.ToLower(ability.Model) + "\x00" + kind
 				if _, exists := seenModels[key]; exists {
