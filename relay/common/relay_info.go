@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -696,16 +697,39 @@ func (info *RelayInfo) HasSendResponse() bool {
 type TaskRelayInfo struct {
 	Action       string
 	OriginTaskID string
+	Platform     constant.TaskPlatform
 	// PublicTaskID 是提交时预生成的 task_xxxx 格式公开 ID，
 	// 供 DoResponse 在返回给客户端时使用（避免暴露上游真实 ID）。
-	PublicTaskID string
+	PublicTaskID   string
+	RequestWritten bool
 
-	ConsumeQuota bool
+	ConsumeQuota     bool
+	billingMu        sync.Mutex
+	billingFinalized bool
 
 	// LockedChannel holds the full channel object when the request is bound to
 	// a specific channel (e.g., remix on origin task's channel). Stored as any
 	// to avoid an import cycle with model; callers type-assert to *model.Channel.
 	LockedChannel any
+}
+
+func (info *TaskRelayInfo) BeginBillingFinalization() bool {
+	if info == nil {
+		return false
+	}
+	info.billingMu.Lock()
+	defer info.billingMu.Unlock()
+	if info.billingFinalized {
+		return false
+	}
+	info.billingFinalized = true
+	return true
+}
+
+func (info *TaskRelayInfo) BeginRequestAttempt() {
+	if info != nil {
+		info.RequestWritten = false
+	}
 }
 
 type TaskSubmitReq struct {

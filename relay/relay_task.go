@@ -150,13 +150,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if platform == "" {
 		platform = GetTaskPlatform(c)
 	}
+	info.Platform = platform
 	adaptor := GetTaskAdaptor(platform)
 	if adaptor == nil {
-		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("invalid api platform: %s", platform), "invalid_api_platform", http.StatusBadRequest)
+		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("invalid api platform: %s", platform), "invalid_api_platform", http.StatusBadRequest).WithSubmissionState(dto.TaskSubmissionNotSent)
 	}
 	adaptor.Init(info)
 	if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
-		return nil, taskErr
+		return nil, taskErr.WithSubmissionState(dto.TaskSubmissionNotSent)
 	}
 
 	// 2. 确定模型名称
@@ -169,7 +170,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	info.OriginModelName = modelName
 	info.UpstreamModelName = modelName
 	if err := helper.ModelMappedHelper(c, info, nil); err != nil {
-		return nil, service.TaskErrorWrapperLocal(err, "model_mapping_failed", http.StatusBadRequest)
+		return nil, service.TaskErrorWrapperLocal(err, "model_mapping_failed", http.StatusBadRequest).WithSubmissionState(dto.TaskSubmissionNotSent)
 	}
 
 	// 3. 预生成公开 task ID（仅首次）
@@ -178,52 +179,61 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 4. 价格计算：基础模型价格
-	info.OriginModelName = modelName
-	priceData, err := helper.ModelPriceHelperPerCall(c, info)
-	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
-	}
-	info.PriceData = priceData
-	resolveTaskPerCallBilling(info, modelName)
-
-	// 5. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）
-	//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
-	//    ResolveOriginTask 可能已在 remix 路径中预设了 OtherRatios，此处合并。
-	if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
-		for k, v := range estimatedRatios {
-			info.PriceData.AddOtherRatio(k, v)
+	if !info.TaskPricingResolved {
+		info.OriginModelName = modelName
+		priceData, err := helper.ModelPriceHelperPerCall(c, info)
+		if err != nil {
+			return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest).WithSubmissionState(dto.TaskSubmissionNotSent)
 		}
-	}
+		info.PriceData = priceData
+		resolveTaskPerCallBilling(info, modelName)
 
-	// 6. 将 OtherRatios 应用到基础额度
-	if !info.TaskPerCallBilling {
-		quota, clamp := applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, info.PriceData.OtherRatios)
-		noteTaskQuotaClamp(info, clamp, "task_submit_other_ratios")
-		info.PriceData.Quota = quota
+		// 5. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）
+		//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
+		//    ResolveOriginTask 可能已在 remix 路径中预设了 OtherRatios，此处合并。
+		if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
+			for k, v := range estimatedRatios {
+				info.PriceData.AddOtherRatio(k, v)
+			}
+		}
+
+		// 6. 将 OtherRatios 应用到基础额度
+		if !info.TaskPerCallBilling {
+			quota, clamp := applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, info.PriceData.OtherRatios)
+			noteTaskQuotaClamp(info, clamp, "task_submit_other_ratios")
+			info.PriceData.Quota = quota
+		}
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
 	if info.Billing == nil && !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
-			return nil, service.TaskErrorFromAPIError(apiErr)
+			return nil, service.TaskErrorFromAPIError(apiErr).WithSubmissionState(dto.TaskSubmissionNotSent)
 		}
 	}
 
 	// 8. 构建请求体
 	requestBody, err := adaptor.BuildRequestBody(c, info)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError).WithSubmissionState(dto.TaskSubmissionNotSent)
 	}
 
 	// 9. 发送请求
+	info.BeginRequestAttempt()
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
+		state := classifyTaskSubmissionState(info.RequestWritten, 0, false)
+		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError).WithSubmissionState(state)
 	}
-	if resp != nil && resp.StatusCode != http.StatusOK {
-		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+	if resp == nil {
+		return nil, service.TaskErrorWrapper(errors.New("upstream returned no task submission response"), "invalid_response", http.StatusBadGateway).
+			WithSubmissionState(classifyTaskSubmissionState(info.RequestWritten, 0, false))
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		_ = resp.Body.Close()
+		return nil, service.TaskErrorWrapper(fmt.Errorf("upstream rejected task submission with status %d", resp.StatusCode), "fail_to_fetch_task", resp.StatusCode).
+			WithSubmissionState(classifyTaskSubmissionState(info.RequestWritten, resp.StatusCode, false))
 	}
 
 	// 10. 返回 OtherRatios 给下游（header 必须在 DoResponse 写 body 之前设置）
@@ -235,14 +245,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	c.Header("X-New-Api-Other-Ratios", string(ratiosJSON))
 
 	// 11. 解析响应
-	upstreamTaskID, taskData, taskErr := adaptor.DoResponse(c, resp, info)
+	upstreamTaskID, taskData, taskErr := doValidatedTaskResponse(c, adaptor, resp, info)
 	if taskErr != nil {
 		return nil, taskErr
 	}
 
 	// 11. 提交后计费调整：让适配器根据上游实际返回调整 OtherRatios
 	finalQuota := info.PriceData.Quota
-	if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
+	if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); !info.TaskPerCallBilling && len(adjustedRatios) > 0 {
 		// 基于调整后的 ratios 重新计算 quota
 		var clamp *common.QuotaClamp
 		finalQuota, clamp = recalcQuotaFromRatiosChecked(info, adjustedRatios)
@@ -257,6 +267,76 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+type taskResponseBuffer struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func (w *taskResponseBuffer) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *taskResponseBuffer) WriteHeader(statusCode int) {
+	if w.status == 0 {
+		w.status = statusCode
+	}
+}
+
+func (w *taskResponseBuffer) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.body.Write(data)
+}
+
+func doValidatedTaskResponse(c *gin.Context, adaptor channel.TaskAdaptor, resp *http.Response, info *relaycommon.RelayInfo) (string, []byte, *dto.TaskError) {
+	buffer := &taskResponseBuffer{}
+	bufferedContext, _ := gin.CreateTestContext(buffer)
+	bufferedContext.Request = c.Request
+	bufferedContext.Keys = c.Keys
+	bufferedContext.Params = c.Params
+
+	upstreamTaskID, taskData, taskErr := adaptor.DoResponse(bufferedContext, resp, info)
+	if taskErr != nil {
+		return "", nil, service.TaskErrorWrapper(errors.New("upstream accepted task submission but returned an invalid response"), "invalid_response", http.StatusBadGateway).
+			WithSubmissionState(dto.TaskSubmissionAccepted)
+	}
+	if upstreamTaskID == "" {
+		return "", nil, service.TaskErrorWrapper(errors.New("upstream accepted task submission without a task id"), "invalid_response", http.StatusBadGateway).
+			WithSubmissionState(dto.TaskSubmissionAccepted)
+	}
+
+	for key, values := range buffer.Header() {
+		c.Writer.Header()[key] = append([]string(nil), values...)
+	}
+	status := buffer.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	c.Writer.WriteHeader(status)
+	_, _ = c.Writer.Write(buffer.body.Bytes())
+	return upstreamTaskID, taskData, nil
+}
+
+func classifyTaskSubmissionState(wroteRequest bool, statusCode int, acceptedResponse bool) dto.TaskSubmissionState {
+	if acceptedResponse || statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices {
+		return dto.TaskSubmissionAccepted
+	}
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+		http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests:
+		return dto.TaskSubmissionRejected
+	}
+	if statusCode != 0 || wroteRequest {
+		return dto.TaskSubmissionAmbiguous
+	}
+	return dto.TaskSubmissionNotSent
 }
 
 func resolveTaskPerCallBilling(info *relaycommon.RelayInfo, modelName string) {

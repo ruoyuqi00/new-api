@@ -3,15 +3,103 @@ package relay
 import (
 	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type responseWritingTaskAdaptor struct {
+	channel.TaskAdaptor
+	taskID string
+}
+
+func (a *responseWritingTaskAdaptor) DoResponse(c *gin.Context, _ *http.Response, _ *relaycommon.RelayInfo) (string, []byte, *dto.TaskError) {
+	c.JSON(http.StatusOK, map[string]any{"task_id": "public"})
+	return a.taskID, nil, nil
+}
+
+func TestTaskResponseIsCommittedOnlyAfterTaskIDValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	invalidRecorder := httptest.NewRecorder()
+	invalidContext, _ := gin.CreateTestContext(invalidRecorder)
+	_, _, taskErr := doValidatedTaskResponse(invalidContext, &responseWritingTaskAdaptor{}, &http.Response{}, &relaycommon.RelayInfo{})
+	require.NotNil(t, taskErr)
+	assert.Equal(t, dto.TaskSubmissionAccepted, taskErr.SubmissionState())
+	assert.Empty(t, invalidRecorder.Body.String())
+
+	validRecorder := httptest.NewRecorder()
+	validContext, _ := gin.CreateTestContext(validRecorder)
+	taskID, _, taskErr := doValidatedTaskResponse(validContext, &responseWritingTaskAdaptor{taskID: "upstream-id"}, &http.Response{}, &relaycommon.RelayInfo{})
+	require.Nil(t, taskErr)
+	assert.Equal(t, "upstream-id", taskID)
+	assert.JSONEq(t, `{"task_id":"public"}`, validRecorder.Body.String())
+}
+
+func TestRejectedRetryThenPreWriteFailureIsNotAmbiguous(t *testing.T) {
+	info := &relaycommon.TaskRelayInfo{RequestWritten: true}
+	assert.Equal(t, dto.TaskSubmissionRejected, classifyTaskSubmissionState(info.RequestWritten, http.StatusTooManyRequests, false))
+
+	info.BeginRequestAttempt()
+	assert.False(t, info.RequestWritten)
+	secondError := (&dto.TaskError{StatusCode: http.StatusInternalServerError}).WithSubmissionState(
+		classifyTaskSubmissionState(info.RequestWritten, 0, false),
+	)
+	assert.Equal(t, dto.TaskSubmissionNotSent, secondError.SubmissionState())
+	assert.True(t, service.ShouldRefundTaskSubmission(secondError))
+}
+
+func TestTaskSubmissionClassification(t *testing.T) {
+	tests := []struct {
+		name       string
+		wrote      bool
+		statusCode int
+		accepted   bool
+		want       dto.TaskSubmissionState
+	}{
+		{name: "transport before write", want: dto.TaskSubmissionNotSent},
+		{name: "explicit rejection", wrote: true, statusCode: http.StatusUnprocessableEntity, want: dto.TaskSubmissionRejected},
+		{name: "timeout after write", wrote: true, statusCode: http.StatusRequestTimeout, want: dto.TaskSubmissionAmbiguous},
+		{name: "server error after write", wrote: true, statusCode: http.StatusBadGateway, want: dto.TaskSubmissionAmbiguous},
+		{name: "unparseable success", wrote: true, statusCode: http.StatusOK, accepted: true, want: dto.TaskSubmissionAccepted},
+		{name: "unspecified response after write", wrote: true, statusCode: http.StatusTeapot, want: dto.TaskSubmissionAmbiguous},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, classifyTaskSubmissionState(tt.wrote, tt.statusCode, tt.accepted))
+		})
+	}
+}
+
+func TestTaskCatalogPricingProducesExactFrozenQuota(t *testing.T) {
+	groupRatio := 1.2
+	perCall, clamp := common.QuotaFromFloatChecked(0.5 * common.QuotaPerUnit * groupRatio)
+	require.Nil(t, clamp)
+	perCallInfo := &relaycommon.RelayInfo{PriceData: types.PriceData{Quota: perCall, OtherRatios: map[string]float64{"seconds": 99}}}
+	resolveTaskPerCallBilling(perCallInfo, "veo-3.1-fast")
+	perCallQuota := perCallInfo.PriceData.Quota
+	if !perCallInfo.TaskPerCallBilling {
+		perCallQuota = applyTaskOtherRatiosQuota(perCallQuota, perCallInfo.PriceData.OtherRatios)
+	}
+	assert.Equal(t, 300_000, perCallQuota)
+
+	perSecondBase, clamp := common.QuotaFromFloatChecked(0.35 * common.QuotaPerUnit * groupRatio)
+	require.Nil(t, clamp)
+	perSecond := applyTaskOtherRatiosQuota(perSecondBase, map[string]float64{"seconds": 5})
+	assert.Equal(t, 1_050_000, perSecond)
+	assert.GreaterOrEqual(t, perSecond, int(0.35*5*common.QuotaPerUnit))
+}
 
 func TestApplyTaskOtherRatiosQuota(t *testing.T) {
 	require.Equal(t, 2000, applyTaskOtherRatiosQuota(1000, map[string]float64{

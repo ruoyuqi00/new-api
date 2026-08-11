@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strings"
 	"sync"
@@ -506,7 +507,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
-	if c != nil && c.Request != nil {
+	if c != nil && c.Request != nil && httptrace.ContextClientTrace(req.Context()) == nil {
 		req = req.WithContext(c.Request.Context())
 	}
 	resp, err := client.Do(req)
@@ -537,6 +538,18 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
 	ApplyUpstreamBodyMetadata(req, requestBody)
+	trace := &httptrace.ClientTrace{
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			if info != nil && info.TaskRelayInfo != nil {
+				info.TaskRelayInfo.RequestWritten = true
+			}
+		},
+	}
+	requestContext := req.Context()
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	req = req.WithContext(httptrace.WithClientTrace(requestContext, trace))
 
 	err = a.BuildRequestHeader(c, req, info)
 	if err != nil {

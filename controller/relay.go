@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -642,11 +643,6 @@ func RelayTask(c *gin.Context) {
 
 	var result *relay.TaskSubmitResult
 	var taskErr *dto.TaskError
-	defer func() {
-		if taskErr != nil && relayInfo.Billing != nil {
-			relayInfo.Billing.Refund(c)
-		}
-	}()
 
 	retryParam := &service.RetryParam{
 		Ctx:         c,
@@ -735,35 +731,58 @@ func RelayTask(c *gin.Context) {
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
 	if taskErr == nil {
-		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-			common.SysError("settle task billing error: " + settleErr.Error())
+		if billingErr := service.FinalizeTaskSubmissionBilling(c, relayInfo, nil, result.Quota); billingErr != nil {
+			common.SysError("finalize task billing error: " + billingErr.Error())
 		}
-		service.LogTaskConsumption(c, relayInfo)
-
-		task := model.InitTask(result.Platform, relayInfo)
-		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
-		task.PrivateData.BillingSource = relayInfo.BillingSource
-		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
-		task.PrivateData.TokenId = relayInfo.TokenId
-		task.PrivateData.NodeName = common.NodeName
-		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:      relayInfo.PriceData.ModelPrice,
-			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:      relayInfo.PriceData.ModelRatio,
-			OtherRatios:     relayInfo.PriceData.OtherRatios,
-			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  relayInfo.TaskPerCallBilling,
-		}
-		task.Quota = result.Quota
-		task.Data = result.TaskData
-		task.Action = relayInfo.Action
-		if insertErr := task.Insert(); insertErr != nil {
+		if insertErr := persistTaskSubmission(relayInfo, result.Platform, model.TaskStatusNotStart, result.Quota, result.UpstreamTaskID, result.TaskData); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
+		}
+	} else {
+		if billingErr := service.FinalizeTaskSubmissionBilling(c, relayInfo, taskErr, 0); billingErr != nil {
+			common.SysError("finalize task billing error: " + billingErr.Error())
+		}
+		if state := taskErr.SubmissionState(); state == dto.TaskSubmissionAmbiguous || state == dto.TaskSubmissionAccepted {
+			if insertErr := persistTaskSubmission(relayInfo, relayInfo.Platform, model.TaskStatusUnknown, relayInfo.PriceData.Quota, "", nil); insertErr != nil {
+				common.SysError("insert unknown task error: " + insertErr.Error())
+			}
+			setUnknownTaskSubmissionData(taskErr, relayInfo.PublicTaskID)
 		}
 	}
 
 	if taskErr != nil {
 		respondTaskError(c, taskErr)
+	}
+}
+
+func persistTaskSubmission(info *relaycommon.RelayInfo, platform constant.TaskPlatform, status model.TaskStatus, quota int, upstreamTaskID string, taskData []byte) error {
+	task := model.InitTask(platform, info)
+	task.Status = status
+	task.PrivateData.UpstreamTaskID = upstreamTaskID
+	task.PrivateData.BillingSource = info.BillingSource
+	task.PrivateData.SubscriptionId = info.SubscriptionId
+	task.PrivateData.TokenId = info.TokenId
+	task.PrivateData.NodeName = common.NodeName
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelPrice:      info.PriceData.ModelPrice,
+		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:      info.PriceData.ModelRatio,
+		OtherRatios:     maps.Clone(info.PriceData.OtherRatios),
+		OriginModelName: info.OriginModelName,
+		PerCallBilling:  info.TaskPerCallBilling,
+	}
+	task.Quota = quota
+	task.Data = taskData
+	task.Action = info.Action
+	return task.Insert()
+}
+
+func setUnknownTaskSubmissionData(taskErr *dto.TaskError, taskID string) {
+	if taskErr == nil {
+		return
+	}
+	taskErr.Data = map[string]any{
+		"task_id":          taskID,
+		"submission_state": "unknown",
 	}
 }
 
@@ -777,6 +796,9 @@ func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {
 	if taskErr == nil {
+		return false
+	}
+	if state := taskErr.SubmissionState(); state == dto.TaskSubmissionAmbiguous || state == dto.TaskSubmissionAccepted {
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {

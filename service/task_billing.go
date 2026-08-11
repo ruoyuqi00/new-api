@@ -6,12 +6,65 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
+
+func ShouldRefundTaskSubmission(taskErr *dto.TaskError) bool {
+	if taskErr == nil {
+		return false
+	}
+	switch taskErr.SubmissionState() {
+	case dto.TaskSubmissionAmbiguous, dto.TaskSubmissionAccepted:
+		return false
+	default:
+		return true
+	}
+}
+
+// FinalizeTaskSubmissionBilling selects exactly one terminal billing action for a task submission.
+func FinalizeTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, taskErr *dto.TaskError, successfulQuota int) error {
+	if info == nil || info.TaskRelayInfo == nil || !info.TaskRelayInfo.BeginBillingFinalization() {
+		return nil
+	}
+	if taskErr != nil && ShouldRefundTaskSubmission(taskErr) {
+		if info.Billing != nil {
+			info.Billing.Refund(c)
+		}
+		return nil
+	}
+
+	quota := successfulQuota
+	if taskErr != nil {
+		quota = frozenTaskSubmissionQuota(info)
+	}
+	info.PriceData.Quota = quota
+	settleErr := SettleBilling(c, info, quota)
+	LogTaskConsumption(c, info)
+	return settleErr
+}
+
+func frozenTaskSubmissionQuota(info *relaycommon.RelayInfo) int {
+	if info == nil {
+		return 0
+	}
+	if info.Billing != nil {
+		if quota := info.Billing.GetPreConsumedQuota(); quota > 0 || info.PriceData.FreeModel {
+			return quota
+		}
+	}
+	if info.FinalPreConsumedQuota > 0 {
+		return info.FinalPreConsumedQuota
+	}
+	if !info.PriceData.FreeModel && info.PriceData.Quota > 0 {
+		return info.PriceData.Quota
+	}
+	return 0
+}
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。

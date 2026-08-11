@@ -5,12 +5,36 @@ import (
 )
 
 type TaskError struct {
-	Code       string `json:"code"`
-	Message    string `json:"message"`
-	Data       any    `json:"data"`
-	StatusCode int    `json:"-"`
-	LocalError bool   `json:"-"`
-	Error      error  `json:"-"`
+	Code            string `json:"code"`
+	Message         string `json:"message"`
+	Data            any    `json:"data"`
+	StatusCode      int    `json:"-"`
+	LocalError      bool   `json:"-"`
+	Error           error  `json:"-"`
+	submissionState TaskSubmissionState
+}
+
+type TaskSubmissionState string
+
+const (
+	TaskSubmissionNotSent   TaskSubmissionState = "not_sent"
+	TaskSubmissionRejected  TaskSubmissionState = "rejected"
+	TaskSubmissionAmbiguous TaskSubmissionState = "ambiguous"
+	TaskSubmissionAccepted  TaskSubmissionState = "accepted"
+)
+
+func (e *TaskError) WithSubmissionState(state TaskSubmissionState) *TaskError {
+	if e != nil {
+		e.submissionState = state
+	}
+	return e
+}
+
+func (e *TaskError) SubmissionState() TaskSubmissionState {
+	if e == nil {
+		return ""
+	}
+	return e.submissionState
 }
 
 type TaskData interface {

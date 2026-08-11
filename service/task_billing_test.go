@@ -5,18 +5,178 @@ import (
 	"encoding/json"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type recordingTaskBillingSettler struct {
+	preConsumed int
+	settled     []int
+	refunds     int
+}
+
+func (s *recordingTaskBillingSettler) Settle(quota int) error {
+	s.settled = append(s.settled, quota)
+	return nil
+}
+func (s *recordingTaskBillingSettler) Refund(*gin.Context) { s.refunds++ }
+func (s *recordingTaskBillingSettler) NeedsRefund() bool {
+	return s.refunds == 0 && len(s.settled) == 0
+}
+func (s *recordingTaskBillingSettler) GetPreConsumedQuota() int {
+	return s.preConsumed
+}
+func (s *recordingTaskBillingSettler) Reserve(int) error { return nil }
+
+func TestTaskSubmissionRefundability(t *testing.T) {
+	tests := []struct {
+		state dto.TaskSubmissionState
+		want  bool
+	}{
+		{state: dto.TaskSubmissionNotSent, want: true},
+		{state: dto.TaskSubmissionRejected, want: true},
+		{state: dto.TaskSubmissionAmbiguous, want: false},
+		{state: dto.TaskSubmissionAccepted, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.state), func(t *testing.T) {
+			taskErr := (&dto.TaskError{}).WithSubmissionState(tt.state)
+			assert.Equal(t, tt.want, ShouldRefundTaskSubmission(taskErr))
+		})
+	}
+}
+
+func TestTaskSubmissionStateDoesNotLeakThroughJSON(t *testing.T) {
+	taskErr := (&dto.TaskError{Code: "upstream_error", Message: "safe"}).WithSubmissionState(dto.TaskSubmissionAmbiguous)
+	payload, err := common.Marshal(taskErr)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"code":"upstream_error","message":"safe","data":null}`, string(payload))
+}
+
+func TestFinalizeRetainedTaskSubmissionSettlesFrozenQuotaOnce(t *testing.T) {
+	for _, state := range []dto.TaskSubmissionState{dto.TaskSubmissionAmbiguous, dto.TaskSubmissionAccepted} {
+		t.Run(string(state), func(t *testing.T) {
+			truncate(t)
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(nil)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			billing := &recordingTaskBillingSettler{preConsumed: 300_000}
+			info := &relaycommon.RelayInfo{
+				TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "generate"},
+				Billing:         billing,
+				UserId:          101,
+				ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 201},
+				TokenId:         301,
+				UsingGroup:      "default",
+				OriginModelName: "veo-3.1-fast",
+				PriceData: types.PriceData{
+					ModelPrice:     0.5,
+					Quota:          300_000,
+					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1.2},
+				},
+			}
+			taskErr := (&dto.TaskError{}).WithSubmissionState(state)
+
+			require.NoError(t, FinalizeTaskSubmissionBilling(c, info, taskErr, 0))
+			require.NoError(t, FinalizeTaskSubmissionBilling(c, info, taskErr, 0))
+
+			assert.Equal(t, []int{300_000}, billing.settled)
+			assert.Zero(t, billing.refunds)
+			assert.Equal(t, int64(1), countLogs(t))
+		})
+	}
+}
+
+func TestFinalizeRefundableTaskSubmissionRefundsWithoutSettlement(t *testing.T) {
+	for _, state := range []dto.TaskSubmissionState{dto.TaskSubmissionRejected, dto.TaskSubmissionNotSent} {
+		t.Run(string(state), func(t *testing.T) {
+			billing := &recordingTaskBillingSettler{preConsumed: 1_050_000}
+			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}, Billing: billing}
+			taskErr := (&dto.TaskError{}).WithSubmissionState(state)
+
+			require.NoError(t, FinalizeTaskSubmissionBilling(nil, info, taskErr, 0))
+
+			assert.Empty(t, billing.settled)
+			assert.Equal(t, 1, billing.refunds)
+		})
+	}
+}
+
+func TestFrozenTaskSubmissionQuotaNeverRetainsZeroForPaidSubmission(t *testing.T) {
+	tests := []struct {
+		name string
+		info *relaycommon.RelayInfo
+		want int
+	}{
+		{
+			name: "billing session reservation",
+			info: &relaycommon.RelayInfo{Billing: &recordingTaskBillingSettler{preConsumed: 300_000}, PriceData: types.PriceData{Quota: 999_999}},
+			want: 300_000,
+		},
+		{
+			name: "legacy frozen reservation",
+			info: &relaycommon.RelayInfo{FinalPreConsumedQuota: 1_050_000, PriceData: types.PriceData{Quota: 999_999}},
+			want: 1_050_000,
+		},
+		{
+			name: "paid defensive fallback",
+			info: &relaycommon.RelayInfo{PriceData: types.PriceData{Quota: 300_000}},
+			want: 300_000,
+		},
+		{
+			name: "free model",
+			info: &relaycommon.RelayInfo{PriceData: types.PriceData{FreeModel: true}},
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, frozenTaskSubmissionQuota(tt.info))
+		})
+	}
+}
+
+func TestUnknownTaskIsExcludedFromPollingAndTimeoutRefundLifecycle(t *testing.T) {
+	truncate(t)
+	now := time.Now().Unix()
+	unknown := makeTask(1, 1, 300_000, 0, BillingSourceWallet, 0)
+	unknown.TaskID = "task_unknown_submission"
+	unknown.Status = model.TaskStatusUnknown
+	unknown.Progress = "0%"
+	unknown.SubmitTime = now - 3600
+	require.NoError(t, model.DB.Create(unknown).Error)
+
+	active := makeTask(1, 1, 300_000, 0, BillingSourceWallet, 0)
+	active.TaskID = "task_active_submission"
+	active.Status = model.TaskStatusInProgress
+	active.Progress = "50%"
+	active.SubmitTime = now - 3600
+	require.NoError(t, model.DB.Create(active).Error)
+
+	timedOut := model.GetTimedOutUnfinishedTasks(now, 10)
+	require.Len(t, timedOut, 1)
+	assert.Equal(t, active.TaskID, timedOut[0].TaskID)
+	pollable := model.GetAllUnFinishSyncTasks(10)
+	require.Len(t, pollable, 1)
+	assert.Equal(t, active.TaskID, pollable[0].TaskID)
+	assert.True(t, model.HasUnfinishedSyncTasks())
+
+	require.NoError(t, model.DB.Delete(active).Error)
+	assert.False(t, model.HasUnfinishedSyncTasks())
+}
 
 func TestMain(m *testing.M) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

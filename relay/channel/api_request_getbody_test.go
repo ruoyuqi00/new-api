@@ -142,7 +142,7 @@ func TestDoTaskApiRequestKeepsNativeReplayableGetBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", bytes.NewReader(payload))
-	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
 	adaptor := &replayTaskAdaptor{baseURL: server.URL}
 
 	resp, err := DoTaskApiRequest(adaptor, c, info, bytes.NewReader(payload))
@@ -151,6 +151,7 @@ func TestDoTaskApiRequestKeepsNativeReplayableGetBody(t *testing.T) {
 	upstreamResult := <-received
 	require.NoError(t, upstreamResult.err)
 	assert.Equal(t, payload, upstreamResult.body)
+	assert.True(t, info.TaskRelayInfo.RequestWritten)
 
 	require.NotNil(t, adaptor.capturedReq)
 	require.NotNil(t, adaptor.capturedReq.GetBody)
