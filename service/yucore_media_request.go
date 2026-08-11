@@ -1,8 +1,11 @@
 package service
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
+	"net/http"
+	"net/netip"
 	"net/url"
 	"path"
 	"strconv"
@@ -17,6 +20,21 @@ const (
 	maxYucoreMediaReferenceValueSize  = 512 * 1024
 	maxYucoreMediaOpaqueReferenceSize = 160
 )
+
+var yucoreMediaNonPublicAddressPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"),
+}
 
 type YucoreMediaRequestOptions struct {
 	Mode           string
@@ -263,19 +281,8 @@ func normalizeYucoreMediaReferenceValue(role string, value string) (string, erro
 
 	lowerValue := strings.ToLower(value)
 	if strings.HasPrefix(lowerValue, "data:") {
-		if role != "image" && role != "first_frame" && role != "last_frame" {
-			return "", fmt.Errorf("media reference role %s does not accept a data URL", role)
-		}
-		if len(value) > maxYucoreMediaReferenceValueSize {
-			return "", fmt.Errorf("media reference data URL is too large")
-		}
-		comma := strings.IndexByte(value, ',')
-		if comma < 0 {
-			return "", fmt.Errorf("media reference must be an image data URL")
-		}
-		mediaType := strings.TrimSpace(strings.SplitN(lowerValue[len("data:"):comma], ";", 2)[0])
-		if !strings.HasPrefix(mediaType, "image/") || len(mediaType) == len("image/") {
-			return "", fmt.Errorf("media reference must be an image data URL")
+		if err := validateYucoreMediaDataURL(role, value); err != nil {
+			return "", err
 		}
 		return value, nil
 	}
@@ -301,6 +308,9 @@ func normalizeYucoreMediaReferenceValue(role string, value string) (string, erro
 		}
 		if parsed.Host == "" || !yucoreMediaValidHost(parsed.Hostname()) {
 			return "", fmt.Errorf("media reference URL requires a valid host")
+		}
+		if !yucoreMediaPublicHost(parsed.Hostname()) {
+			return "", fmt.Errorf("media reference URL requires a public host")
 		}
 		return value, nil
 	}
@@ -345,6 +355,57 @@ func normalizeYucoreMediaReferenceValue(role string, value string) (string, erro
 	return "", fmt.Errorf("media reference value is invalid")
 }
 
+func validateYucoreMediaDataURL(role string, value string) error {
+	if role != "image" && role != "first_frame" && role != "last_frame" {
+		return fmt.Errorf("media reference role %s does not accept a data URL", role)
+	}
+	if len(value) > maxYucoreMediaReferenceValueSize {
+		return fmt.Errorf("media reference data URL is too large")
+	}
+	comma := strings.IndexByte(value, ',')
+	if comma < 0 {
+		return fmt.Errorf("media reference must be a base64 image data URL")
+	}
+	headerParts := strings.Split(strings.ToLower(value[len("data:"):comma]), ";")
+	if len(headerParts) != 2 || strings.TrimSpace(headerParts[1]) != "base64" {
+		return fmt.Errorf("media reference must be a base64 image data URL")
+	}
+	declaredType := strings.TrimSpace(headerParts[0])
+	if declaredType == "image/jpg" {
+		declaredType = "image/jpeg"
+	}
+	switch declaredType {
+	case "image/png", "image/jpeg", "image/webp", "image/gif":
+	default:
+		return fmt.Errorf("media reference data URL must use a supported raster image type")
+	}
+	encoded := value[comma+1:]
+	if encoded == "" {
+		return fmt.Errorf("media reference data URL requires a nonempty payload")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(encoded)
+	}
+	if err != nil {
+		return fmt.Errorf("media reference data URL contains invalid base64")
+	}
+	if len(decoded) == 0 {
+		return fmt.Errorf("media reference data URL requires a nonempty payload")
+	}
+	if len(decoded) > maxYucoreMediaReferenceValueSize {
+		return fmt.Errorf("media reference decoded data is too large")
+	}
+	detectedType := strings.TrimSpace(strings.SplitN(http.DetectContentType(decoded), ";", 2)[0])
+	if detectedType == "image/jpg" {
+		detectedType = "image/jpeg"
+	}
+	if detectedType != declaredType {
+		return fmt.Errorf("media reference declared image type does not match decoded content")
+	}
+	return nil
+}
+
 func yucoreMediaContainsControl(value string) bool {
 	for _, character := range value {
 		if unicode.IsControl(character) {
@@ -369,6 +430,58 @@ func yucoreMediaValidHost(host string) bool {
 		for _, character := range label {
 			if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
 				(character < '0' || character > '9') && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func yucoreMediaPublicHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	if address, err := netip.ParseAddr(host); err == nil {
+		address = address.Unmap()
+		if address.Zone() != "" || !address.IsGlobalUnicast() || address.IsLoopback() || address.IsUnspecified() ||
+			address.IsPrivate() || address.IsLinkLocalUnicast() || address.IsMulticast() {
+			return false
+		}
+		for _, prefix := range yucoreMediaNonPublicAddressPrefixes {
+			if prefix.Contains(address) {
+				return false
+			}
+		}
+		return true
+	}
+	if yucoreMediaLooksNumericAddress(host) {
+		return false
+	}
+	// Task 5's fetch boundary must resolve DNS and re-enforce public egress to prevent DNS rebinding.
+	return true
+}
+
+func yucoreMediaLooksNumericAddress(host string) bool {
+	parts := strings.Split(host, ".")
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		if strings.HasPrefix(strings.ToLower(part), "0x") {
+			digits := part[2:]
+			if digits == "" {
+				return false
+			}
+			for _, character := range digits {
+				if (character < '0' || character > '9') && (character < 'a' || character > 'f') && (character < 'A' || character > 'F') {
+					return false
+				}
+			}
+			continue
+		}
+		for _, character := range part {
+			if character < '0' || character > '9' {
 				return false
 			}
 		}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -31,6 +32,10 @@ func yucoreMediaRequestTestModel(id string) YucoreMediaCatalogModel {
 }
 
 func intPointer(value int) *int { return &value }
+
+func yucoreMediaTestDataURL(mimeType string, payload []byte) string {
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(payload)
+}
 
 func TestNormalizeYucoreMediaRequestPreservesExplicitOptionalZeroValues(t *testing.T) {
 	generateAudio := false
@@ -224,20 +229,31 @@ func TestNormalizeYucoreMediaRequestRejectsInvalidReferences(t *testing.T) {
 
 func TestNormalizeYucoreMediaRequestAcceptsSafeReferenceValues(t *testing.T) {
 	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	pngDataURL := yucoreMediaTestDataURL("image/png", append([]byte("\x89PNG\r\n\x1a\n"), []byte("payload")...))
+	jpegDataURL := yucoreMediaTestDataURL("image/jpeg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'})
+	jpgAliasDataURL := yucoreMediaTestDataURL("image/jpg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'})
+	webpDataURL := yucoreMediaTestDataURL("image/webp", []byte{'R', 'I', 'F', 'F', 0x08, 0x00, 0x00, 0x00, 'W', 'E', 'B', 'P', 'V', 'P', '8', ' '})
+	gifDataURL := yucoreMediaTestDataURL("image/gif", []byte("GIF89a\x01\x00\x01\x00"))
 	tests := []struct {
 		name       string
 		references []model.YucoreMediaReferenceInput
 	}{
 		{name: "http URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "http://cdn.example.com/reference.png"}}},
 		{name: "https URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "https://cdn.example.com/reference.png?size=large#preview"}}},
+		{name: "public IPv4 URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "https://8.8.8.8/reference.png"}}},
+		{name: "public IPv6 URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "https://[2606:4700:4700::1111]/reference.png"}}},
 		{name: "unsigned cached upload", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "/api/yucore/media/uploads/42/ref_1234567890_AbCd123456.png"}}},
 		{name: "signed cached upload", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "/api/yucore/media/uploads/42/ref_1234567890_AbCd123456.png?sig=abc123"}}},
 		{name: "legacy ref ID", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "ref_1234567890_AbCd123456"}}},
 		{name: "legacy asset ID", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "asset_1"}}},
-		{name: "image data URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: "data:image/png;base64,iVBORw0KGgo="}}},
+		{name: "PNG data URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: pngDataURL}}},
+		{name: "JPEG data URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: jpegDataURL}}},
+		{name: "JPG alias data URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: jpgAliasDataURL}}},
+		{name: "WebP data URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: webpDataURL}}},
+		{name: "GIF data URL", references: []model.YucoreMediaReferenceInput{{Role: "image", URL: gifDataURL}}},
 		{name: "frame data URLs", references: []model.YucoreMediaReferenceInput{
-			{Role: "first_frame", URL: "data:image/png;base64,Zmlyc3Q="},
-			{Role: "last_frame", URL: "data:image/jpeg;base64,bGFzdA=="},
+			{Role: "first_frame", URL: pngDataURL},
+			{Role: "last_frame", URL: jpegDataURL},
 		}},
 		{name: "mixed remote media", references: []model.YucoreMediaReferenceInput{
 			{Role: "image", URL: "https://cdn.example.com/primary.png"},
@@ -255,6 +271,8 @@ func TestNormalizeYucoreMediaRequestAcceptsSafeReferenceValues(t *testing.T) {
 
 func TestNormalizeYucoreMediaRequestRejectsUnsafeReferenceValues(t *testing.T) {
 	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	pngPayload := append([]byte("\x89PNG\r\n\x1a\n"), []byte("payload")...)
+	jpegPayload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
 	tests := []struct {
 		name      string
 		role      string
@@ -269,10 +287,35 @@ func TestNormalizeYucoreMediaRequestRejectsUnsafeReferenceValues(t *testing.T) {
 		{name: "userinfo", role: "image", value: "https://user:pass@cdn.example.com/ref.png", errorText: "userinfo"},
 		{name: "missing host", role: "image", value: "https:///ref.png", errorText: "host"},
 		{name: "invalid host", role: "image", value: "https://bad_host/ref.png", errorText: "host"},
+		{name: "localhost", role: "image", value: "http://localhost/ref.png", errorText: "public host"},
+		{name: "localhost trailing dot", role: "image", value: "http://LOCALHOST./ref.png", errorText: "public host"},
+		{name: "localhost subdomain", role: "image", value: "http://media.localhost/ref.png", errorText: "public host"},
+		{name: "loopback IPv4", role: "image", value: "http://127.0.0.1/ref.png", errorText: "public host"},
+		{name: "integer IPv4", role: "image", value: "http://2130706433/ref.png", errorText: "public host"},
+		{name: "hex IPv4", role: "image", value: "http://0x7f000001/ref.png", errorText: "public host"},
+		{name: "short IPv4", role: "image", value: "http://127.1/ref.png", errorText: "public host"},
+		{name: "octal IPv4", role: "image", value: "http://0177.0.0.1/ref.png", errorText: "public host"},
+		{name: "unspecified IPv4", role: "image", value: "http://0.0.0.0/ref.png", errorText: "public host"},
+		{name: "private 10 range", role: "image", value: "http://10.0.0.1/ref.png", errorText: "public host"},
+		{name: "private 172 range", role: "image", value: "http://172.16.0.1/ref.png", errorText: "public host"},
+		{name: "private 192 range", role: "image", value: "http://192.168.0.1/ref.png", errorText: "public host"},
+		{name: "link local metadata", role: "image", value: "http://169.254.169.254/latest/meta-data", errorText: "public host"},
+		{name: "multicast IPv4", role: "image", value: "http://224.0.0.1/ref.png", errorText: "public host"},
+		{name: "loopback IPv6", role: "image", value: "http://[::1]/ref.png", errorText: "public host"},
+		{name: "ULA IPv6", role: "image", value: "http://[fc00::1]/ref.png", errorText: "public host"},
+		{name: "link local IPv6", role: "image", value: "http://[fe80::1]/ref.png", errorText: "public host"},
 		{name: "encoded control", role: "image", value: "https://cdn.example.com/ref%0A.png", errorText: "control"},
 		{name: "literal space", role: "image", value: "https://cdn.example.com/ref image.png", errorText: "reference value"},
 		{name: "backslash path", role: "image", value: "https://cdn.example.com/ref\\image.png", errorText: "reference value"},
-		{name: "text data URL", role: "image", value: "data:text/plain;base64,aGVsbG8=", errorText: "image data URL"},
+		{name: "text data URL", role: "image", value: "data:text/plain;base64,aGVsbG8=", errorText: "supported raster"},
+		{name: "SVG data URL", role: "image", value: yucoreMediaTestDataURL("image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)), errorText: "supported raster"},
+		{name: "arbitrary image data URL", role: "image", value: yucoreMediaTestDataURL("image/bmp", []byte("BMpayload")), errorText: "supported raster"},
+		{name: "malformed base64", role: "image", value: "data:image/png;base64,@@@", errorText: "base64"},
+		{name: "percent encoded payload", role: "image", value: "data:image/png,%89PNG", errorText: "base64"},
+		{name: "empty payload", role: "image", value: "data:image/png;base64,", errorText: "nonempty"},
+		{name: "declared content mismatch", role: "image", value: yucoreMediaTestDataURL("image/png", jpegPayload), errorText: "does not match"},
+		{name: "invalid detected content", role: "image", value: yucoreMediaTestDataURL("image/png", []byte("not an image")), errorText: "does not match"},
+		{name: "oversized decoded image", role: "image", value: yucoreMediaTestDataURL("image/png", append(pngPayload, []byte(strings.Repeat("A", 512*1024))...)), errorText: "too large"},
 		{name: "video data URL", role: "video", value: "data:image/png;base64,aGVsbG8=", errorText: "data URL"},
 		{name: "audio data URL", role: "audio", value: "data:image/png;base64,aGVsbG8=", errorText: "data URL"},
 		{name: "oversized data URL", role: "image", value: "data:image/png;base64," + strings.Repeat("A", 512*1024), errorText: "too large"},
