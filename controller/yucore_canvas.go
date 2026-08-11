@@ -322,13 +322,17 @@ func buildYucoreCanvasAgentExecuteMediaRequest(req yucoreCanvasAgentExecuteReque
 			mediaMode = "text-to-image"
 		}
 	}
+	var negativePrompt *string
+	if strings.TrimSpace(req.NegativePrompt) != "" {
+		negativePrompt = &req.NegativePrompt
+	}
 	return yucoreMediaTaskRequest{
 		Group:          req.Group,
 		Kind:           kind,
 		Mode:           mediaMode,
 		ModelId:        req.ModelId,
 		Prompt:         req.Prompt,
-		NegativePrompt: req.NegativePrompt,
+		NegativePrompt: negativePrompt,
 		AspectRatio:    req.AspectRatio,
 		Size:           req.Size,
 		Quality:        req.Quality,

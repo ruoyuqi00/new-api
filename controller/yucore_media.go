@@ -39,12 +39,17 @@ type yucoreMediaTaskRequest struct {
 	Mode           string          `json:"mode"`
 	ModelId        string          `json:"model_id"`
 	Prompt         string          `json:"prompt"`
-	NegativePrompt string          `json:"negative_prompt"`
+	NegativePrompt *string         `json:"negative_prompt,omitempty"`
 	AspectRatio    string          `json:"aspect_ratio"`
 	Size           string          `json:"size"`
 	Quality        string          `json:"quality"`
 	Format         string          `json:"format"`
 	Count          int             `json:"count"`
+	Duration       *int            `json:"duration,omitempty"`
+	Resolution     *string         `json:"resolution,omitempty"`
+	GenerateAudio  *bool           `json:"generate_audio,omitempty"`
+	Seed           *int64          `json:"seed,omitempty"`
+	ReferenceMode  *string         `json:"reference_mode,omitempty"`
 	SessionId      string          `json:"session_id"`
 	Inputs         json.RawMessage `json:"inputs"`
 	Metadata       json.RawMessage `json:"metadata"`
@@ -98,6 +103,166 @@ func rawYucoreMediaJSON(value string, fallback string) json.RawMessage {
 	return json.RawMessage(value)
 }
 
+func decodeYucoreMediaReferences(value string) ([]model.YucoreMediaReferenceInput, error) {
+	rawReferences := make([]json.RawMessage, 0)
+	if err := common.Unmarshal([]byte(value), &rawReferences); err != nil {
+		return nil, errors.New("media inputs must be a JSON array")
+	}
+	references := make([]model.YucoreMediaReferenceInput, 0, len(rawReferences))
+	for _, rawReference := range rawReferences {
+		trimmed := strings.TrimSpace(string(rawReference))
+		if strings.HasPrefix(trimmed, `"`) {
+			var referenceURL string
+			if err := common.Unmarshal(rawReference, &referenceURL); err != nil {
+				return nil, errors.New("media input string must contain a valid URL")
+			}
+			references = append(references, model.YucoreMediaReferenceInput{Role: "image", URL: strings.TrimSpace(referenceURL)})
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "{") {
+			return nil, errors.New("media inputs must contain strings or objects")
+		}
+		fields := make(map[string]json.RawMessage)
+		if err := common.Unmarshal(rawReference, &fields); err != nil {
+			return nil, errors.New("media input object is invalid")
+		}
+		reference := model.YucoreMediaReferenceInput{Role: "image"}
+		roleFound := false
+		for _, key := range []string{"role", "kind"} {
+			rawValue, ok := fields[key]
+			if !ok {
+				continue
+			}
+			if err := common.Unmarshal(rawValue, &reference.Role); err != nil {
+				return nil, fmt.Errorf("media input %s must be a string", key)
+			}
+			roleFound = true
+			break
+		}
+		if !roleFound {
+			reference.Role = "image"
+		}
+		for _, key := range []string{"dataUrl", "data_url", "cachedUrl", "cached_url", "sourceUrl", "source_url", "url", "path", "id"} {
+			rawValue, ok := fields[key]
+			if !ok {
+				continue
+			}
+			var candidate string
+			if err := common.Unmarshal(rawValue, &candidate); err != nil {
+				return nil, fmt.Errorf("media input %s must be a string", key)
+			}
+			if strings.TrimSpace(candidate) != "" {
+				reference.URL = strings.TrimSpace(candidate)
+				break
+			}
+		}
+		for _, key := range []string{"mime_type", "mimeType"} {
+			rawValue, ok := fields[key]
+			if !ok {
+				continue
+			}
+			if err := common.Unmarshal(rawValue, &reference.MimeType); err != nil {
+				return nil, fmt.Errorf("media input %s must be a string", key)
+			}
+			break
+		}
+		for _, key := range []string{"duration_ms", "durationMs"} {
+			rawValue, ok := fields[key]
+			if !ok || strings.TrimSpace(string(rawValue)) == "null" {
+				continue
+			}
+			var duration int
+			if err := common.Unmarshal(rawValue, &duration); err != nil {
+				return nil, fmt.Errorf("media input %s must be an integer", key)
+			}
+			reference.DurationMS = &duration
+			break
+		}
+		references = append(references, reference)
+	}
+	return references, nil
+}
+
+func decodeYucoreMediaMetadata(value string) (map[string]json.RawMessage, error) {
+	metadata := make(map[string]json.RawMessage)
+	if err := common.Unmarshal([]byte(value), &metadata); err != nil {
+		return nil, errors.New("media metadata must be a JSON object")
+	}
+	if metadata == nil {
+		metadata = make(map[string]json.RawMessage)
+	}
+	return metadata, nil
+}
+
+func yucoreMediaMetadataInt(metadata map[string]json.RawMessage, keys ...string) (*int, error) {
+	for _, key := range keys {
+		raw, ok := metadata[key]
+		if !ok || strings.TrimSpace(string(raw)) == "null" {
+			continue
+		}
+		var value int
+		if err := common.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("media metadata %s must be an integer", key)
+		}
+		return &value, nil
+	}
+	return nil, nil
+}
+
+func yucoreMediaMetadataInt64(metadata map[string]json.RawMessage, keys ...string) (*int64, error) {
+	for _, key := range keys {
+		raw, ok := metadata[key]
+		if !ok || strings.TrimSpace(string(raw)) == "null" {
+			continue
+		}
+		var value int64
+		if err := common.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("media metadata %s must be an integer", key)
+		}
+		return &value, nil
+	}
+	return nil, nil
+}
+
+func yucoreMediaMetadataBool(metadata map[string]json.RawMessage, keys ...string) (*bool, error) {
+	for _, key := range keys {
+		raw, ok := metadata[key]
+		if !ok || strings.TrimSpace(string(raw)) == "null" {
+			continue
+		}
+		var value bool
+		if err := common.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("media metadata %s must be a boolean", key)
+		}
+		return &value, nil
+	}
+	return nil, nil
+}
+
+func yucoreMediaMetadataString(metadata map[string]json.RawMessage, keys ...string) (*string, error) {
+	for _, key := range keys {
+		raw, ok := metadata[key]
+		if !ok || strings.TrimSpace(string(raw)) == "null" {
+			continue
+		}
+		var value string
+		if err := common.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("media metadata %s must be a string", key)
+		}
+		return &value, nil
+	}
+	return nil, nil
+}
+
+func setYucoreMediaMetadataValue(metadata map[string]json.RawMessage, key string, value any) error {
+	raw, err := common.Marshal(value)
+	if err != nil {
+		return err
+	}
+	metadata[key] = raw
+	return nil
+}
+
 func buildYucoreMediaTaskFromRequest(req yucoreMediaTaskRequest, userId int) (*model.YucoreMediaTask, error) {
 	prompt := strings.TrimSpace(req.Prompt)
 	if prompt == "" {
@@ -114,9 +279,110 @@ func buildYucoreMediaTaskFromRequest(req yucoreMediaTaskRequest, userId int) (*m
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := normalizeYucoreMediaRawJSON(req.Metadata, "{}", maxYucoreMediaMetadataBytes, "metadata")
+	references, err := decodeYucoreMediaReferences(inputs)
 	if err != nil {
 		return nil, err
+	}
+	canonicalInputs, err := common.Marshal(references)
+	if err != nil {
+		return nil, err
+	}
+	metadataJSON, err := normalizeYucoreMediaRawJSON(req.Metadata, "{}", maxYucoreMediaMetadataBytes, "metadata")
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := decodeYucoreMediaMetadata(metadataJSON)
+	if err != nil {
+		return nil, err
+	}
+
+	duration := req.Duration
+	if duration == nil {
+		duration, err = yucoreMediaMetadataInt(metadata, "duration", "durationSeconds", "duration_seconds")
+		if err != nil {
+			return nil, err
+		}
+	}
+	resolution := req.Resolution
+	if resolution == nil && strings.TrimSpace(req.Size) != "" {
+		value := req.Size
+		resolution = &value
+	}
+	if resolution == nil {
+		resolution, err = yucoreMediaMetadataString(metadata, "resolution", "size")
+		if err != nil {
+			return nil, err
+		}
+	}
+	generateAudio := req.GenerateAudio
+	if generateAudio == nil {
+		generateAudio, err = yucoreMediaMetadataBool(metadata, "generate_audio", "generateAudio")
+		if err != nil {
+			return nil, err
+		}
+	}
+	seed := req.Seed
+	if seed == nil {
+		seed, err = yucoreMediaMetadataInt64(metadata, "seed")
+		if err != nil {
+			return nil, err
+		}
+	}
+	referenceMode := req.ReferenceMode
+	if referenceMode == nil {
+		referenceMode, err = yucoreMediaMetadataString(metadata, "reference_mode", "referenceMode")
+		if err != nil {
+			return nil, err
+		}
+	}
+	negativePrompt := req.NegativePrompt
+	if negativePrompt == nil {
+		negativePrompt, err = yucoreMediaMetadataString(metadata, "negative_prompt", "negativePrompt")
+		if err != nil {
+			return nil, err
+		}
+	}
+	if duration != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "duration", duration); err != nil {
+			return nil, err
+		}
+	}
+	if resolution != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "resolution", resolution); err != nil {
+			return nil, err
+		}
+	}
+	if generateAudio != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "generate_audio", generateAudio); err != nil {
+			return nil, err
+		}
+	}
+	if seed != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "seed", seed); err != nil {
+			return nil, err
+		}
+	}
+	if referenceMode != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "reference_mode", referenceMode); err != nil {
+			return nil, err
+		}
+	}
+	if negativePrompt != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "negative_prompt", negativePrompt); err != nil {
+			return nil, err
+		}
+	}
+	canonicalMetadata, err := common.Marshal(metadata)
+	if err != nil {
+		return nil, err
+	}
+	negativePromptValue := ""
+	if negativePrompt != nil {
+		negativePromptValue = *negativePrompt
+	}
+	resolutionValue := req.Size
+	if resolution != nil {
+		resolutionValue = *resolution
 	}
 	return &model.YucoreMediaTask{
 		UserId:         userId,
@@ -126,14 +392,14 @@ func buildYucoreMediaTaskFromRequest(req yucoreMediaTaskRequest, userId int) (*m
 		Mode:           req.Mode,
 		ModelId:        req.ModelId,
 		Prompt:         prompt,
-		NegativePrompt: req.NegativePrompt,
+		NegativePrompt: negativePromptValue,
 		AspectRatio:    req.AspectRatio,
-		Size:           req.Size,
+		Size:           resolutionValue,
 		Quality:        req.Quality,
 		Format:         req.Format,
 		Count:          req.Count,
-		Inputs:         inputs,
-		Metadata:       metadata,
+		Inputs:         string(canonicalInputs),
+		Metadata:       string(canonicalMetadata),
 	}, nil
 }
 
@@ -174,6 +440,120 @@ func buildYucoreMediaTaskResponses(tasks []*model.YucoreMediaTask) []yucoreMedia
 	return responses
 }
 
+func normalizeYucoreMediaTaskWithSelection(task *model.YucoreMediaTask, selectedModel service.YucoreMediaCatalogModel) error {
+	var references []model.YucoreMediaReferenceInput
+	if err := common.Unmarshal([]byte(task.Inputs), &references); err != nil {
+		return errors.New("media inputs must be a JSON array")
+	}
+	metadata, err := decodeYucoreMediaMetadata(task.Metadata)
+	if err != nil {
+		return err
+	}
+	duration, err := yucoreMediaMetadataInt(metadata, "duration")
+	if err != nil {
+		return err
+	}
+	resolution, err := yucoreMediaMetadataString(metadata, "resolution")
+	if err != nil {
+		return err
+	}
+	generateAudio, err := yucoreMediaMetadataBool(metadata, "generate_audio")
+	if err != nil {
+		return err
+	}
+	seed, err := yucoreMediaMetadataInt64(metadata, "seed")
+	if err != nil {
+		return err
+	}
+	referenceMode, err := yucoreMediaMetadataString(metadata, "reference_mode")
+	if err != nil {
+		return err
+	}
+	negativePrompt, err := yucoreMediaMetadataString(metadata, "negative_prompt")
+	if err != nil {
+		return err
+	}
+	resolutionValue := ""
+	if resolution != nil {
+		resolutionValue = *resolution
+	}
+	referenceModeValue := ""
+	if referenceMode != nil {
+		referenceModeValue = *referenceMode
+	}
+
+	normalized, err := service.NormalizeYucoreMediaRequest(selectedModel, service.YucoreMediaRequestOptions{
+		Mode:           task.Mode,
+		Count:          task.Count,
+		Duration:       duration,
+		Resolution:     resolutionValue,
+		AspectRatio:    task.AspectRatio,
+		GenerateAudio:  generateAudio,
+		Seed:           seed,
+		NegativePrompt: negativePrompt,
+		ReferenceMode:  referenceModeValue,
+		References:     references,
+	})
+	if err != nil {
+		return err
+	}
+
+	canonicalInputs, err := common.Marshal(normalized.References)
+	if err != nil {
+		return err
+	}
+	for _, alias := range []string{"durationSeconds", "duration_seconds", "size", "generateAudio", "referenceMode", "negativePrompt"} {
+		delete(metadata, alias)
+	}
+	for _, key := range []string{"duration", "resolution", "generate_audio", "seed", "reference_mode", "negative_prompt"} {
+		delete(metadata, key)
+	}
+	if normalized.Duration != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "duration", normalized.Duration); err != nil {
+			return err
+		}
+	}
+	if normalized.Resolution != "" {
+		if err := setYucoreMediaMetadataValue(metadata, "resolution", normalized.Resolution); err != nil {
+			return err
+		}
+	}
+	if normalized.GenerateAudio != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "generate_audio", normalized.GenerateAudio); err != nil {
+			return err
+		}
+	}
+	if normalized.Seed != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "seed", normalized.Seed); err != nil {
+			return err
+		}
+	}
+	if err := setYucoreMediaMetadataValue(metadata, "reference_mode", normalized.ReferenceMode); err != nil {
+		return err
+	}
+	if normalized.NegativePrompt != nil {
+		if err := setYucoreMediaMetadataValue(metadata, "negative_prompt", normalized.NegativePrompt); err != nil {
+			return err
+		}
+	}
+	canonicalMetadata, err := common.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+
+	task.Mode = normalized.Mode
+	task.Count = normalized.Count
+	task.Size = normalized.Resolution
+	task.AspectRatio = normalized.AspectRatio
+	task.NegativePrompt = ""
+	if normalized.NegativePrompt != nil {
+		task.NegativePrompt = *normalized.NegativePrompt
+	}
+	task.Inputs = string(canonicalInputs)
+	task.Metadata = string(canonicalMetadata)
+	return nil
+}
+
 func resolveYucoreMediaTaskRequest(task *model.YucoreMediaTask) error {
 	if strings.EqualFold(strings.TrimSpace(task.Kind), service.YucoreMediaKindVideo) {
 		task.Kind = service.YucoreMediaKindVideo
@@ -189,23 +569,11 @@ func resolveYucoreMediaTaskRequest(task *model.YucoreMediaTask) error {
 	if err != nil {
 		return err
 	}
-	var inputs []any
-	if err := common.Unmarshal([]byte(task.Inputs), &inputs); err != nil {
-		return errors.New("media inputs must be a JSON array")
-	}
-	resolvedMode, resolvedCount, err := service.ValidateYucoreMediaRequest(
-		selectedModel,
-		task.Mode,
-		task.Count,
-		len(inputs),
-	)
-	if err != nil {
+	if err := normalizeYucoreMediaTaskWithSelection(task, selectedModel); err != nil {
 		return err
 	}
 	task.BillingGroup = resolvedGroup
 	task.ModelId = selectedModel.Id
-	task.Mode = resolvedMode
-	task.Count = resolvedCount
 	return nil
 }
 
