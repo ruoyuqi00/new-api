@@ -364,10 +364,12 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 			payload["audio"] = generateAudio
 		}
 	}
-	if rawSeed, ok := metadata["seed"]; ok && allowsParameter("seed") {
-		seed, err := strconv.ParseInt(yucoreMediaStringValue(rawSeed), 10, 64)
-		if err == nil {
-			payload["seed"] = seed
+	if allowsParameter("seed") {
+		var canonicalMetadata struct {
+			Seed *int64 `json:"seed"`
+		}
+		if err := common.Unmarshal([]byte(task.Metadata), &canonicalMetadata); err == nil && canonicalMetadata.Seed != nil {
+			payload["seed"] = *canonicalMetadata.Seed
 		}
 	}
 

@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/base64"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -353,6 +354,18 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 		assert.NotContains(t, payload, "video")
 		assert.NotContains(t, payload, "generate_audio")
 		assert.NotContains(t, payload, "unknown_upstream_parameter")
+	})
+
+	t.Run("canonical seed values preserve exact int64", func(t *testing.T) {
+		for _, seed := range []int64{0, 9007199254740993, math.MaxInt64, -1} {
+			t.Run(yucoreMediaStringValue(seed), func(t *testing.T) {
+				task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", nil, map[string]any{"seed": seed})
+				payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
+
+				assert.IsType(t, int64(0), payload["seed"])
+				assert.Equal(t, seed, payload["seed"])
+			})
+		}
 	})
 
 	t.Run("first and last frames exclude media aliases", func(t *testing.T) {
