@@ -89,16 +89,22 @@ func TestBuildOpenAICompatibleAsyncPayloadDurationPolicies(t *testing.T) {
 		Prompt:      "animate this frame",
 		Size:        "1080p",
 		AspectRatio: "16:9",
-		Inputs:      `[{"sourceUrl":"https://cdn.example.com/input.png"}]`,
+		Inputs:      `[{"role":"image","url":"https://cdn.example.com/input.png"}]`,
 		Metadata:    `{"duration":8}`,
 	}
 
-	durationPayload := buildOpenAICompatibleAsyncPayload(task, YucoreMediaModelCapability{DurationPolicy: yucoreMediaDurationPolicyDuration})
+	durationPayload := buildOpenAICompatibleAsyncPayload(task, YucoreMediaModelCapability{
+		DurationPolicy:    yucoreMediaDurationPolicyDuration,
+		AllowedParameters: []string{"duration", "size", "aspect_ratio", "image"},
+	})
 	assert.Equal(t, 8, durationPayload["duration"])
 	assert.NotContains(t, durationPayload, "seconds")
 	assert.Equal(t, "https://cdn.example.com/input.png", durationPayload["image"])
 
-	secondsPayload := buildOpenAICompatibleAsyncPayload(task, YucoreMediaModelCapability{DurationPolicy: yucoreMediaDurationPolicySeconds})
+	secondsPayload := buildOpenAICompatibleAsyncPayload(task, YucoreMediaModelCapability{
+		DurationPolicy:    yucoreMediaDurationPolicySeconds,
+		AllowedParameters: []string{"seconds"},
+	})
 	assert.Equal(t, "8", secondsPayload["seconds"])
 	assert.NotContains(t, secondsPayload, "duration")
 
@@ -127,8 +133,9 @@ func TestBuildOpenAICompatibleAsyncPayloadDurationPolicies(t *testing.T) {
 	assert.NotContains(t, filteredPayload, "response_format")
 
 	formattedPayload := buildOpenAICompatibleAsyncPayload(task, YucoreMediaModelCapability{
-		DurationPolicy: yucoreMediaDurationPolicyNone,
-		ResponseFormat: "b64_json",
+		DurationPolicy:    yucoreMediaDurationPolicyNone,
+		AllowedParameters: []string{"response_format"},
+		ResponseFormat:    "b64_json",
 	})
 	assert.Equal(t, "b64_json", formattedPayload["response_format"])
 
@@ -219,6 +226,20 @@ func TestBuildOpenAICompatibleAsyncPayloadOmni(t *testing.T) {
 		assert.NotContains(t, payload, "video")
 		assert.NotContains(t, payload, "reference_videos")
 	})
+
+	t.Run("frame presence excludes video without image authorization", func(t *testing.T) {
+		task := newCanonicalOpenAICompatiblePayloadTask(t, "omni-v2v", []YucoreMediaReferenceInput{
+			{Role: "first_frame", URL: "https://cdn.example.com/first.png"},
+			{Role: "video", URL: "https://cdn.example.com/source.mp4"},
+		}, map[string]any{"reference_mode": "frames"})
+		capability := catalog[task.ModelId]
+		capability.AllowedParameters = []string{"video"}
+		payload := buildOpenAICompatibleAsyncPayload(task, capability)
+
+		for _, forbidden := range []string{"first_image_url", "last_image_url", "video_url", "reference_videos"} {
+			assert.NotContains(t, payload, forbidden)
+		}
+	})
 }
 
 func TestBuildOpenAICompatibleAsyncPayloadGrok(t *testing.T) {
@@ -242,6 +263,18 @@ func TestBuildOpenAICompatibleAsyncPayloadGrok(t *testing.T) {
 	unknownPayload := buildOpenAICompatibleAsyncPayload(task, unknownFamily)
 	assert.Equal(t, "https://cdn.example.com/first.png", unknownPayload["image"])
 	assert.NotContains(t, unknownPayload, "image_urls")
+
+	unknownFamily.AllowedParameters = nil
+	task.Inputs = `[{"role":"image","url":"https://cdn.example.com/main.png"},{"role":"video","url":"https://cdn.example.com/motion.mp4"},{"role":"audio","url":"https://cdn.example.com/music.mp3"}]`
+	task.Metadata = `{"duration":10,"resolution":"720p","generate_audio":false,"seed":0}`
+	emptyAllowlistPayload := buildOpenAICompatibleAsyncPayload(task, unknownFamily)
+	for _, forbidden := range []string{
+		"negative_prompt", "resolution", "size", "aspect_ratio", "ratio", "response_format",
+		"image", "image_url", "image_urls", "images", "video_url", "reference_videos",
+		"reference_audios", "audio", "generate_audio", "seed", "duration", "seconds",
+	} {
+		assert.NotContains(t, emptyAllowlistPayload, forbidden)
+	}
 }
 
 func TestBuildOpenAICompatibleAsyncPayloadHappyhouse(t *testing.T) {
@@ -333,6 +366,43 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 		assert.Equal(t, "https://cdn.example.com/last.png", payload["last_image_url"])
 		for _, forbidden := range []string{"image_url", "image_urls", "images", "reference_image_urls", "reference_videos", "reference_audios"} {
 			assert.NotContains(t, payload, forbidden)
+		}
+	})
+
+	t.Run("frame presence excludes media without image authorization", func(t *testing.T) {
+		task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", []YucoreMediaReferenceInput{
+			{Role: "first_frame", URL: "https://cdn.example.com/first.png"},
+			{Role: "video", URL: "https://cdn.example.com/motion.mp4"},
+			{Role: "audio", URL: "https://cdn.example.com/music.mp3"},
+		}, map[string]any{"reference_mode": "frames"})
+		capability := catalog[task.ModelId]
+		capability.AllowedParameters = []string{"video", "audio"}
+		payload := buildOpenAICompatibleAsyncPayload(task, capability)
+
+		for _, forbidden := range []string{"first_image_url", "last_image_url", "video_url", "reference_videos", "reference_audios"} {
+			assert.NotContains(t, payload, forbidden)
+		}
+	})
+
+	t.Run("metadata reference aliases are never a payload source", func(t *testing.T) {
+		for _, test := range []struct {
+			name     string
+			inputs   string
+			metadata string
+		}{
+			{name: "empty inputs", inputs: "", metadata: `{"ref_assets":["https://cdn.example.com/metadata.png"]}`},
+			{name: "malformed inputs", inputs: "{", metadata: `{"refAssets":["https://cdn.example.com/metadata.png"]}`},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", nil, nil)
+				task.Inputs = test.inputs
+				task.Metadata = test.metadata
+				payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
+
+				for _, forbidden := range []string{"image", "image_url", "image_urls", "images", "reference_image_urls", "video_url", "reference_videos", "reference_audios"} {
+					assert.NotContains(t, payload, forbidden)
+				}
+			})
 		}
 	})
 

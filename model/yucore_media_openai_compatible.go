@@ -214,25 +214,9 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 		"prompt": task.Prompt,
 	}
 	family := strings.ToLower(strings.TrimSpace(capability.Family))
-	strictFamilyAllowlist := false
-	switch family {
-	case "omni", "grok", "happyhouse", "kling", "seedance", "veo":
-		strictFamilyAllowlist = true
-	}
 	allowsParameter := func(parameter string) bool {
-		if !strictFamilyAllowlist {
-			return yucoreMediaCapabilityAllowsParameter(capability, parameter)
-		}
 		for _, allowed := range capability.AllowedParameters {
 			if strings.EqualFold(strings.TrimSpace(allowed), parameter) {
-				return true
-			}
-		}
-		return false
-	}
-	allowsAnyParameter := func(parameters ...string) bool {
-		for _, parameter := range parameters {
-			if allowsParameter(parameter) {
 				return true
 			}
 		}
@@ -289,23 +273,23 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 			lastFrames = append(lastFrames, referenceURL)
 		}
 	}
-	if len(images)+len(videos)+len(audios)+len(firstFrames)+len(lastFrames) == 0 {
-		images = append(images, yucoreMediaReferenceAssets(task)...)
-	}
 
-	imageAllowed := allowsAnyParameter("image", "image_url", "image_urls", "images", "reference_image_urls")
-	videoAllowed := allowsAnyParameter("video", "video_url", "reference_videos")
-	audioAllowed := allowsAnyParameter("audio", "reference_audios")
+	imageAllowed := allowsParameter("image") || allowsParameter("image_url") || allowsParameter("image_urls") || allowsParameter("images") || allowsParameter("reference_image_urls")
+	videoAllowed := allowsParameter("video") || allowsParameter("video_url") || allowsParameter("reference_videos")
+	audioAllowed := allowsParameter("audio") || allowsParameter("reference_audios")
 	hasFrameReferences := len(firstFrames) > 0 || len(lastFrames) > 0
 	switch family {
 	case "omni":
-		if hasFrameReferences && imageAllowed {
-			if len(firstFrames) > 0 {
-				payload["first_image_url"] = firstFrames[0]
+		if hasFrameReferences {
+			if imageAllowed {
+				if len(firstFrames) > 0 {
+					payload["first_image_url"] = firstFrames[0]
+				}
+				if len(lastFrames) > 0 {
+					payload["last_image_url"] = lastFrames[0]
+				}
 			}
-			if len(lastFrames) > 0 {
-				payload["last_image_url"] = lastFrames[0]
-			}
+			break
 		} else if len(videos) > 0 && videoAllowed {
 			payload["video_url"] = videos[0]
 		} else if len(images) == 1 && imageAllowed {
@@ -328,12 +312,14 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 			payload["reference_audios"] = audios
 		}
 	case "seedance":
-		if hasFrameReferences && imageAllowed {
-			if len(firstFrames) > 0 {
-				payload["first_image_url"] = firstFrames[0]
-			}
-			if len(lastFrames) > 0 {
-				payload["last_image_url"] = lastFrames[0]
+		if hasFrameReferences {
+			if imageAllowed {
+				if len(firstFrames) > 0 {
+					payload["first_image_url"] = firstFrames[0]
+				}
+				if len(lastFrames) > 0 {
+					payload["last_image_url"] = lastFrames[0]
+				}
 			}
 			break
 		}
