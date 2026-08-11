@@ -213,29 +213,174 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 		"model":  yucoreMediaCapabilityModel(task, capability),
 		"prompt": task.Prompt,
 	}
-	if task.NegativePrompt != "" && yucoreMediaCapabilityAllowsParameter(capability, "negative_prompt") {
+	family := strings.ToLower(strings.TrimSpace(capability.Family))
+	strictFamilyAllowlist := false
+	switch family {
+	case "omni", "grok", "happyhouse", "kling", "seedance", "veo":
+		strictFamilyAllowlist = true
+	}
+	allowsParameter := func(parameter string) bool {
+		if !strictFamilyAllowlist {
+			return yucoreMediaCapabilityAllowsParameter(capability, parameter)
+		}
+		for _, allowed := range capability.AllowedParameters {
+			if strings.EqualFold(strings.TrimSpace(allowed), parameter) {
+				return true
+			}
+		}
+		return false
+	}
+	allowsAnyParameter := func(parameters ...string) bool {
+		for _, parameter := range parameters {
+			if allowsParameter(parameter) {
+				return true
+			}
+		}
+		return false
+	}
+	if task.NegativePrompt != "" && allowsParameter("negative_prompt") {
 		payload["negative_prompt"] = task.NegativePrompt
 	}
-	if task.Size != "" && !strings.EqualFold(task.Size, "auto") && yucoreMediaCapabilityAllowsParameter(capability, "size") {
-		payload["size"] = task.Size
+	metadata := yucoreMediaMetadataMap(task.Metadata)
+	resolution := yucoreMediaStringValue(metadata["resolution"])
+	if resolution == "" {
+		resolution = strings.TrimSpace(task.Size)
 	}
-	if task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && yucoreMediaCapabilityAllowsParameter(capability, "aspect_ratio") {
+	if resolution != "" && !strings.EqualFold(resolution, "auto") {
+		if allowsParameter("resolution") {
+			payload["resolution"] = resolution
+		} else if allowsParameter("size") {
+			payload["size"] = resolution
+		}
+	}
+	if task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && allowsParameter("aspect_ratio") {
 		payload["aspect_ratio"] = task.AspectRatio
-	} else if task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && yucoreMediaCapabilityAllowsParameter(capability, "ratio") {
+	} else if task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && allowsParameter("ratio") {
 		payload["ratio"] = task.AspectRatio
 	}
-	if capability.ResponseFormat != "" && yucoreMediaCapabilityAllowsParameter(capability, "response_format") {
+	if capability.ResponseFormat != "" && allowsParameter("response_format") {
 		payload["response_format"] = capability.ResponseFormat
 	}
-	refs := yucoreMediaReferenceAssets(task)
-	if len(refs) > 0 && len(capability.AllowedParameters) > 0 && yucoreMediaCapabilityAllowsParameter(capability, "image_urls") {
-		payload["image_urls"] = refs
-	} else if len(refs) == 1 && len(capability.AllowedParameters) > 0 && yucoreMediaCapabilityAllowsParameter(capability, "image_url") {
-		payload["image_url"] = refs[0]
-	} else if len(refs) == 1 && yucoreMediaCapabilityAllowsParameter(capability, "image") {
-		payload["image"] = refs[0]
-	} else if len(refs) > 1 && yucoreMediaCapabilityAllowsParameter(capability, "images") {
-		payload["images"] = refs
+
+	images := make([]string, 0)
+	videos := make([]string, 0)
+	audios := make([]string, 0)
+	firstFrames := make([]string, 0, 1)
+	lastFrames := make([]string, 0, 1)
+	var references []YucoreMediaReferenceInput
+	if task.Inputs != "" {
+		_ = common.Unmarshal([]byte(task.Inputs), &references)
+	}
+	for _, reference := range references {
+		referenceURL := strings.TrimSpace(reference.URL)
+		if referenceURL == "" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(reference.Role)) {
+		case "", "image":
+			images = append(images, referenceURL)
+		case "video":
+			videos = append(videos, referenceURL)
+		case "audio":
+			audios = append(audios, referenceURL)
+		case "first_frame":
+			firstFrames = append(firstFrames, referenceURL)
+		case "last_frame":
+			lastFrames = append(lastFrames, referenceURL)
+		}
+	}
+	if len(images)+len(videos)+len(audios)+len(firstFrames)+len(lastFrames) == 0 {
+		images = append(images, yucoreMediaReferenceAssets(task)...)
+	}
+
+	imageAllowed := allowsAnyParameter("image", "image_url", "image_urls", "images", "reference_image_urls")
+	videoAllowed := allowsAnyParameter("video", "video_url", "reference_videos")
+	audioAllowed := allowsAnyParameter("audio", "reference_audios")
+	hasFrameReferences := len(firstFrames) > 0 || len(lastFrames) > 0
+	switch family {
+	case "omni":
+		if hasFrameReferences && imageAllowed {
+			if len(firstFrames) > 0 {
+				payload["first_image_url"] = firstFrames[0]
+			}
+			if len(lastFrames) > 0 {
+				payload["last_image_url"] = lastFrames[0]
+			}
+		} else if len(videos) > 0 && videoAllowed {
+			payload["video_url"] = videos[0]
+		} else if len(images) == 1 && imageAllowed {
+			payload["image_url"] = images[0]
+		} else if len(images) > 1 && imageAllowed {
+			payload["image_urls"] = images
+		}
+	case "grok", "happyhouse", "veo":
+		if len(images) > 0 && imageAllowed {
+			payload["image_urls"] = images
+		}
+	case "kling":
+		if len(images) > 0 && imageAllowed {
+			payload["image_urls"] = images
+		}
+		if len(videos) > 0 && videoAllowed {
+			payload["reference_videos"] = videos
+		}
+		if len(audios) > 0 && audioAllowed {
+			payload["reference_audios"] = audios
+		}
+	case "seedance":
+		if hasFrameReferences && imageAllowed {
+			if len(firstFrames) > 0 {
+				payload["first_image_url"] = firstFrames[0]
+			}
+			if len(lastFrames) > 0 {
+				payload["last_image_url"] = lastFrames[0]
+			}
+			break
+		}
+		if len(images) > 0 && imageAllowed {
+			payload["image_url"] = images[0]
+			if len(images) > 1 {
+				payload["reference_image_urls"] = images[1:]
+			}
+		}
+		if len(videos) > 0 && videoAllowed {
+			payload["reference_videos"] = videos
+		}
+		if len(audios) > 0 && audioAllowed {
+			payload["reference_audios"] = audios
+		}
+	default:
+		if len(images) > 0 && len(capability.AllowedParameters) > 0 && allowsParameter("image_urls") {
+			payload["image_urls"] = images
+		} else if len(images) == 1 && len(capability.AllowedParameters) > 0 && allowsParameter("image_url") {
+			payload["image_url"] = images[0]
+		} else if len(images) == 1 && allowsParameter("image") {
+			payload["image"] = images[0]
+		} else if len(images) > 1 && allowsParameter("images") {
+			payload["images"] = images
+		}
+		if len(videos) > 0 && allowsParameter("video_url") {
+			payload["video_url"] = videos[0]
+		} else if len(videos) > 0 && allowsParameter("reference_videos") {
+			payload["reference_videos"] = videos
+		}
+		if len(audios) > 0 && allowsParameter("reference_audios") {
+			payload["reference_audios"] = audios
+		}
+	}
+
+	if generateAudio, ok := metadata["generate_audio"].(bool); ok {
+		if allowsParameter("generate_audio") {
+			payload["generate_audio"] = generateAudio
+		} else if allowsParameter("audio") {
+			payload["audio"] = generateAudio
+		}
+	}
+	if rawSeed, ok := metadata["seed"]; ok && allowsParameter("seed") {
+		seed, err := strconv.ParseInt(yucoreMediaStringValue(rawSeed), 10, 64)
+		if err == nil {
+			payload["seed"] = seed
+		}
 	}
 
 	duration := yucoreMediaTaskDuration(task)
@@ -244,11 +389,11 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 	}
 	switch capability.DurationPolicy {
 	case yucoreMediaDurationPolicyDuration:
-		if duration > 0 && yucoreMediaCapabilityAllowsParameter(capability, "duration") {
+		if duration > 0 && allowsParameter("duration") {
 			payload["duration"] = duration
 		}
 	case yucoreMediaDurationPolicySeconds:
-		if duration > 0 && yucoreMediaCapabilityAllowsParameter(capability, "seconds") {
+		if duration > 0 && allowsParameter("seconds") {
 			payload["seconds"] = strconv.Itoa(duration)
 		}
 	}
