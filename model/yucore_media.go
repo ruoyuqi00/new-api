@@ -689,8 +689,31 @@ func estimateYucoreMediaTaskCost(task *YucoreMediaTask) int {
 	return int(math.Ceil(float64(base*task.Count) * multiplier))
 }
 
+// YucoreMediaModelPricingUnit reports the explicitly configured billing unit for a model.
+func YucoreMediaModelPricingUnit(modelID string) (string, bool) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return "", false
+	}
+	for configuredModelID, capability := range getYucoreMediaAdapterConfig().ModelCapabilities {
+		if !strings.EqualFold(strings.TrimSpace(configuredModelID), modelID) {
+			continue
+		}
+		switch unit := strings.ToLower(strings.TrimSpace(capability.PricingUnit)); unit {
+		case YucoreMediaPricingPerCall, YucoreMediaPricingPerSecond:
+			return unit, true
+		default:
+			return "", false
+		}
+	}
+	return "", false
+}
+
 // YucoreMediaModelUsesPerCallPricing reports whether task duration must not multiply the configured model price.
 func YucoreMediaModelUsesPerCallPricing(modelID string) bool {
+	if unit, explicit := YucoreMediaModelPricingUnit(modelID); explicit {
+		return unit == YucoreMediaPricingPerCall
+	}
 	return constant.TaskPricePatchApplies(modelID)
 }
 

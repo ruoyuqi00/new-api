@@ -69,6 +69,7 @@ type YucoreMediaCatalogModel struct {
 }
 
 func yucoreMediaCapabilityForModel(capabilities map[string]model.YucoreMediaModelCapability, modelID string) (model.YucoreMediaModelCapability, bool) {
+	modelID = strings.TrimSpace(modelID)
 	if capability, ok := capabilities[modelID]; ok {
 		return capability, true
 	}
@@ -182,8 +183,8 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 		}
 	}
 
-	pricingUnit := strings.ToLower(strings.TrimSpace(capability.PricingUnit))
-	if pricingUnit == "" {
+	pricingUnit, explicitPricingUnit := model.YucoreMediaModelPricingUnit(modelID)
+	if !explicitPricingUnit {
 		pricingUnit = "per_call"
 		if kind == YucoreMediaKindVideo && !model.YucoreMediaModelUsesPerCallPricing(modelID) {
 			pricingUnit = "per_second"
@@ -197,7 +198,7 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 			Currency: "CNY",
 			Display:  fmt.Sprintf("CNY %g", price),
 		}
-	} else if configured && strings.TrimSpace(capability.PricingUnit) != "" {
+	} else if configured && explicitPricingUnit {
 		item.Pricing.Unit = pricingUnit
 	}
 	return item
@@ -257,17 +258,22 @@ func BuildYucoreMediaCatalog(userID int) (*YucoreMediaCatalog, error) {
 		models := make([]YucoreMediaCatalogModel, 0)
 		seenModels := make(map[string]struct{})
 		for _, ability := range abilities {
-			capability, configured := yucoreMediaCapabilityForModel(capabilities, ability.Model)
+			modelID := strings.TrimSpace(ability.Model)
+			if modelID == "" {
+				continue
+			}
+			ability.Model = modelID
+			capability, configured := yucoreMediaCapabilityForModel(capabilities, modelID)
 			if configured && strings.EqualFold(strings.TrimSpace(capability.Availability), model.YucoreMediaAvailabilityProbe) {
 				continue
 			}
 			for _, kind := range yucoreMediaKindsForAbility(ability, capability, configured) {
-				key := strings.ToLower(ability.Model) + "\x00" + kind
+				key := strings.ToLower(modelID) + "\x00" + kind
 				if _, exists := seenModels[key]; exists {
 					continue
 				}
 				seenModels[key] = struct{}{}
-				models = append(models, buildYucoreMediaCatalogModel(ability.Model, kind, capability, configured, groupRatio))
+				models = append(models, buildYucoreMediaCatalogModel(modelID, kind, capability, configured, groupRatio))
 			}
 		}
 		if len(models) == 0 {

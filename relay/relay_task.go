@@ -195,7 +195,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度
-	if !constant.TaskPricePatchApplies(modelName) {
+	if !model.YucoreMediaModelUsesPerCallPricing(modelName) {
 		quota, clamp := applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, info.PriceData.OtherRatios)
 		noteTaskQuotaClamp(info, clamp, "task_submit_other_ratios")
 		info.PriceData.Quota = quota

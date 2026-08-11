@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -224,6 +225,38 @@ func TestYucoreMediaConfiguredModelIDsKeepsEmbeddedCatalogForPartialOverride(t *
 	assert.Contains(t, configured, "operator-video")
 	assert.NotContains(t, configured, "seedance-2.0-mini-8s")
 	assert.NotContains(t, configured, "veo-clean")
+}
+
+func TestYucoreMediaModelPricingUnitPrefersConfiguredCapability(t *testing.T) {
+	originalPatches := constant.TaskPricePatches
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.model_capabilities": `{
+			"explicit-per-call":{"kind":"video","pricing_unit":"per_call"},
+			"explicit-per-second":{"kind":"video","pricing_unit":"per_second"}
+		}`,
+	}
+	common.OptionMapRWMutex.Unlock()
+	constant.TaskPricePatches = []string{"explicit-per-second", "fallback-per-call"}
+	t.Cleanup(func() {
+		constant.TaskPricePatches = originalPatches
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	unit, explicit := YucoreMediaModelPricingUnit(" EXPLICIT-PER-CALL ")
+	assert.True(t, explicit)
+	assert.Equal(t, YucoreMediaPricingPerCall, unit)
+	assert.True(t, YucoreMediaModelUsesPerCallPricing("explicit-per-call"))
+
+	unit, explicit = YucoreMediaModelPricingUnit(" explicit-per-second ")
+	assert.True(t, explicit)
+	assert.Equal(t, YucoreMediaPricingPerSecond, unit)
+	assert.False(t, YucoreMediaModelUsesPerCallPricing("explicit-per-second"))
+	assert.True(t, YucoreMediaModelUsesPerCallPricing("fallback-per-call"))
+	assert.False(t, YucoreMediaModelUsesPerCallPricing("unconfigured-video"))
 }
 
 func TestCangyuanMediaCatalogReturnsIndependentCopies(t *testing.T) {

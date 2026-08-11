@@ -553,6 +553,55 @@ func TestEstimateYucoreMediaTaskCostKeepsPatchedVideoPricePerCall(t *testing.T) 
 	assert.Equal(t, 20000, cost)
 }
 
+func TestEstimateYucoreMediaTaskCostHonorsExplicitPricingUnit(t *testing.T) {
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	originalGroups := ratio_setting.GroupRatio2JSONString()
+	originalPatches := constant.TaskPricePatches
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"explicit-per-call":0.04,"explicit-per-second":0.04,"fallback-per-call":0.04}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"media-group":1}`))
+	constant.TaskPricePatches = []string{"explicit-per-second", "fallback-per-call"}
+
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":             YucoreMediaAdapterYuAPIChannel,
+		"yucore_media.managed_token_group": "media-group",
+		"yucore_media.model_capabilities": `{
+			"explicit-per-call":{"kind":"video","pricing_unit":"per_call"},
+			"explicit-per-second":{"kind":"video","pricing_unit":"per_second"}
+		}`,
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroups))
+		constant.TaskPricePatches = originalPatches
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	tests := []struct {
+		name  string
+		model string
+		cost  int
+	}{
+		{name: "explicit per call overrides duration", model: "explicit-per-call", cost: 20000},
+		{name: "explicit per second overrides patch", model: "explicit-per-second", cost: 300000},
+		{name: "no explicit unit keeps patch fallback", model: "fallback-per-call", cost: 20000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cost := estimateYucoreMediaTaskCost(&YucoreMediaTask{
+				Kind:     "video",
+				ModelId:  tt.model,
+				Metadata: `{"duration":15}`,
+			})
+			assert.Equal(t, tt.cost, cost)
+		})
+	}
+}
+
 func TestEstimateYucoreMediaTaskCostChargesGrokVideoByDuration(t *testing.T) {
 	originalPrices := ratio_setting.ModelPrice2JSONString()
 	originalGroups := ratio_setting.GroupRatio2JSONString()

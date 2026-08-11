@@ -143,7 +143,7 @@ func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 		Id: 31, Type: constant.ChannelTypeSora, Name: "seedance", Key: "key-31", Status: common.ChannelStatusEnabled,
 	}).Error)
 	require.NoError(t, db.Create(&model.Ability{
-		Group: "multimodal", Model: "sd6-seedance-2.0-1080p", ChannelId: 31, Enabled: true,
+		Group: "multimodal", Model: " sd6-seedance-2.0-1080p ", ChannelId: 31, Enabled: true,
 	}).Error)
 
 	catalog, err := BuildYucoreMediaCatalog(9104)
@@ -152,6 +152,7 @@ func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 	require.Len(t, catalog.Groups[0].Models, 1)
 	item := catalog.Groups[0].Models[0]
 
+	assert.Equal(t, "sd6-seedance-2.0-1080p", item.Id)
 	assert.Equal(t, []int{4, 5, 6, 8, 10, 12, 15}, item.Durations)
 	assert.Equal(t, []string{"1080p"}, item.Resolutions)
 	assert.Equal(t, []string{"media", "frames"}, item.ReferenceModes)
@@ -177,12 +178,33 @@ func TestBuildYucoreMediaCatalogHidesProbeModels(t *testing.T) {
 		Id: 32, Type: constant.ChannelTypeSora, Name: "probe", Key: "key-32", Status: common.ChannelStatusEnabled,
 	}).Error)
 	require.NoError(t, db.Create(&model.Ability{
-		Group: "multimodal", Model: "seedance-2.0-mini-8s", ChannelId: 32, Enabled: true,
+		Group: "multimodal", Model: " seedance-2.0-mini-8s ", ChannelId: 32, Enabled: true,
 	}).Error)
 
 	catalog, err := BuildYucoreMediaCatalog(9105)
 	require.NoError(t, err)
 	assert.Empty(t, catalog.Groups)
+}
+
+func TestBuildYucoreMediaCatalogUsesExplicitPerCallPricingUnit(t *testing.T) {
+	db := setupYucoreMediaCatalogTest(t)
+	createYucoreMediaCatalogUser(t, db, 9107)
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["yucore_media.model_capabilities"] = `{"catalog-per-call":{"kind":"video","pricing_unit":"per_call","transport":"async-task"}}`
+	common.OptionMapRWMutex.Unlock()
+
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 34, Type: constant.ChannelTypeSora, Name: "per-call", Key: "key-34", Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "multimodal", Model: "catalog-per-call", ChannelId: 34, Enabled: true,
+	}).Error)
+
+	catalog, err := BuildYucoreMediaCatalog(9107)
+	require.NoError(t, err)
+	require.NotEmpty(t, catalog.Groups)
+	require.Len(t, catalog.Groups[0].Models, 1)
+	assert.Equal(t, "per_call", catalog.Groups[0].Models[0].Pricing.Unit)
 }
 
 func TestBuildYucoreMediaCatalogCapabilityProjectionIsolated(t *testing.T) {
