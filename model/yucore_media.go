@@ -72,6 +72,8 @@ type YucoreMediaUAGProxyHeaders map[string]string
 
 type YucoreMediaAssets string
 
+const YucoreMediaAssetVariantThumbnail = "thumbnail"
+
 func (YucoreMediaAssets) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
 	if db != nil && db.Dialector.Name() == "mysql" {
 		return "LONGTEXT"
@@ -827,6 +829,13 @@ func YucoreMediaAssetSource(asset YucoreMediaAsset) string {
 		}
 	}
 	return ""
+}
+
+func YucoreMediaAssetThumbnailSource(asset YucoreMediaAsset) string {
+	if source := strings.TrimSpace(asset.SourceThumbUrl); source != "" {
+		return source
+	}
+	return YucoreMediaAssetSource(asset)
 }
 
 func ResolveYucoreMediaAssetSourceURL(source string) (string, error) {

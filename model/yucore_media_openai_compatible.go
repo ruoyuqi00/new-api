@@ -669,7 +669,7 @@ func buildOpenAICompatibleTaskAssets(task *YucoreMediaTask, payload map[string]a
 			Id:             fmt.Sprintf("%s_asset_%d", task.TaskId, index),
 			Kind:           task.Kind,
 			Url:            assetURL,
-			ThumbUrl:       assetURL,
+			ThumbUrl:       assetURL + "?variant=" + YucoreMediaAssetVariantThumbnail,
 			SourceUrl:      resultURL,
 			SourceThumbUrl: sourceThumbnailURL,
 			Label:          fmt.Sprintf("%s result %d", task.ModelId, index+1),

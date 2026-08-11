@@ -770,7 +770,7 @@ func TestOpenAICompatibleTaskPollsAcceptedIDOnly(t *testing.T) {
 	require.Len(t, assets, 1)
 	assert.Equal(t, "media/results/final clip.mp4", assets[0].SourceUrl)
 	assert.Equal(t, "media/thumbs/final.jpg", assets[0].SourceThumbUrl)
-	assert.Equal(t, "/api/yucore/media/tasks/"+task.TaskId+"/assets/0", assets[0].ThumbUrl)
+	assert.Equal(t, "/api/yucore/media/tasks/"+task.TaskId+"/assets/0?variant=thumbnail", assets[0].ThumbUrl)
 	assert.Equal(t, "video/webm", assets[0].MimeType)
 	assert.Equal(t, 4321, assets[0].DurationMs)
 	assert.Equal(t, 1280, assets[0].Width)
@@ -877,7 +877,7 @@ func TestOpenAICompatibleTaskResultMetadata(t *testing.T) {
 					},
 				}},
 			}}},
-			want:       YucoreMediaAsset{SourceUrl: "relative/videos/final.mp4", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0", DurationMs: 6100, Width: 1920, Height: 1080, MimeType: "video/mp4"},
+			want:       YucoreMediaAsset{SourceUrl: "relative/videos/final.mp4", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0?variant=thumbnail", DurationMs: 6100, Width: 1920, Height: 1080, MimeType: "video/mp4"},
 			wantStatus: "succeeded",
 		},
 		{
@@ -895,7 +895,7 @@ func TestOpenAICompatibleTaskResultMetadata(t *testing.T) {
 					},
 				},
 			}}},
-			want:       YucoreMediaAsset{SourceUrl: "/v1/videos/provider-task/content", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0", DurationMs: 4321, Width: 1280, Height: 720, MimeType: "video/webm"},
+			want:       YucoreMediaAsset{SourceUrl: "/v1/videos/provider-task/content", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0?variant=thumbnail", DurationMs: 4321, Width: 1280, Height: 720, MimeType: "video/webm"},
 			wantStatus: "completed",
 		},
 		{
@@ -908,7 +908,7 @@ func TestOpenAICompatibleTaskResultMetadata(t *testing.T) {
 					map[string]any{"thumbnail_url": "signed/duplicate-thumb", "mime_type": "video/duplicate", "duration_ms": 9999, "content": map[string]any{"url": "signed/video-one"}},
 				},
 			}}},
-			want:       YucoreMediaAsset{SourceUrl: "signed/video-one", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0", DurationMs: 1001, Width: 640, Height: 360, MimeType: "video/mp4"},
+			want:       YucoreMediaAsset{SourceUrl: "signed/video-one", ThumbUrl: "/api/yucore/media/tasks/yu_result/assets/0?variant=thumbnail", DurationMs: 1001, Width: 640, Height: 360, MimeType: "video/mp4"},
 			wantStatus: "succeeded",
 		},
 	}
@@ -945,7 +945,7 @@ func TestOpenAICompatibleTaskResultMetadata(t *testing.T) {
 				assert.Equal(t, "signed/thumb-one", assets[0].SourceThumbUrl)
 				assert.Equal(t, "signed/video-two", assets[1].SourceUrl)
 				assert.Equal(t, "signed/thumb-two", assets[1].SourceThumbUrl)
-				assert.Equal(t, "/api/yucore/media/tasks/yu_result/assets/1", assets[1].ThumbUrl)
+				assert.Equal(t, "/api/yucore/media/tasks/yu_result/assets/1?variant=thumbnail", assets[1].ThumbUrl)
 				assert.Equal(t, 2002, assets[1].DurationMs)
 				assert.Equal(t, 1280, assets[1].Width)
 				assert.Equal(t, 720, assets[1].Height)
@@ -973,7 +973,36 @@ func TestOpenAICompatibleTaskSerializationKeepsSourcesInternal(t *testing.T) {
 	assert.NotContains(t, serialized, "secret-cache")
 	assert.NotContains(t, serialized, "source_url")
 	assert.Contains(t, serialized, `"url":"/api/yucore/media/tasks/yu_private_sources/assets/0"`)
-	assert.Contains(t, serialized, `"thumb_url":"/api/yucore/media/tasks/yu_private_sources/assets/0"`)
+	assert.Contains(t, serialized, `"thumb_url":"/api/yucore/media/tasks/yu_private_sources/assets/0?variant=thumbnail"`)
+}
+
+func TestYucoreMediaAssetPrivateSourcesRoundTrip(t *testing.T) {
+	assets := []YucoreMediaAsset{{
+		Id:             "asset_private",
+		Kind:           "video",
+		Url:            "/api/yucore/media/tasks/yu_private/assets/0",
+		ThumbUrl:       "/api/yucore/media/tasks/yu_private/assets/0?variant=thumbnail",
+		SourceUrl:      "https://signed.example/content.mp4?token=content-secret",
+		SourceThumbUrl: "https://signed.example/thumb.jpg?token=thumb-secret",
+		CachedUrl:      "https://signed.example/cache.mp4?token=cache-secret",
+		Label:          "private result",
+	}}
+	rawAssets, err := marshalYucoreMediaAssets(assets)
+	require.NoError(t, err)
+	task := &YucoreMediaTask{Assets: YucoreMediaAssets(rawAssets)}
+	roundTripped := YucoreMediaTaskAssets(task)
+	require.Len(t, roundTripped, 1)
+	assert.Equal(t, assets[0], roundTripped[0])
+	assert.Equal(t, assets[0].SourceUrl, YucoreMediaAssetSource(roundTripped[0]))
+	assert.Equal(t, assets[0].SourceThumbUrl, YucoreMediaAssetThumbnailSource(roundTripped[0]))
+	roundTripped[0].SourceThumbUrl = ""
+	assert.Equal(t, assets[0].SourceUrl, YucoreMediaAssetThumbnailSource(roundTripped[0]))
+
+	publicJSON, err := common.Marshal(roundTripped)
+	require.NoError(t, err)
+	assert.NotContains(t, string(publicJSON), "signed.example")
+	assert.NotContains(t, string(publicJSON), "secret")
+	assert.Contains(t, string(publicJSON), `"thumb_url":"/api/yucore/media/tasks/yu_private/assets/0?variant=thumbnail"`)
 }
 
 func TestOpenAICompatibleTaskResultMetadataKeepsNestedURLDistinct(t *testing.T) {

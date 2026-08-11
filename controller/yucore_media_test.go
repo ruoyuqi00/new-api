@@ -18,8 +18,11 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func yucoreMediaControllerTestModel(id string) service.YucoreMediaCatalogModel {
@@ -607,4 +610,81 @@ func TestServeYucoreMediaUploadedReferencePreservesOwnerAndSignatureAccess(t *te
 
 	unauthorizedResponse := serve("/api/yucore/media/uploads/42/"+fileName, 7)
 	assert.Equal(t, http.StatusUnauthorized, unauthorizedResponse.Code)
+}
+
+func TestServeYucoreMediaTaskAssetSelectsPrivateThumbnailSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamRequests := make([]string, 0, 4)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamRequests = append(upstreamRequests, r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/octet-stream")
+		switch r.URL.Path {
+		case "/content":
+			_, _ = w.Write([]byte("content-bytes"))
+		case "/thumbnail":
+			_, _ = w.Write([]byte("thumbnail-bytes"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	originalDB := model.DB
+	db, err := gorm.Open(sqlite.Open("file:yucore_media_thumbnail_proxy?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.YucoreMediaTask{}))
+	model.DB = db
+	t.Cleanup(func() { model.DB = originalDB })
+
+	persistedAssets, err := common.Marshal([]map[string]any{{
+		"id":               "yu_thumbnail_asset_0",
+		"kind":             "video",
+		"url":              "/api/yucore/media/tasks/yu_thumbnail/assets/0",
+		"thumb_url":        "/api/yucore/media/tasks/yu_thumbnail/assets/0?variant=thumbnail",
+		"source_url":       upstream.URL + "/content?signature=content",
+		"source_thumb_url": upstream.URL + "/thumbnail?signature=thumb",
+		"label":            "thumbnail result",
+		"mime_type":        "video/mp4",
+	}})
+	require.NoError(t, err)
+	task := &model.YucoreMediaTask{
+		TaskId: "yu_thumbnail", UserId: 42, Kind: "video", ModelId: "video-model",
+		Status: model.YucoreMediaTaskStatusCompleted, Assets: model.YucoreMediaAssets(persistedAssets),
+		Metadata: `{"adapter":"openai-compatible"}`, CreatedTime: common.GetTimestamp(), UpdatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	serve := func(requestURL string, userID int) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
+		context.Params = gin.Params{{Key: "task_id", Value: task.TaskId}, {Key: "index", Value: "0"}}
+		context.Set("id", userID)
+		ServeYucoreMediaTaskAsset(context)
+		return recorder
+	}
+
+	contentResponse := serve("/api/yucore/media/tasks/yu_thumbnail/assets/0", 42)
+	assert.Equal(t, http.StatusOK, contentResponse.Code)
+	assert.Equal(t, "content-bytes", contentResponse.Body.String())
+	assert.Equal(t, "private, max-age=300", contentResponse.Header().Get("Cache-Control"))
+	thumbnailResponse := serve("/api/yucore/media/tasks/yu_thumbnail/assets/0?variant=thumbnail", 42)
+	assert.Equal(t, http.StatusOK, thumbnailResponse.Code)
+	assert.Equal(t, "thumbnail-bytes", thumbnailResponse.Body.String())
+	assert.Equal(t, "private, max-age=300", thumbnailResponse.Header().Get("Cache-Control"))
+	invalidVariantResponse := serve("/api/yucore/media/tasks/yu_thumbnail/assets/0?variant=thumbnail-extra", 42)
+	assert.Equal(t, http.StatusOK, invalidVariantResponse.Code)
+	assert.Equal(t, "content-bytes", invalidVariantResponse.Body.String())
+	assert.Equal(t, []string{"/content?signature=content", "/thumbnail?signature=thumb", "/content?signature=content"}, upstreamRequests)
+
+	unauthorizedResponse := serve("/api/yucore/media/tasks/yu_thumbnail/assets/0?variant=thumbnail", 0)
+	assert.Equal(t, http.StatusUnauthorized, unauthorizedResponse.Code)
+	nonOwnerResponse := serve("/api/yucore/media/tasks/yu_thumbnail/assets/0?variant=thumbnail", 7)
+	assert.Equal(t, http.StatusNotFound, nonOwnerResponse.Code)
+
+	responseJSON, err := common.Marshal(buildYucoreMediaTaskResponse(task))
+	require.NoError(t, err)
+	assert.NotContains(t, string(responseJSON), upstream.URL)
+	assert.NotContains(t, string(responseJSON), "signature=thumb")
+	assert.Contains(t, string(responseJSON), `"thumb_url":"/api/yucore/media/tasks/yu_thumbnail/assets/0?variant=thumbnail"`)
 }

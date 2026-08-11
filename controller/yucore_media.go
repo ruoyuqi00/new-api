@@ -1655,6 +1655,9 @@ func ServeYucoreMediaTaskAsset(c *gin.Context) {
 		return
 	}
 	source := model.YucoreMediaAssetSource(asset)
+	if c.Query("variant") == model.YucoreMediaAssetVariantThumbnail {
+		source = model.YucoreMediaAssetThumbnailSource(asset)
+	}
 	if source == "" {
 		c.String(http.StatusBadGateway, "provider media asset source is missing")
 		return
