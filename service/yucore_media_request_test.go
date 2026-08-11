@@ -75,6 +75,21 @@ func TestNormalizeYucoreMediaRequestValidatesDurationResolutionAndAspectRatio(t 
 	require.ErrorContains(t, err, "aspect ratio")
 }
 
+func TestNormalizeYucoreMediaRequestPreservesConfiguredDurationOrder(t *testing.T) {
+	selected := yucoreMediaRequestTestModel("operator-ordered-video")
+	selected.Durations = []int{10, 5}
+
+	normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, normalized.Duration)
+	assert.Equal(t, 10, *normalized.Duration)
+
+	normalized, err = NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{Duration: intPointer(5)})
+	require.NoError(t, err)
+	require.NotNil(t, normalized.Duration)
+	assert.Equal(t, 5, *normalized.Duration)
+}
+
 func TestNormalizeYucoreMediaRequestRejectsUnsupportedOptionalParameters(t *testing.T) {
 	generateAudio := false
 	seed := int64(0)

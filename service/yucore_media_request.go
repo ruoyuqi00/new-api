@@ -84,11 +84,6 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 		}
 	} else if len(durations) > 0 {
 		value := durations[0]
-		for _, duration := range durations[1:] {
-			if duration < value {
-				value = duration
-			}
-		}
 		normalized.Duration = &value
 	}
 
