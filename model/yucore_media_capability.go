@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -110,12 +111,14 @@ func decodeYucoreMediaCapabilityDocument(raw []byte) (map[string]map[string]any,
 	}
 
 	rows := make(map[string]map[string]any)
+	modelIDs := make(map[string]string)
 	addRow := func(modelID string, value any) error {
 		modelID = strings.TrimSpace(modelID)
 		if modelID == "" {
 			return errors.New("YuCore media model capabilities contain an empty model ID")
 		}
-		if _, exists := rows[modelID]; exists {
+		identity := strings.ToLower(modelID)
+		if _, exists := modelIDs[identity]; exists {
 			return fmt.Errorf("YuCore media model capabilities contain duplicate model %s", modelID)
 		}
 		row, ok := value.(map[string]any)
@@ -133,12 +136,26 @@ func decodeYucoreMediaCapabilityDocument(raw []byte) (map[string]map[string]any,
 			}
 		}
 		rows[modelID] = rowCopy
+		modelIDs[identity] = modelID
 		return nil
 	}
 
 	switch value := document.(type) {
 	case map[string]any:
-		for modelID, row := range value {
+		orderedIDs := make([]string, 0, len(value))
+		for modelID := range value {
+			orderedIDs = append(orderedIDs, modelID)
+		}
+		sort.Slice(orderedIDs, func(i, j int) bool {
+			left := strings.ToLower(strings.TrimSpace(orderedIDs[i]))
+			right := strings.ToLower(strings.TrimSpace(orderedIDs[j]))
+			if left == right {
+				return orderedIDs[i] < orderedIDs[j]
+			}
+			return left < right
+		})
+		for _, modelID := range orderedIDs {
+			row := value[modelID]
 			if err := addRow(modelID, row); err != nil {
 				return nil, err
 			}
@@ -166,7 +183,13 @@ func decodeYucoreMediaModelCapabilities(raw []byte) (map[string]YucoreMediaModel
 		return nil, err
 	}
 	capabilities := make(map[string]YucoreMediaModelCapability, len(rows))
-	for modelID, row := range rows {
+	modelIDs := make([]string, 0, len(rows))
+	for modelID := range rows {
+		modelIDs = append(modelIDs, modelID)
+	}
+	sort.Strings(modelIDs)
+	for _, modelID := range modelIDs {
+		row := rows[modelID]
 		encoded, err := common.Marshal(row)
 		if err != nil {
 			return nil, err
@@ -193,22 +216,54 @@ func parseYucoreMediaModelCapabilities(raw string) map[string]YucoreMediaModelCa
 	return cloneYucoreMediaModelCapabilities(capabilities)
 }
 
-func mergeYucoreMediaModelCapabilities(base map[string]YucoreMediaModelCapability, raw string) map[string]YucoreMediaModelCapability {
+func mergeYucoreMediaModelCapabilities(base map[string]YucoreMediaModelCapability, raw string) (map[string]YucoreMediaModelCapability, error) {
 	merged := cloneYucoreMediaModelCapabilities(base)
+	canonicalIDs := make(map[string]string, len(merged))
+	baseIDs := make([]string, 0, len(merged))
+	for modelID := range merged {
+		baseIDs = append(baseIDs, modelID)
+	}
+	sort.Strings(baseIDs)
+	for _, modelID := range baseIDs {
+		trimmedModelID := strings.TrimSpace(modelID)
+		identity := strings.ToLower(trimmedModelID)
+		if existing, duplicate := canonicalIDs[identity]; duplicate {
+			return cloneYucoreMediaModelCapabilities(base), fmt.Errorf("YuCore media model capabilities contain duplicate models %s and %s", existing, trimmedModelID)
+		}
+		canonicalIDs[identity] = trimmedModelID
+	}
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return merged
+		if err := validateYucoreMediaCapabilities(merged); err != nil {
+			return cloneYucoreMediaModelCapabilities(base), err
+		}
+		return merged, nil
 	}
 	overrides, err := decodeYucoreMediaCapabilityDocument([]byte(raw))
 	if err != nil {
-		return merged
+		return cloneYucoreMediaModelCapabilities(base), err
 	}
-	for modelID, override := range overrides {
+	overrideIDs := make([]string, 0, len(overrides))
+	for modelID := range overrides {
+		overrideIDs = append(overrideIDs, modelID)
+	}
+	sort.Strings(overrideIDs)
+	for _, overrideModelID := range overrideIDs {
+		override := overrides[overrideModelID]
+		identity := strings.ToLower(strings.TrimSpace(overrideModelID))
+		modelID, exists := canonicalIDs[identity]
+		if !exists {
+			modelID = strings.TrimSpace(overrideModelID)
+			canonicalIDs[identity] = modelID
+		}
 		row := make(map[string]any)
 		if existing, ok := merged[modelID]; ok {
 			encoded, err := common.Marshal(existing)
-			if err != nil || common.Unmarshal(encoded, &row) != nil {
-				continue
+			if err != nil {
+				return cloneYucoreMediaModelCapabilities(base), fmt.Errorf("YuCore media model %s cannot be merged: %w", modelID, err)
+			}
+			if err := common.Unmarshal(encoded, &row); err != nil {
+				return cloneYucoreMediaModelCapabilities(base), fmt.Errorf("YuCore media model %s cannot be merged: %w", modelID, err)
 			}
 		}
 		for key, value := range override {
@@ -230,16 +285,19 @@ func mergeYucoreMediaModelCapabilities(base map[string]YucoreMediaModelCapabilit
 		}
 		encoded, err := common.Marshal(row)
 		if err != nil {
-			continue
+			return cloneYucoreMediaModelCapabilities(base), fmt.Errorf("YuCore media model %s cannot be merged: %w", modelID, err)
 		}
 		var capability YucoreMediaModelCapability
 		if err := common.Unmarshal(encoded, &capability); err != nil {
-			continue
+			return cloneYucoreMediaModelCapabilities(base), fmt.Errorf("YuCore media model %s has invalid capability fields: %w", modelID, err)
 		}
 		capability.Model = modelID
 		merged[modelID] = capability
 	}
-	return cloneYucoreMediaModelCapabilities(merged)
+	if err := validateYucoreMediaCapabilities(merged); err != nil {
+		return cloneYucoreMediaModelCapabilities(base), err
+	}
+	return cloneYucoreMediaModelCapabilities(merged), nil
 }
 
 func loadCangyuanMediaCatalog() (map[string]YucoreMediaModelCapability, error) {
@@ -265,8 +323,55 @@ func validateYucoreMediaModelCapabilities(raw string) error {
 	return validateYucoreMediaCapabilities(capabilities)
 }
 
+func validateYucoreMediaModelCapabilitiesForConfig(raw string) error {
+	embedded, err := loadCangyuanMediaCatalog()
+	if err != nil {
+		return err
+	}
+	merged, err := mergeYucoreMediaModelCapabilities(
+		embedded,
+		common.GetEnvOrDefaultString("YUCORE_MEDIA_MODEL_CAPABILITIES", ""),
+	)
+	if err != nil {
+		return fmt.Errorf("invalid YuCore media model capabilities from environment: %w", err)
+	}
+	if _, err := mergeYucoreMediaModelCapabilities(merged, raw); err != nil {
+		return fmt.Errorf("invalid YuCore media model capabilities option: %w", err)
+	}
+	return nil
+}
+
 func validateYucoreMediaCapabilities(capabilities map[string]YucoreMediaModelCapability) error {
-	for modelID, capability := range capabilities {
+	modelIDs := make([]string, 0, len(capabilities))
+	for modelID := range capabilities {
+		modelIDs = append(modelIDs, modelID)
+	}
+	sort.Slice(modelIDs, func(i, j int) bool {
+		left := strings.ToLower(strings.TrimSpace(modelIDs[i]))
+		right := strings.ToLower(strings.TrimSpace(modelIDs[j]))
+		if left == right {
+			return modelIDs[i] < modelIDs[j]
+		}
+		return left < right
+	})
+	identities := make(map[string]string, len(modelIDs))
+	for _, modelID := range modelIDs {
+		trimmedModelID := strings.TrimSpace(modelID)
+		if trimmedModelID == "" {
+			return errors.New("YuCore media model capabilities contain an empty model ID")
+		}
+		identity := strings.ToLower(trimmedModelID)
+		if existing, duplicate := identities[identity]; duplicate {
+			return fmt.Errorf("YuCore media model capabilities contain duplicate models %s and %s", existing, trimmedModelID)
+		}
+		identities[identity] = trimmedModelID
+
+		capability := capabilities[modelID]
+		switch strings.ToLower(strings.TrimSpace(capability.Kind)) {
+		case "", "image", "video":
+		default:
+			return fmt.Errorf("YuCore media model %s has an invalid kind", modelID)
+		}
 		transport := strings.ToLower(strings.TrimSpace(capability.Transport))
 		switch transport {
 		case "", yucoreMediaTransportSyncImage, yucoreMediaTransportAsyncTask, "async-image-task", "async-video-task":
@@ -302,22 +407,55 @@ func validateYucoreMediaCapabilities(capabilities map[string]YucoreMediaModelCap
 			(capability.MaxPollDurationSeconds > 0 && capability.MaxPollDurationSeconds < capability.PollIntervalSeconds) {
 			return fmt.Errorf("YuCore media model %s has an invalid maximum poll duration", modelID)
 		}
-		for label, endpointPath := range map[string]string{
-			"create":  capability.CreatePath,
-			"edit":    capability.EditPath,
-			"status":  capability.StatusPath,
-			"content": capability.ContentPath,
-			"cancel":  capability.CancelPath,
-		} {
-			endpointPath = strings.TrimSpace(endpointPath)
+		seenDurations := make(map[int]struct{}, len(capability.Durations))
+		for _, duration := range capability.Durations {
+			if duration <= 0 {
+				return fmt.Errorf("YuCore media model %s has an invalid duration", modelID)
+			}
+			if _, duplicate := seenDurations[duration]; duplicate {
+				return fmt.Errorf("YuCore media model %s has duplicate duration %d", modelID, duration)
+			}
+			seenDurations[duration] = struct{}{}
+		}
+		if err := validateYucoreMediaStringList(modelID, "resolution", capability.Resolutions, nil); err != nil {
+			return err
+		}
+		if err := validateYucoreMediaStringList(modelID, "aspect ratio", capability.AspectRatios, nil); err != nil {
+			return err
+		}
+		if err := validateYucoreMediaStringList(modelID, "reference mode", capability.ReferenceModes, map[string]struct{}{
+			"text": {}, "media": {}, "frames": {},
+		}); err != nil {
+			return err
+		}
+		if err := validateYucoreMediaStringList(modelID, "allowed parameter", capability.AllowedParameters, nil); err != nil {
+			return err
+		}
+		if err := validateYucoreMediaStringList(modelID, "note", capability.Notes, nil); err != nil {
+			return err
+		}
+
+		paths := []struct {
+			label          string
+			value          string
+			requiresTaskID bool
+		}{
+			{label: "create", value: capability.CreatePath},
+			{label: "edit", value: capability.EditPath},
+			{label: "status", value: capability.StatusPath, requiresTaskID: true},
+			{label: "content", value: capability.ContentPath, requiresTaskID: true},
+			{label: "cancel", value: capability.CancelPath, requiresTaskID: true},
+		}
+		for _, path := range paths {
+			endpointPath := strings.TrimSpace(path.value)
 			if endpointPath == "" {
 				continue
 			}
 			if !strings.HasPrefix(endpointPath, "/") {
-				return fmt.Errorf("YuCore media model %s %s path must start with /", modelID, label)
+				return fmt.Errorf("YuCore media model %s %s path must start with /", modelID, path.label)
 			}
-			if label != "create" && label != "edit" && !strings.Contains(endpointPath, "{task_id}") {
-				return fmt.Errorf("YuCore media model %s %s path must contain {task_id}", modelID, label)
+			if path.requiresTaskID && !strings.Contains(endpointPath, "{task_id}") {
+				return fmt.Errorf("YuCore media model %s %s path must contain {task_id}", modelID, path.label)
 			}
 		}
 
@@ -334,7 +472,8 @@ func validateYucoreMediaCapabilities(capabilities map[string]YucoreMediaModelCap
 		if limits.Total < 0 || limits.Total > 32 {
 			return fmt.Errorf("YuCore media model %s has an invalid reference total limit", modelID)
 		}
-		if limits.MaxVideoDurationMS < 0 || limits.MaxAudioDurationMS < 0 {
+		if limits.MaxVideoDurationMS < 0 || limits.MaxVideoDurationMS > 86400000 ||
+			limits.MaxAudioDurationMS < 0 || limits.MaxAudioDurationMS > 86400000 {
 			return fmt.Errorf("YuCore media model %s has an invalid reference duration limit", modelID)
 		}
 		if capability.MaxReferenceImages > 0 && limits.Images > 0 && capability.MaxReferenceImages != limits.Images {
@@ -346,6 +485,26 @@ func validateYucoreMediaCapabilities(capabilities map[string]YucoreMediaModelCap
 		if err := validateYucoreMediaTerminalStates(modelID, capability.TerminalSuccessStates, capability.TerminalFailureStates); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateYucoreMediaStringList(modelID string, label string, values []string, allowed map[string]struct{}) error {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized == "" {
+			return fmt.Errorf("YuCore media model %s has an invalid %s", modelID, label)
+		}
+		if allowed != nil {
+			if _, ok := allowed[normalized]; !ok {
+				return fmt.Errorf("YuCore media model %s has an invalid %s %s", modelID, label, strings.TrimSpace(value))
+			}
+		}
+		if _, duplicate := seen[normalized]; duplicate {
+			return fmt.Errorf("YuCore media model %s has duplicate %s %s", modelID, label, strings.TrimSpace(value))
+		}
+		seen[normalized] = struct{}{}
 	}
 	return nil
 }

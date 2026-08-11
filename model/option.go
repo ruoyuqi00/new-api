@@ -225,7 +225,7 @@ func SyncOptions(frequency int) {
 
 func UpdateOption(key string, value string) error {
 	if key == "yucore_media.model_capabilities" {
-		if err := validateYucoreMediaModelCapabilities(value); err != nil {
+		if err := validateYucoreMediaModelCapabilitiesForConfig(value); err != nil {
 			return err
 		}
 	}
@@ -263,7 +263,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 		return nil
 	}
 	if value, ok := values["yucore_media.model_capabilities"]; ok {
-		if err := validateYucoreMediaModelCapabilities(value); err != nil {
+		if err := validateYucoreMediaModelCapabilitiesForConfig(value); err != nil {
 			return err
 		}
 	}

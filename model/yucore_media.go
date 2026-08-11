@@ -199,6 +199,11 @@ func getYucoreMediaOptionBool(key string, envKey string, fallback bool) bool {
 }
 
 func getYucoreMediaAdapterConfig() yucoreMediaAdapterConfig {
+	config, _ := getYucoreMediaAdapterConfigChecked()
+	return config
+}
+
+func getYucoreMediaAdapterConfigChecked() (yucoreMediaAdapterConfig, error) {
 	timeout := getYucoreMediaOptionInt("yucore_media.timeout_seconds", "YUCORE_MEDIA_TIMEOUT_SECONDS", 90)
 	if timeout <= 0 {
 		timeout = 90
@@ -208,18 +213,21 @@ func getYucoreMediaAdapterConfig() yucoreMediaAdapterConfig {
 	if adapter == YucoreMediaAdapterUAGProxy && baseURL == "" {
 		baseURL = strings.TrimRight(strings.TrimSpace(common.GetEnvOrDefaultString("YUCORE_MEDIA_UAG_BASE_URL", "")), "/")
 	}
-	embeddedCapabilities, _ := loadCangyuanMediaCatalog()
-	modelCapabilities := mergeYucoreMediaModelCapabilities(
-		embeddedCapabilities,
-		common.GetEnvOrDefaultString("YUCORE_MEDIA_MODEL_CAPABILITIES", ""),
-	)
+	embeddedCapabilities, configErr := loadCangyuanMediaCatalog()
+	modelCapabilities := embeddedCapabilities
+	if configErr == nil {
+		modelCapabilities, configErr = mergeYucoreMediaModelCapabilities(
+			embeddedCapabilities,
+			common.GetEnvOrDefaultString("YUCORE_MEDIA_MODEL_CAPABILITIES", ""),
+		)
+	}
 	common.OptionMapRWMutex.RLock()
 	operatorCapabilities, hasOperatorCapabilities := common.OptionMap["yucore_media.model_capabilities"]
 	common.OptionMapRWMutex.RUnlock()
-	if hasOperatorCapabilities {
-		modelCapabilities = mergeYucoreMediaModelCapabilities(modelCapabilities, operatorCapabilities)
+	if hasOperatorCapabilities && configErr == nil {
+		modelCapabilities, configErr = mergeYucoreMediaModelCapabilities(modelCapabilities, operatorCapabilities)
 	}
-	return yucoreMediaAdapterConfig{
+	config := yucoreMediaAdapterConfig{
 		Adapter:             adapter,
 		BaseURL:             baseURL,
 		APIKey:              getYucoreMediaOptionString("yucore_media.api_key", "YUCORE_MEDIA_API_KEY", ""),
@@ -232,6 +240,7 @@ func getYucoreMediaAdapterConfig() yucoreMediaAdapterConfig {
 		UAGAllowedModels:    parseYucoreMediaUAGAllowlist(getYucoreMediaOptionString("yucore_media.uag_allowed_models", "YUCORE_MEDIA_UAG_ALLOWED_MODELS", "")),
 		UpstreamVerified:    getYucoreMediaOptionBool("yucore_media.upstream_verified", "YUCORE_MEDIA_UPSTREAM_VERIFIED", false),
 	}
+	return config, configErr
 }
 
 func GetYucoreMediaCatalogSettings() (string, map[string]YucoreMediaModelCapability) {

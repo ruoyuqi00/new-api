@@ -84,7 +84,7 @@ func TestCangyuanMediaCatalogAuditedFamilyContracts(t *testing.T) {
 	assert.NotContains(t, omni.AllowedParameters, "seconds")
 	assert.NotContains(t, omni.AllowedParameters, "size")
 	assert.Equal(t, YucoreMediaReferenceLimits{Images: 5, Total: 5}, omni.ReferenceLimits)
-	assert.Equal(t, []string{"media", "frame"}, omni.ReferenceModes)
+	assert.Equal(t, []string{"media", "frames"}, omni.ReferenceModes)
 	geminiOmni := catalog["gemini-omni-flash"]
 	assert.Equal(t, []int{3, 4, 5, 6, 7, 8, 9, 10}, geminiOmni.Durations)
 	assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Total: 4}, geminiOmni.ReferenceLimits)
@@ -93,7 +93,7 @@ func TestCangyuanMediaCatalogAuditedFamilyContracts(t *testing.T) {
 	assert.Equal(t, []int{4, 5, 6, 8, 10, 12, 15}, seedance.Durations)
 	assert.Equal(t, []string{"480p", "720p"}, seedance.Resolutions)
 	assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8}, seedance.ReferenceLimits)
-	assert.Equal(t, []string{"media", "frame"}, seedance.ReferenceModes)
+	assert.Equal(t, []string{"media", "frames"}, seedance.ReferenceModes)
 	seedanceFast := catalog["seedance-2.0-fast"]
 	assert.Equal(t, 4, seedanceFast.ReferenceLimits.Images)
 	assert.Equal(t, 3, seedanceFast.ReferenceLimits.Videos)
@@ -172,11 +172,13 @@ func TestCangyuanMediaCatalogOperatorOverridesPreserveExplicitZeroValues(t *test
 
 	embedded, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
-	arrayMerged := mergeYucoreMediaModelCapabilities(embedded, `[{"model":"seedance-2.0","supports_audio":false,"durations":[]}]`)
+	arrayMerged, err := mergeYucoreMediaModelCapabilities(embedded, `[{"model":"seedance-2.0","supports_audio":false,"durations":[]}]`)
+	require.NoError(t, err)
 	assert.False(t, arrayMerged["seedance-2.0"].SupportsAudio)
 	assert.Empty(t, arrayMerged["seedance-2.0"].Durations)
 	assert.Equal(t, "video", arrayMerged["seedance-2.0"].Kind)
-	legacyMerged := mergeYucoreMediaModelCapabilities(embedded, `{"seedance-2.0":{"max_reference_images":2}}`)
+	legacyMerged, err := mergeYucoreMediaModelCapabilities(embedded, `{"seedance-2.0":{"max_reference_images":2}}`)
+	require.NoError(t, err)
 	assert.Equal(t, 2, legacyMerged["seedance-2.0"].ReferenceLimits.Images)
 	assert.Equal(t, 3, legacyMerged["seedance-2.0"].ReferenceLimits.Videos)
 }
@@ -287,6 +289,16 @@ func TestValidateYucoreMediaModelCapabilitiesRichSchema(t *testing.T) {
 		{name: "legacy richer conflict", raw: `{"video":{"max_reference_images":2,"reference_limits":{"images":3}}}`, wantErr: "conflicting reference image limits"},
 		{name: "duplicate model", raw: `[{"model":"video"},{"model":" video "}]`, wantErr: "duplicate model"},
 		{name: "duplicate object model", raw: `{"video":{"kind":"video"},"video":{"kind":"image"}}`, wantErr: "duplicate model"},
+		{name: "invalid kind", raw: `{"video":{"kind":"audio"}}`, wantErr: "invalid kind"},
+		{name: "legacy singular frame mode", raw: `{"video":{"reference_modes":["frame"]}}`, wantErr: "invalid reference mode"},
+		{name: "provider media type mode", raw: `{"video":{"reference_modes":["image"]}}`, wantErr: "invalid reference mode"},
+		{name: "nonpositive duration", raw: `{"video":{"durations":[0]}}`, wantErr: "invalid duration"},
+		{name: "duplicate duration", raw: `{"video":{"durations":[4,4]}}`, wantErr: "duplicate duration"},
+		{name: "blank resolution", raw: `{"video":{"resolutions":[" "]}}`, wantErr: "invalid resolution"},
+		{name: "duplicate aspect ratio", raw: `{"video":{"aspect_ratios":["16:9"," 16:9 "]}}`, wantErr: "duplicate aspect ratio"},
+		{name: "blank allowed parameter", raw: `{"video":{"allowed_parameters":[""]}}`, wantErr: "invalid allowed parameter"},
+		{name: "duplicate note", raw: `{"video":{"notes":["Needs audio"," needs audio "]}}`, wantErr: "duplicate note"},
+		{name: "reference duration too large", raw: `{"video":{"reference_limits":{"max_video_duration_ms":86400001}}}`, wantErr: "reference duration limit"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -295,6 +307,75 @@ func TestValidateYucoreMediaModelCapabilitiesRichSchema(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestYucoreMediaCapabilitiesUseCaseInsensitiveModelIdentity(t *testing.T) {
+	tests := []string{
+		`[{"model":"Video"},{"model":" video "}]`,
+		`{"Video":{}," video ":{}}`,
+	}
+	for _, raw := range tests {
+		_, err := decodeYucoreMediaModelCapabilities([]byte(raw))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate model")
+	}
+
+	base := map[string]YucoreMediaModelCapability{
+		"seedance-2.0": {Model: "seedance-2.0", Kind: "video", PollIntervalSeconds: 5},
+	}
+	merged, err := mergeYucoreMediaModelCapabilities(base, `{"SEEDANCE-2.0":{"poll_interval_seconds":7}}`)
+	require.NoError(t, err)
+	require.Len(t, merged, 1)
+	assert.Equal(t, 7, merged["seedance-2.0"].PollIntervalSeconds)
+	assert.NotContains(t, merged, "SEEDANCE-2.0")
+
+	merged, err = mergeYucoreMediaModelCapabilities(merged, `{"Custom-Video":{"kind":"video","poll_interval_seconds":3}}`)
+	require.NoError(t, err)
+	merged, err = mergeYucoreMediaModelCapabilities(merged, `{" custom-video ":{"poll_interval_seconds":9}}`)
+	require.NoError(t, err)
+	assert.Equal(t, 9, merged["Custom-Video"].PollIntervalSeconds)
+	assert.NotContains(t, merged, "custom-video")
+
+	unchanged, err := mergeYucoreMediaModelCapabilities(merged, `{"broken":`)
+	require.Error(t, err)
+	assert.Equal(t, merged, unchanged)
+}
+
+func TestYucoreMediaCheckedConfigRejectsCrossLayerConflict(t *testing.T) {
+	t.Setenv("YUCORE_MEDIA_MODEL_CAPABILITIES", `{"Layered-Video":{"kind":"video","max_reference_images":2}}`)
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.model_capabilities": `{"layered-video":{"reference_limits":{"images":3}}}`,
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	config, err := getYucoreMediaAdapterConfigChecked()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "conflicting reference image limits")
+	assert.Equal(t, 2, config.ModelCapabilities["Layered-Video"].ReferenceLimits.Images)
+}
+
+func TestYucoreMediaCapabilityValidationIsDeterministic(t *testing.T) {
+	capabilities := map[string]YucoreMediaModelCapability{
+		"z-model": {Model: "z-model", Kind: "audio", CreatePath: "also-invalid"},
+		"a-model": {Model: "a-model", Kind: "video", CreatePath: "invalid", EditPath: "invalid"},
+	}
+	for range 50 {
+		err := validateYucoreMediaCapabilities(capabilities)
+		require.EqualError(t, err, "YuCore media model a-model create path must start with /")
+	}
+}
+
+func TestYucoreMediaReferenceModeSchema(t *testing.T) {
+	require.NoError(t, validateYucoreMediaModelCapabilities(
+		`{"video":{"kind":"video","reference_modes":["text","media","frames"],"durations":[]}}`,
+	))
 }
 
 func TestYucoreMediaReferenceInputRoleIsAlwaysSerialized(t *testing.T) {
