@@ -290,8 +290,7 @@ func TestValidateYucoreMediaModelCapabilitiesRichSchema(t *testing.T) {
 		{name: "duplicate model", raw: `[{"model":"video"},{"model":" video "}]`, wantErr: "duplicate model"},
 		{name: "duplicate object model", raw: `{"video":{"kind":"video"},"video":{"kind":"image"}}`, wantErr: "duplicate model"},
 		{name: "invalid kind", raw: `{"video":{"kind":"audio"}}`, wantErr: "invalid kind"},
-		{name: "legacy singular frame mode", raw: `{"video":{"reference_modes":["frame"]}}`, wantErr: "invalid reference mode"},
-		{name: "provider media type mode", raw: `{"video":{"reference_modes":["image"]}}`, wantErr: "invalid reference mode"},
+		{name: "unknown reference mode", raw: `{"video":{"reference_modes":["storyboard"]}}`, wantErr: "invalid reference mode"},
 		{name: "nonpositive duration", raw: `{"video":{"durations":[0]}}`, wantErr: "invalid duration"},
 		{name: "duplicate duration", raw: `{"video":{"durations":[4,4]}}`, wantErr: "duplicate duration"},
 		{name: "blank resolution", raw: `{"video":{"resolutions":[" "]}}`, wantErr: "invalid resolution"},
@@ -376,6 +375,68 @@ func TestYucoreMediaReferenceModeSchema(t *testing.T) {
 	require.NoError(t, validateYucoreMediaModelCapabilities(
 		`{"video":{"kind":"video","reference_modes":["text","media","frames"],"durations":[]}}`,
 	))
+	for _, mode := range []string{"frame", " Media "} {
+		err := validateYucoreMediaCapabilities(map[string]YucoreMediaModelCapability{
+			"video": {Model: "video", Kind: "video", ReferenceModes: []string{mode}},
+		})
+		require.ErrorContains(t, err, "invalid reference mode")
+	}
+}
+
+func TestYucoreMediaReferenceModesNormalizeLegacyAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		modes    string
+		expected []string
+	}{
+		{name: "singular frame", modes: `["frame"]`, expected: []string{"frames"}},
+		{name: "image alias", modes: `["image"]`, expected: []string{"media"}},
+		{name: "media type aliases", modes: `["image","video","audio"]`, expected: []string{"media"}},
+		{name: "mixed canonical and aliases", modes: `["frames","video","text","frame","media","image"]`, expected: []string{"text", "media", "frames"}},
+		{name: "whitespace and case", modes: `[" FRAME "," Media ","TEXT","AuDiO"]`, expected: []string{"text", "media", "frames"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `{"video":{"kind":"video","reference_modes":` + tt.modes + `}}`
+			capabilities, err := decodeYucoreMediaModelCapabilities([]byte(raw))
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, capabilities["video"].ReferenceModes)
+			require.NoError(t, validateYucoreMediaCapabilities(capabilities))
+		})
+	}
+}
+
+func TestYucoreMediaReferenceModeAliasesKeepEnvironmentAndOptionLayersActive(t *testing.T) {
+	t.Setenv("YUCORE_MEDIA_MODEL_CAPABILITIES", `{
+		"SEEDANCE-2.0": {
+			"supports_audio": false,
+			"reference_modes": ["image", "video", "audio"]
+		}
+	}`)
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.model_capabilities": `{
+			"seedance-2.0": {
+				"durations": [],
+				"reference_modes": [" FRAME ", "TeXT", "image", "frames", "MEDIA"]
+			}
+		}`,
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	config, err := getYucoreMediaAdapterConfigChecked()
+	require.NoError(t, err)
+	capability := config.ModelCapabilities["seedance-2.0"]
+	assert.False(t, capability.SupportsAudio)
+	assert.Empty(t, capability.Durations)
+	assert.Equal(t, []string{"text", "media", "frames"}, capability.ReferenceModes)
+	assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8}, capability.ReferenceLimits)
 }
 
 func TestYucoreMediaReferenceInputRoleIsAlwaysSerialized(t *testing.T) {

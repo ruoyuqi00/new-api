@@ -199,6 +199,7 @@ func decodeYucoreMediaModelCapabilities(raw []byte) (map[string]YucoreMediaModel
 			return nil, fmt.Errorf("YuCore media model %s has invalid capability fields: %w", modelID, err)
 		}
 		capability.Model = modelID
+		capability.ReferenceModes = normalizeYucoreMediaReferenceModes(capability.ReferenceModes)
 		capabilities[modelID] = capability
 	}
 	return capabilities, nil
@@ -292,12 +293,43 @@ func mergeYucoreMediaModelCapabilities(base map[string]YucoreMediaModelCapabilit
 			return cloneYucoreMediaModelCapabilities(base), fmt.Errorf("YuCore media model %s has invalid capability fields: %w", modelID, err)
 		}
 		capability.Model = modelID
+		capability.ReferenceModes = normalizeYucoreMediaReferenceModes(capability.ReferenceModes)
 		merged[modelID] = capability
 	}
 	if err := validateYucoreMediaCapabilities(merged); err != nil {
 		return cloneYucoreMediaModelCapabilities(base), err
 	}
 	return cloneYucoreMediaModelCapabilities(merged), nil
+}
+
+func normalizeYucoreMediaReferenceModes(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	present := make(map[string]struct{}, len(values))
+	unknown := make([]string, 0)
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		switch normalized {
+		case "image", "video", "audio":
+			normalized = "media"
+		case "frame":
+			normalized = "frames"
+		}
+		switch normalized {
+		case "text", "media", "frames":
+			present[normalized] = struct{}{}
+		default:
+			unknown = append(unknown, normalized)
+		}
+	}
+	normalized := make([]string, 0, len(present)+len(unknown))
+	for _, mode := range []string{"text", "media", "frames"} {
+		if _, ok := present[mode]; ok {
+			normalized = append(normalized, mode)
+		}
+	}
+	return append(normalized, unknown...)
 }
 
 func loadCangyuanMediaCatalog() (map[string]YucoreMediaModelCapability, error) {
@@ -498,6 +530,9 @@ func validateYucoreMediaStringList(modelID string, label string, values []string
 		}
 		if allowed != nil {
 			if _, ok := allowed[normalized]; !ok {
+				return fmt.Errorf("YuCore media model %s has an invalid %s %s", modelID, label, strings.TrimSpace(value))
+			}
+			if value != normalized {
 				return fmt.Errorf("YuCore media model %s has an invalid %s %s", modelID, label, strings.TrimSpace(value))
 			}
 		}
