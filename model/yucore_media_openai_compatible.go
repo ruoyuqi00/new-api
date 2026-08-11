@@ -253,7 +253,9 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 	lastFrames := make([]string, 0, 1)
 	var references []YucoreMediaReferenceInput
 	if task.Inputs != "" {
-		_ = common.Unmarshal([]byte(task.Inputs), &references)
+		if err := common.Unmarshal([]byte(task.Inputs), &references); err != nil {
+			references = nil
+		}
 	}
 	for _, reference := range references {
 		referenceURL := strings.TrimSpace(reference.URL)

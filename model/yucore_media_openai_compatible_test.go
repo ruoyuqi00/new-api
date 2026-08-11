@@ -406,6 +406,32 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 		}
 	})
 
+	t.Run("partial typed reference decoding is discarded", func(t *testing.T) {
+		for _, test := range []struct {
+			name   string
+			inputs string
+		}{
+			{
+				name:   "valid image before scalar",
+				inputs: `[{"role":"image","url":"https://cdn.example.com/partial.png"},1]`,
+			},
+			{
+				name:   "valid video before invalid role type",
+				inputs: `[{"role":"video","url":"https://cdn.example.com/partial.mp4"},{"role":1,"url":"https://cdn.example.com/invalid.mp4"}]`,
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", nil, nil)
+				task.Inputs = test.inputs
+				payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
+
+				for _, forbidden := range []string{"image", "image_url", "image_urls", "images", "reference_image_urls", "video_url", "reference_videos", "reference_audios"} {
+					assert.NotContains(t, payload, forbidden)
+				}
+			})
+		}
+	})
+
 	t.Run("semantic gates suppress every derived alias", func(t *testing.T) {
 		task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", []YucoreMediaReferenceInput{
 			{Role: "image", URL: "https://cdn.example.com/main.png"},
