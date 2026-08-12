@@ -20,6 +20,13 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+const (
+	responsesIncompletePublicCode    = "upstream_stream_incomplete"
+	responsesIncompletePublicMessage = "The stream ended before completion. Please retry later."
+	responsesFailedPublicCode        = "upstream_response_failed"
+	responsesFailedPublicMessage     = "The response failed before completion. Please retry later."
+)
+
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -137,6 +144,24 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		case "response.incomplete", "response.failed", "response.error":
 			terminalReceived = true
 			info.StreamTerminalSuccess = false
+			publicResponse := &dto.OpenAIResponsesResponse{
+				ID:     responseID,
+				Object: "response",
+				Model:  responseModel,
+				Status: []byte(`"failed"`),
+				Output: []dto.ResponsesOutput{},
+			}
+			publicResponse.Error = map[string]any{
+				"code":    responsesFailedPublicCode,
+				"message": responsesFailedPublicMessage,
+			}
+			streamResponse.Response = publicResponse
+			sanitized, err := common.Marshal(&streamResponse)
+			if err != nil {
+				sr.Error(err)
+				return
+			}
+			data = string(sanitized)
 		}
 		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
 			sr.Stop(err)
@@ -194,8 +219,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			switch info.StreamStatus.EndReason {
 			case relaycommon.StreamEndReasonClientGone, relaycommon.StreamEndReasonHandlerStop:
 			default:
-				const incompleteMessage = "Upstream stream ended before completion."
-				info.StreamStatus.RecordError(incompleteMessage)
+				info.StreamStatus.RecordError(responsesIncompletePublicMessage)
 				if responseID == "" {
 					responseID = "resp_" + c.GetString(common.RequestIdKey)
 					if responseID == "resp_" {
@@ -209,10 +233,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					Type:           "response.failed",
 					SequenceNumber: nextSequenceNumber,
 					Response: &dto.OpenAIResponsesResponse{
-						ID:         responseID,
-						Object:     "response",
-						Status:     []byte(`"failed"`),
-						Error:      map[string]any{"code": "server_error", "message": incompleteMessage},
+						ID:     responseID,
+						Object: "response",
+						Status: []byte(`"failed"`),
+						Error: map[string]any{
+							"code":    responsesIncompletePublicCode,
+							"message": responsesIncompletePublicMessage,
+						},
 						Model:      responseModel,
 						Output:     []dto.ResponsesOutput{},
 						ToolChoice: []byte(`"auto"`),

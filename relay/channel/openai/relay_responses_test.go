@@ -81,8 +81,70 @@ func TestOaiResponsesStreamHandlerEmitsFailureForEOFWithoutTerminalEvent(t *test
 	require.NotNil(t, usage)
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.failed"))
 	require.Contains(t, recorder.Body.String(), `"sequence_number":6`)
-	require.Contains(t, recorder.Body.String(), `"code":"server_error"`)
-	require.Contains(t, recorder.Body.String(), "Upstream stream ended before completion.")
+	require.Contains(t, recorder.Body.String(), `"code":"upstream_stream_incomplete"`)
+	require.Contains(t, recorder.Body.String(), "The stream ended before completion. Please retry later.")
+	require.True(t, info.PreservePreConsumedQuota)
+}
+
+func TestOaiResponsesStreamHandlerSanitizesUpstreamTerminalFailure(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	for _, eventType := range []string{"response.failed", "response.incomplete"} {
+		t.Run(eventType, func(t *testing.T) {
+			ctx, recorder := clientResponseTestContext()
+			ctx.Request.URL.Path = "/v1/responses"
+			body := "data: {\"type\":\"" + eventType + "\",\"response\":{\"id\":\"resp_private\",\"model\":\"upstream-model\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"POST https://secret-upstream.example/v1/responses via 10.20.30.40 channel #73 Authorization Bearer sk-upstream-secret returned <html>private</html>\"},\"incomplete_details\":{\"reason\":\"redirect https://private-redirect.example\"},\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"private-output-marker\"}]}],\"metadata\":{\"private\":\"private-metadata-marker\"}}}\n\n"
+			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
+
+			info := mappedClientResponseInfo()
+			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+			require.Nil(t, relayErr)
+			publicBody := recorder.Body.String()
+			require.Equal(t, 1, strings.Count(publicBody, "event: "+eventType))
+			require.Contains(t, publicBody, `"code":"upstream_response_failed"`)
+			require.Contains(t, publicBody, "The response failed before completion. Please retry later.")
+			for _, secret := range []string{
+				"secret-upstream.example",
+				"10.20.30.40",
+				"channel #73",
+				"Authorization",
+				"sk-upstream-secret",
+				"<html>private</html>",
+				"private-redirect.example",
+				"private-output-marker",
+				"private-metadata-marker",
+			} {
+				require.NotContains(t, publicBody, secret)
+			}
+		})
+	}
+}
+
+func TestOaiResponsesStreamHandlerClientGoneDoesNotWriteSyntheticFailure(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	requestContext, cancel := context.WithCancel(ctx.Request.Context())
+	cancel()
+	ctx.Request = ctx.Request.WithContext(requestContext)
+	ctx.Request.URL.Path = "/v1/responses"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_client_gone\"}}\n\n",
+		)),
+	}
+
+	info := mappedClientResponseInfo()
+	_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.NotContains(t, recorder.Body.String(), "event: response.failed")
 	require.True(t, info.PreservePreConsumedQuota)
 }
 
