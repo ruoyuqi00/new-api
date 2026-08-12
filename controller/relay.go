@@ -285,7 +285,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		service.MaybeCooldownSelectedProviderAccount(c, newAPIError)
 		service.ReleaseCurrentChannelPoolLease(c)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		if !shouldRetryRelayOutcome(c, relayInfo, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
 		prepareRelayRetry(c, retryParam, channel.Id, !types.IsChannelError(newAPIError))
@@ -450,6 +450,18 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func shouldRetryRelayOutcome(c *gin.Context, relayInfo *relaycommon.RelayInfo, openaiErr *types.NewAPIError, retryTimes int) bool {
+	if relayInfo != nil && relayInfo.IsStream && relayInfo.StreamTerminalMarkersRequired {
+		if relayInfo.ReceivedResponseCount > 0 || relayInfo.ChannelAffinityResponseIDObserved {
+			return false
+		}
+		if relayInfo.StreamStatus != nil && relayInfo.StreamStatus.EndReason != relaycommon.StreamEndReasonNone {
+			return false
+		}
+	}
+	return shouldRetry(c, openaiErr, retryTimes)
 }
 
 func shouldCommitChannelAffinity(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {

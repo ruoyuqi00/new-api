@@ -723,3 +723,35 @@ func TestApplyPreConsumedQuotaFloor(t *testing.T) {
 		})
 	}
 }
+
+func TestIncompleteResponsesUsageAlwaysUsesPreConsumedQuotaFloor(t *testing.T) {
+	for _, reason := range []relaycommon.StreamEndReason{
+		relaycommon.StreamEndReasonClientGone,
+		relaycommon.StreamEndReasonHandlerStop,
+		relaycommon.StreamEndReasonEOF,
+		relaycommon.StreamEndReasonTimeout,
+		relaycommon.StreamEndReasonScannerErr,
+		relaycommon.StreamEndReasonPingFail,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			relayInfo := &relaycommon.RelayInfo{
+				IsStream:                      true,
+				StreamStatus:                  streamStatusForAffinityUsageTest(reason, true),
+				StreamTerminalMarkersRequired: true,
+				PreservePreConsumedQuota:      true,
+				FinalPreConsumedQuota:         1250,
+			}
+
+			quota, preserved := applyPreConsumedQuotaFloor(relayInfo, 400)
+
+			require.Equal(t, 1250, quota)
+			require.True(t, preserved)
+			require.False(t, shouldObserveConfirmedChannelAffinityUsage(nil, relayInfo, &dto.Usage{
+				PromptTokens: 400,
+				PromptTokensDetails: dto.InputTokenDetails{
+					CachedTokens: 0,
+				},
+			}))
+		})
+	}
+}

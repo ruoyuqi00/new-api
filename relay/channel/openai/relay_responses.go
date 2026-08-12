@@ -213,6 +213,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+	if !info.StreamTerminalUsageSeen {
+		info.PreservePreConsumedQuota = true
+	}
 	if !terminalReceived {
 		info.PreservePreConsumedQuota = true
 		if c.Request.Context().Err() == nil && info.StreamStatus != nil {

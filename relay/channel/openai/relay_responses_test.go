@@ -160,6 +160,7 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 		failureEventCnt int
 		terminalSuccess bool
 		terminalUsage   bool
+		wantPreserve    bool
 	}{
 		{
 			name:            "completed",
@@ -175,18 +176,21 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 			terminalEvent:   "event: response.completed",
 			failureEventCnt: 0,
 			terminalSuccess: true,
+			wantPreserve:    true,
 		},
 		{
 			name:            "incomplete",
 			body:            "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"incomplete\"}}\n\n",
 			terminalEvent:   "event: response.incomplete",
 			failureEventCnt: 0,
+			wantPreserve:    true,
 		},
 		{
 			name:            "failed",
 			body:            "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"upstream failed\"}}}\n\n",
 			terminalEvent:   "event: response.failed",
 			failureEventCnt: 1,
+			wantPreserve:    true,
 		},
 	}
 
@@ -205,7 +209,7 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 			require.Nil(t, relayErr)
 			require.Equal(t, 1, strings.Count(recorder.Body.String(), tt.terminalEvent))
 			require.Equal(t, tt.failureEventCnt, strings.Count(recorder.Body.String(), "event: response.failed"))
-			require.False(t, info.PreservePreConsumedQuota)
+			require.Equal(t, tt.wantPreserve, info.PreservePreConsumedQuota)
 			require.Equal(t, tt.terminalSuccess, info.StreamTerminalSuccess)
 			require.Equal(t, tt.terminalUsage, info.StreamTerminalUsageSeen)
 		})
@@ -255,6 +259,7 @@ func TestOaiResponsesStreamHandlerCapturesObservedAffinityResponseID(t *testing.
 				"data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\"}}\n\n",
 			wantID:       "resp_incomplete",
 			wantObserved: true,
+			wantPreserve: true,
 		},
 		{
 			name:         "eof without terminal",

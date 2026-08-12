@@ -69,6 +69,38 @@ func TestShouldRetryStopsContextCanceledError(t *testing.T) {
 	require.False(t, shouldRetry(c, canceledErr, 1))
 }
 
+func TestShouldRetryStopsAfterIncompleteResponsesStream(t *testing.T) {
+	for _, reason := range []relaycommon.StreamEndReason{
+		relaycommon.StreamEndReasonClientGone,
+		relaycommon.StreamEndReasonHandlerStop,
+		relaycommon.StreamEndReasonEOF,
+		relaycommon.StreamEndReasonTimeout,
+		relaycommon.StreamEndReasonScannerErr,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			c := newRelayRetryTestContext(t, false)
+			relayInfo := &relaycommon.RelayInfo{
+				IsStream:                      true,
+				StreamStatus:                  relayStreamStatusForAffinityTest(reason, true),
+				StreamTerminalMarkersRequired: true,
+				ReceivedResponseCount:         1,
+			}
+
+			require.False(t, shouldRetryRelayOutcome(c, relayInfo, retryableRelayTestError(http.StatusServiceUnavailable), 1))
+		})
+	}
+}
+
+func TestShouldRetryRelayOutcomePreservesSafePreResponseRetry(t *testing.T) {
+	c := newRelayRetryTestContext(t, false)
+	relayInfo := &relaycommon.RelayInfo{
+		IsStream:                      true,
+		StreamTerminalMarkersRequired: true,
+	}
+
+	require.True(t, shouldRetryRelayOutcome(c, relayInfo, retryableRelayTestError(http.StatusServiceUnavailable), 1))
+}
+
 func TestShouldCommitChannelAffinityRequiresNormalRelayCompletion(t *testing.T) {
 	tests := []struct {
 		name       string
