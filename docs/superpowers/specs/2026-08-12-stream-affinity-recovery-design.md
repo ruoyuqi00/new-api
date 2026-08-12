@@ -20,6 +20,8 @@ The fix must preserve the production UI and database, never expose upstream infr
 ## Non-goals
 
 - No Cloudflare, Caddy, DNS, production-container, schema, UI, or pricing-expression changes.
+- No frontend source, theme, branding, animation, canvas, documentation-page, or custom model-configuration changes. The candidate must retain the exact production UI baseline.
+- No `cl100k_base` to `o200k_base` tokenizer migration in this patch. Tokenizer selection is a separate compatibility decision and is not treated as a channel-cache-affinity fix.
 - No automatic refund for an incomplete or ambiguous stream.
 - No automatic POST retry after the request may have reached the upstream.
 - No fabricated cache-token usage.
@@ -111,6 +113,8 @@ For an incomplete or client-gone Responses stream:
 
 Observed output tokens may remain an internal estimate for diagnostics, but they cannot reduce the frozen quota or create authoritative cache fields. Existing tiered pricing uses authoritative usage only; absent terminal usage therefore cannot undercut the frozen reservation.
 
+Local tokenizer estimates from any encoding, including `cl100k_base` or `o200k_base`, must not be presented as provider-confirmed cache usage. This patch does not change tokenizer selection; it prevents an incomplete stream estimate from being interpreted as proof of a cache miss or hit.
+
 ### 6. Keepalive and first-byte behavior
 
 SSE ping remains enabled where configured because it prevents idle intermediaries from closing a valid long-running connection. This change does not disable ping or increase first-byte timeout.
@@ -146,6 +150,8 @@ Deterministic Go regression tests will cover:
 
 Focused package tests run first, followed by full tests for affected backend packages and `git diff --check`. No production or Caddy operation is part of verification.
 
+The final local candidate is built from this branch and compared with the running production baseline without changing production traffic. The comparison covers homepage/static-asset fingerprints and the existing branded sign-in, registration, console, API-key, system-settings, canvas, documentation, animation, and custom-model surfaces. Any frontend diff attributable to this branch is a release blocker.
+
 ## Acceptance Criteria
 
 - Interrupted Responses chains with an observed upstream response ID select the same channel on the next `previous_response_id` request.
@@ -153,4 +159,5 @@ Focused package tests run first, followed by full tests for affected backend pac
 - Confirmed cache statistics use only authoritative terminal usage.
 - Public errors contain no upstream infrastructure or credentials.
 - Existing completed-stream billing, successful affinity, heartbeat, UI, and async media behavior remain unchanged.
+- The implementation diff contains no frontend/theme/branding changes, and the local candidate matches the production brand UI before any deployment can be considered.
 - SQLite, MySQL, and PostgreSQL compatibility is preserved; this design requires no migration.
