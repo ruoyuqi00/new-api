@@ -183,11 +183,12 @@ type RelayInfo struct {
 	// 若为空，调用 GetFinalRequestRelayFormat 会回退到 RequestConversionChain 的最后一项或 RelayFormat。
 	FinalRequestRelayFormat types.RelayFormat
 
-	StreamStatus                  *StreamStatus
-	ChannelAffinityResponseID     string
-	StreamTerminalMarkersRequired bool
-	StreamTerminalSuccess         bool
-	StreamTerminalUsageSeen       bool
+	StreamStatus                      *StreamStatus
+	ChannelAffinityResponseID         string
+	ChannelAffinityResponseIDObserved bool
+	StreamTerminalMarkersRequired     bool
+	StreamTerminalSuccess             bool
+	StreamTerminalUsageSeen           bool
 
 	ThinkingContentInfo
 	TokenCountMeta
@@ -203,6 +204,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	info.ActualResponseModel = ""
 	info.StreamStatus = nil
 	info.ChannelAffinityResponseID = ""
+	info.ChannelAffinityResponseIDObserved = false
 	info.StreamTerminalMarkersRequired = false
 	info.StreamTerminalSuccess = false
 	info.StreamTerminalUsageSeen = false

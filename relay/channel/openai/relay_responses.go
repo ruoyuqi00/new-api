@@ -39,6 +39,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	if info != nil && strings.TrimSpace(responsesResponse.ID) != "" {
 		info.ChannelAffinityResponseID = strings.TrimSpace(responsesResponse.ID)
+		info.ChannelAffinityResponseIDObserved = true
 	}
 
 	if responsesResponse.HasImageGenerationCall() {
@@ -122,6 +123,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if streamResponse.Response != nil {
 			if streamResponse.Response.ID != "" {
 				responseID = streamResponse.Response.ID
+				info.ChannelAffinityResponseID = strings.TrimSpace(responseID)
+				info.ChannelAffinityResponseIDObserved = true
 			}
 			if streamResponse.Response.Model != "" {
 				responseModel = streamResponse.Response.Model
@@ -185,48 +188,44 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
-	if terminalReceived && info.StreamTerminalSuccess && strings.TrimSpace(responseID) != "" {
-		info.ChannelAffinityResponseID = strings.TrimSpace(responseID)
-	}
-
-	if !terminalReceived && c.Request.Context().Err() == nil && info.StreamStatus != nil {
-		switch info.StreamStatus.EndReason {
-		case relaycommon.StreamEndReasonClientGone, relaycommon.StreamEndReasonHandlerStop:
-		default:
-			const incompleteMessage = "Upstream stream ended before completion."
-			info.PreservePreConsumedQuota = true
-			info.StreamStatus.RecordError(incompleteMessage)
-			if responseID == "" {
-				responseID = "resp_" + c.GetString(common.RequestIdKey)
-				if responseID == "resp_" {
-					responseID = "resp_incomplete"
+	if !terminalReceived {
+		info.PreservePreConsumedQuota = true
+		if c.Request.Context().Err() == nil && info.StreamStatus != nil {
+			switch info.StreamStatus.EndReason {
+			case relaycommon.StreamEndReasonClientGone, relaycommon.StreamEndReasonHandlerStop:
+			default:
+				const incompleteMessage = "Upstream stream ended before completion."
+				info.StreamStatus.RecordError(incompleteMessage)
+				if responseID == "" {
+					responseID = "resp_" + c.GetString(common.RequestIdKey)
+					if responseID == "resp_" {
+						responseID = "resp_incomplete"
+					}
 				}
-			}
-			if responseModel == "" {
-				responseModel = info.ClientResponseModelName()
-			}
-			failure := dto.ResponsesStreamResponse{
-				Type:           "response.failed",
-				SequenceNumber: nextSequenceNumber,
-				Response: &dto.OpenAIResponsesResponse{
-					ID:         responseID,
-					Object:     "response",
-					Status:     []byte(`"failed"`),
-					Error:      map[string]any{"code": "server_error", "message": incompleteMessage},
-					Model:      responseModel,
-					Output:     []dto.ResponsesOutput{},
-					ToolChoice: []byte(`"auto"`),
-					Tools:      []map[string]any{},
-					Truncation: []byte(`"disabled"`),
-					Metadata:   []byte(`{}`),
-				},
-			}
-			failureData, err := common.Marshal(&failure)
-			if err != nil {
-				logger.LogError(c, "failed to marshal incomplete responses stream event: "+err.Error())
-				info.StreamStatus.RecordError(err.Error())
-			} else {
-				if err := sendResponsesStreamData(c, failure, string(failureData)); err != nil {
+				if responseModel == "" {
+					responseModel = info.ClientResponseModelName()
+				}
+				failure := dto.ResponsesStreamResponse{
+					Type:           "response.failed",
+					SequenceNumber: nextSequenceNumber,
+					Response: &dto.OpenAIResponsesResponse{
+						ID:         responseID,
+						Object:     "response",
+						Status:     []byte(`"failed"`),
+						Error:      map[string]any{"code": "server_error", "message": incompleteMessage},
+						Model:      responseModel,
+						Output:     []dto.ResponsesOutput{},
+						ToolChoice: []byte(`"auto"`),
+						Tools:      []map[string]any{},
+						Truncation: []byte(`"disabled"`),
+						Metadata:   []byte(`{}`),
+					},
+				}
+				failureData, err := common.Marshal(&failure)
+				if err != nil {
+					logger.LogError(c, "failed to marshal incomplete responses stream event: "+err.Error())
+					info.StreamStatus.RecordError(err.Error())
+				} else if err := sendResponsesStreamData(c, failure, string(failureData)); err != nil {
 					logger.LogError(c, "failed to send incomplete responses stream event: "+err.Error())
 					info.StreamStatus.RecordError(err.Error())
 				}

@@ -167,31 +167,44 @@ func TestOaiResponsesHandlerCapturesAffinityResponseID(t *testing.T) {
 	require.Equal(t, "resp_buffered", info.ChannelAffinityResponseID)
 }
 
-func TestOaiResponsesStreamHandlerCapturesAffinityResponseIDOnlyOnSuccess(t *testing.T) {
+func TestOaiResponsesStreamHandlerCapturesObservedAffinityResponseID(t *testing.T) {
 	oldStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
 
 	tests := []struct {
-		name   string
-		body   string
-		wantID string
+		name         string
+		body         string
+		wantID       string
+		wantObserved bool
+		wantPreserve bool
 	}{
 		{
 			name: "completed",
 			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_ok\"}}\n\n" +
 				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n" +
 				"data: [DONE]\n\n",
-			wantID: "resp_ok",
+			wantID:       "resp_ok",
+			wantObserved: true,
 		},
 		{
 			name: "incomplete",
 			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_incomplete\"}}\n\n" +
 				"data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\"}}\n\n",
+			wantID:       "resp_incomplete",
+			wantObserved: true,
 		},
 		{
-			name: "eof without terminal",
-			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_eof\"}}\n\n",
+			name:         "eof without terminal",
+			body:         "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_eof\"}}\n\n",
+			wantID:       "resp_eof",
+			wantObserved: true,
+			wantPreserve: true,
+		},
+		{
+			name:         "eof without real response id",
+			body:         "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+			wantPreserve: true,
 		},
 	}
 
@@ -209,6 +222,8 @@ func TestOaiResponsesStreamHandlerCapturesAffinityResponseIDOnlyOnSuccess(t *tes
 
 			require.Nil(t, relayErr)
 			require.Equal(t, tt.wantID, info.ChannelAffinityResponseID)
+			require.Equal(t, tt.wantObserved, info.ChannelAffinityResponseIDObserved)
+			require.Equal(t, tt.wantPreserve, info.PreservePreConsumedQuota)
 		})
 	}
 }

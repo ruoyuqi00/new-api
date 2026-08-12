@@ -25,17 +25,19 @@ func TestInitChannelMetaResetsResponseModelAuditForRetry(t *testing.T) {
 func TestInitChannelMetaResetsStreamOutcomeForRetry(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	info := &RelayInfo{
-		ChannelAffinityResponseID:     "resp_failed_attempt",
-		StreamStatus:                  NewStreamStatus(),
-		StreamTerminalMarkersRequired: true,
-		StreamTerminalSuccess:         true,
-		StreamTerminalUsageSeen:       true,
+		ChannelAffinityResponseID:         "resp_failed_attempt",
+		ChannelAffinityResponseIDObserved: true,
+		StreamStatus:                      NewStreamStatus(),
+		StreamTerminalMarkersRequired:     true,
+		StreamTerminalSuccess:             true,
+		StreamTerminalUsageSeen:           true,
 	}
 
 	info.InitChannelMeta(c)
 
 	require.Nil(t, info.StreamStatus)
 	require.Empty(t, info.ChannelAffinityResponseID)
+	require.False(t, info.ChannelAffinityResponseIDObserved)
 	require.False(t, info.StreamTerminalMarkersRequired)
 	require.False(t, info.StreamTerminalSuccess)
 	require.False(t, info.StreamTerminalUsageSeen)
