@@ -66,8 +66,14 @@ func TestAmbiguousTaskSubmissionPersistsUnknownTaskWithFrozenBilling(t *testing.
 		},
 	}
 
-	require.NoError(t, persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 1_050_000, "", json.RawMessage(nil)))
-	require.NoError(t, persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 1_050_000, "", json.RawMessage(nil)))
+	inserted, err := persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 1_050_000, "", json.RawMessage(nil))
+	require.NoError(t, err)
+	assert.True(t, inserted.Inserted)
+	assert.Equal(t, model.TaskSubmissionBillingPending, *inserted.BillingState)
+	existing, err := persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 1_050_000, "", json.RawMessage(nil))
+	require.NoError(t, err)
+	assert.False(t, existing.Inserted)
+	assert.Equal(t, model.TaskSubmissionBillingPending, *existing.BillingState)
 	assert.True(t, db.Migrator().HasIndex(&model.Task{}, "idx_tasks_submission_key"))
 	var count int64
 	require.NoError(t, db.Model(&model.Task{}).Count(&count).Error)
@@ -87,13 +93,17 @@ func TestAmbiguousTaskSubmissionPersistsUnknownTaskWithFrozenBilling(t *testing.
 	assert.Equal(t, map[string]any{"task_id": "task_public_123", "submission_state": "unknown"}, taskErr.Data)
 
 	info.PriceData.Quota = 999_999
-	require.Error(t, persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 999_999, "", nil))
+	_, err = persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 999_999, "", nil)
+	require.Error(t, err)
 	info.PriceData.Quota = 1_050_000
-	require.Error(t, persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusNotStart, 1_050_000, "upstream-id", nil))
+	_, err = persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusNotStart, 1_050_000, "upstream-id", nil)
+	require.Error(t, err)
 	var unchanged model.Task
 	require.NoError(t, db.Where("submission_key = ?", "task_public_123").First(&unchanged).Error)
 	assert.EqualValues(t, model.TaskStatusUnknown, unchanged.Status)
 	assert.Empty(t, unchanged.PrivateData.UpstreamTaskID)
+	require.NotNil(t, unchanged.SubmissionBillingState)
+	assert.Equal(t, model.TaskSubmissionBillingPending, *unchanged.SubmissionBillingState)
 }
 
 func TestTaskSubmissionKeyMigrationPreservesLegacyDuplicateTaskIDs(t *testing.T) {
@@ -105,6 +115,11 @@ func TestTaskSubmissionKeyMigrationPreservesLegacyDuplicateTaskIDs(t *testing.T)
 	legacyB := &model.Task{TaskID: "legacy-duplicate", UserId: 1}
 	require.NoError(t, db.Create(legacyA).Error)
 	require.NoError(t, db.Create(legacyB).Error)
+	var legacyTasks []model.Task
+	require.NoError(t, db.Where("task_id = ?", "legacy-duplicate").Find(&legacyTasks).Error)
+	require.Len(t, legacyTasks, 2)
+	assert.Nil(t, legacyTasks[0].SubmissionBillingState)
+	assert.Nil(t, legacyTasks[1].SubmissionBillingState)
 
 	submissionKey := "task_new_submission"
 	first := &model.Task{TaskID: "task_a", UserId: 1, SubmissionKey: &submissionKey}

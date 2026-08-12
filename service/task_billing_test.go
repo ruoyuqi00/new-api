@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,11 +29,12 @@ type recordingTaskBillingSettler struct {
 	preConsumed int
 	settled     []int
 	refunds     int
+	settleErr   error
 }
 
 func (s *recordingTaskBillingSettler) Settle(quota int) error {
 	s.settled = append(s.settled, quota)
-	return nil
+	return s.settleErr
 }
 func (s *recordingTaskBillingSettler) Refund(*gin.Context) { s.refunds++ }
 func (s *recordingTaskBillingSettler) NeedsRefund() bool {
@@ -117,6 +120,144 @@ func TestFinalizeRetainedTaskSubmissionSettlesFrozenQuotaOnce(t *testing.T) {
 			assert.Equal(t, int64(1), countLogs(t))
 		})
 	}
+}
+
+func TestFinalizePersistedTaskSubmissionBillingDistinctDuplicatesSettleAndLogOnce(t *testing.T) {
+	tests := []struct {
+		name    string
+		taskErr *dto.TaskError
+	}{
+		{name: "successful submission"},
+		{name: "ambiguous submission", taskErr: (&dto.TaskError{}).WithSubmissionState(dto.TaskSubmissionAmbiguous)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			truncate(t)
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(nil)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+			submissionKey := "task_durable_billing_" + strings.ReplaceAll(tt.name, " ", "_")
+			pending := model.TaskSubmissionBillingPending
+			require.NoError(t, model.DB.Create(&model.Task{
+				SubmissionKey:          &submissionKey,
+				SubmissionBillingState: &pending,
+				TaskID:                 submissionKey,
+				Status:                 model.TaskStatusUnknown,
+			}).Error)
+
+			firstBilling := &recordingTaskBillingSettler{preConsumed: 300_000}
+			secondBilling := &recordingTaskBillingSettler{preConsumed: 300_000}
+			firstInfo := newPersistedTaskBillingTestInfo(submissionKey, firstBilling)
+			secondInfo := newPersistedTaskBillingTestInfo(submissionKey, secondBilling)
+
+			require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, firstInfo, tt.taskErr, 300_000))
+			require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, secondInfo, tt.taskErr, 300_000))
+
+			assert.Equal(t, []int{300_000}, firstBilling.settled)
+			assert.Empty(t, secondBilling.settled)
+			assert.Zero(t, firstBilling.refunds)
+			assert.Zero(t, secondBilling.refunds)
+			assert.Equal(t, int64(1), countLogs(t))
+			var task model.Task
+			require.NoError(t, model.DB.Where("submission_key = ?", submissionKey).First(&task).Error)
+			require.NotNil(t, task.SubmissionBillingState)
+			assert.Equal(t, model.TaskSubmissionBillingFinalized, *task.SubmissionBillingState)
+		})
+	}
+}
+
+func TestFinalizePersistedTaskSubmissionBillingConcurrentDuplicatesSettleOnce(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+
+	submissionKey := "task_durable_billing_concurrent"
+	pending := model.TaskSubmissionBillingPending
+	require.NoError(t, model.DB.Create(&model.Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		TaskID:                 submissionKey,
+		Status:                 model.TaskStatusNotStart,
+	}).Error)
+
+	const goroutines = 8
+	billings := make([]*recordingTaskBillingSettler, goroutines)
+	errs := make(chan error, goroutines)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		billings[i] = &recordingTaskBillingSettler{preConsumed: 300_000}
+		info := newPersistedTaskBillingTestInfo(submissionKey, billings[i])
+		c, _ := gin.CreateTestContext(nil)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- FinalizePersistedTaskSubmissionBilling(c, info, nil, 300_000)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	settlementCount := 0
+	for _, billing := range billings {
+		settlementCount += len(billing.settled)
+	}
+	assert.Equal(t, 1, settlementCount)
+
+	var task model.Task
+	require.NoError(t, model.DB.Where("submission_key = ?", submissionKey).First(&task).Error)
+	require.NotNil(t, task.SubmissionBillingState)
+	assert.Equal(t, model.TaskSubmissionBillingFinalized, *task.SubmissionBillingState)
+}
+
+func newPersistedTaskBillingTestInfo(submissionKey string, billing *recordingTaskBillingSettler) *relaycommon.RelayInfo {
+	return &relaycommon.RelayInfo{
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{PublicTaskID: submissionKey, Action: "generate"},
+		Billing:         billing,
+		UserId:          101,
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 201},
+		TokenId:         301,
+		UsingGroup:      "default",
+		OriginModelName: "veo-3.1-fast",
+		PriceData: types.PriceData{
+			ModelPrice:     0.5,
+			Quota:          300_000,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1.2},
+		},
+	}
+}
+
+func TestFinalizePersistedTaskSubmissionBillingSettlementErrorRemainsDiscoverable(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+	submissionKey := "task_durable_billing_error"
+	pending := model.TaskSubmissionBillingPending
+	require.NoError(t, model.DB.Create(&model.Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		TaskID:                 submissionKey,
+		Status:                 model.TaskStatusUnknown,
+	}).Error)
+	billing := &recordingTaskBillingSettler{preConsumed: 300_000, settleErr: errors.New("settlement unavailable")}
+	info := newPersistedTaskBillingTestInfo(submissionKey, billing)
+	taskErr := (&dto.TaskError{}).WithSubmissionState(dto.TaskSubmissionAmbiguous)
+
+	require.Error(t, FinalizePersistedTaskSubmissionBilling(c, info, taskErr, 0))
+	unfinished, err := model.GetUnfinishedTaskSubmissionBillings(10)
+	require.NoError(t, err)
+	require.Len(t, unfinished, 1)
+	require.NotNil(t, unfinished[0].SubmissionBillingState)
+	assert.Equal(t, model.TaskSubmissionBillingFinalizing, *unfinished[0].SubmissionBillingState)
+	assert.Zero(t, countLogs(t))
 }
 
 func TestFinalizeRefundableTaskSubmissionRefundsWithoutSettlement(t *testing.T) {

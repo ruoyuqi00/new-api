@@ -14,6 +14,8 @@ import (
 
 type TaskStatus string
 
+type TaskSubmissionBillingState string
+
 func (t TaskStatus) ToVideoStatus() string {
 	var status string
 	switch t {
@@ -41,33 +43,79 @@ const (
 	TaskStatusUnknown               = "UNKNOWN"
 )
 
+const (
+	TaskSubmissionBillingPending    TaskSubmissionBillingState = "pending"
+	TaskSubmissionBillingFinalizing TaskSubmissionBillingState = "finalizing"
+	TaskSubmissionBillingFinalized  TaskSubmissionBillingState = "finalized"
+)
+
 // TaskRefundLegacyCutoff separates legacy timeout tasks that intentionally
 // do not receive automatic refunds from tasks covered by reconciliation.
 const TaskRefundLegacyCutoff int64 = 1740182400 // 2025-02-22 00:00:00 UTC
 
 type Task struct {
-	SubmissionKey *string               `json:"-" gorm:"type:varchar(191);uniqueIndex:idx_tasks_submission_key"`
-	ID            int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
-	CreatedAt     int64                 `json:"created_at" gorm:"index"`
-	UpdatedAt     int64                 `json:"updated_at"`
-	TaskID        string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
-	Platform      constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
-	UserId        int                   `json:"user_id" gorm:"index"`
-	Group         string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
-	ChannelId     int                   `json:"channel_id" gorm:"index"`
-	Quota         int                   `json:"quota"`
-	Action        string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
-	Status        TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
-	FailReason    string                `json:"fail_reason"`
-	SubmitTime    int64                 `json:"submit_time" gorm:"index"`
-	StartTime     int64                 `json:"start_time" gorm:"index"`
-	FinishTime    int64                 `json:"finish_time" gorm:"index"`
-	Progress      string                `json:"progress" gorm:"type:varchar(20);index"`
-	Properties    Properties            `json:"properties" gorm:"type:json"`
-	Username      string                `json:"username,omitempty" gorm:"-"`
+	SubmissionKey                *string                     `json:"-" gorm:"type:varchar(191);uniqueIndex:idx_tasks_submission_key"`
+	SubmissionBillingState       *TaskSubmissionBillingState `json:"-" gorm:"type:varchar(20);index:idx_tasks_submission_billing_state"`
+	SubmissionBillingClaimedAt   *int64                      `json:"-"`
+	SubmissionBillingFinalizedAt *int64                      `json:"-"`
+	ID                           int64                       `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
+	CreatedAt                    int64                       `json:"created_at" gorm:"index"`
+	UpdatedAt                    int64                       `json:"updated_at"`
+	TaskID                       string                      `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
+	Platform                     constant.TaskPlatform       `json:"platform" gorm:"type:varchar(30);index"` // 平台
+	UserId                       int                         `json:"user_id" gorm:"index"`
+	Group                        string                      `json:"group" gorm:"type:varchar(50)"` // 修正计费用
+	ChannelId                    int                         `json:"channel_id" gorm:"index"`
+	Quota                        int                         `json:"quota"`
+	Action                       string                      `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
+	Status                       TaskStatus                  `json:"status" gorm:"type:varchar(20);index"` // 任务状态
+	FailReason                   string                      `json:"fail_reason"`
+	SubmitTime                   int64                       `json:"submit_time" gorm:"index"`
+	StartTime                    int64                       `json:"start_time" gorm:"index"`
+	FinishTime                   int64                       `json:"finish_time" gorm:"index"`
+	Progress                     string                      `json:"progress" gorm:"type:varchar(20);index"`
+	Properties                   Properties                  `json:"properties" gorm:"type:json"`
+	Username                     string                      `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
+}
+
+// ClaimTaskSubmissionBilling atomically assigns terminal billing to one
+// request. Rows already finalizing or finalized are intentionally untouched.
+func ClaimTaskSubmissionBilling(submissionKey string) (bool, error) {
+	result := DB.Model(&Task{}).
+		Where("submission_key = ? AND submission_billing_state = ?", submissionKey, TaskSubmissionBillingPending).
+		Updates(map[string]any{
+			"submission_billing_state":      TaskSubmissionBillingFinalizing,
+			"submission_billing_claimed_at": time.Now().Unix(),
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+func MarkTaskSubmissionBillingFinalized(submissionKey string) (bool, error) {
+	result := DB.Model(&Task{}).
+		Where("submission_key = ? AND submission_billing_state = ?", submissionKey, TaskSubmissionBillingFinalizing).
+		Updates(map[string]any{
+			"submission_billing_state":        TaskSubmissionBillingFinalized,
+			"submission_billing_finalized_at": time.Now().Unix(),
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+// GetUnfinishedTaskSubmissionBillings exposes submissions that need operator
+// review. A finalizing row must not be replayed automatically because an
+// external billing side effect may have completed before the state was saved.
+func GetUnfinishedTaskSubmissionBillings(limit int) ([]*Task, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var tasks []*Task
+	err := DB.Where("submission_billing_state IN ?", []TaskSubmissionBillingState{
+		TaskSubmissionBillingPending,
+		TaskSubmissionBillingFinalizing,
+	}).Order("id").Limit(limit).Find(&tasks).Error
+	return tasks, err
 }
 
 func (t *Task) SetData(data any) {

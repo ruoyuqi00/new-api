@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:model_task_tests?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		panic("failed to open test db: " + err.Error())
 	}
@@ -99,6 +100,118 @@ func insertTask(t *testing.T, task *Task) {
 	task.CreatedAt = time.Now().Unix()
 	task.UpdatedAt = time.Now().Unix()
 	require.NoError(t, DB.Create(task).Error)
+}
+
+func TestTaskSubmissionBillingClaimConcurrentWinner(t *testing.T) {
+	truncateTables(t)
+
+	submissionKey := "task_billing_claim_race"
+	pending := TaskSubmissionBillingPending
+	insertTask(t, &Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		TaskID:                 submissionKey,
+		Status:                 TaskStatusUnknown,
+	})
+
+	const goroutines = 8
+	wins := make(chan bool, goroutines)
+	errs := make(chan error, goroutines)
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			won, err := ClaimTaskSubmissionBilling(submissionKey)
+			wins <- won
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(wins)
+	close(errs)
+
+	winCount := 0
+	for won := range wins {
+		if won {
+			winCount++
+		}
+	}
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, winCount)
+
+	var task Task
+	require.NoError(t, DB.Where("submission_key = ?", submissionKey).First(&task).Error)
+	require.NotNil(t, task.SubmissionBillingState)
+	assert.Equal(t, TaskSubmissionBillingFinalizing, *task.SubmissionBillingState)
+}
+
+func TestTaskSubmissionBillingLifecyclePersistsInternalTimestamps(t *testing.T) {
+	truncateTables(t)
+
+	submissionKey := "task_billing_lifecycle_timestamps"
+	pending := TaskSubmissionBillingPending
+	insertTask(t, &Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		TaskID:                 submissionKey,
+		Status:                 TaskStatusUnknown,
+	})
+
+	claimed, err := ClaimTaskSubmissionBilling(submissionKey)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	var claimedTask Task
+	require.NoError(t, DB.Where("submission_key = ?", submissionKey).First(&claimedTask).Error)
+	require.NotNil(t, claimedTask.SubmissionBillingClaimedAt)
+	assert.Positive(t, *claimedTask.SubmissionBillingClaimedAt)
+	assert.Nil(t, claimedTask.SubmissionBillingFinalizedAt)
+
+	finalized, err := MarkTaskSubmissionBillingFinalized(submissionKey)
+	require.NoError(t, err)
+	require.True(t, finalized)
+
+	var finalizedTask Task
+	require.NoError(t, DB.Where("submission_key = ?", submissionKey).First(&finalizedTask).Error)
+	require.NotNil(t, finalizedTask.SubmissionBillingFinalizedAt)
+	assert.GreaterOrEqual(t, *finalizedTask.SubmissionBillingFinalizedAt, *claimedTask.SubmissionBillingClaimedAt)
+
+	payload, err := common.Marshal(finalizedTask)
+	require.NoError(t, err)
+	assert.NotContains(t, string(payload), "submission_billing")
+}
+
+func TestGetUnfinishedTaskSubmissionBillingsIncludesRecoverableStatesOnly(t *testing.T) {
+	truncateTables(t)
+
+	states := []*TaskSubmissionBillingState{
+		pointerToTaskSubmissionBillingState(TaskSubmissionBillingPending),
+		pointerToTaskSubmissionBillingState(TaskSubmissionBillingFinalizing),
+		pointerToTaskSubmissionBillingState(TaskSubmissionBillingFinalized),
+		nil,
+	}
+	for i, state := range states {
+		submissionKey := fmt.Sprintf("task_billing_state_%d", i)
+		insertTask(t, &Task{
+			SubmissionKey:          &submissionKey,
+			SubmissionBillingState: state,
+			TaskID:                 submissionKey,
+			Status:                 TaskStatusUnknown,
+		})
+	}
+
+	tasks, err := GetUnfinishedTaskSubmissionBillings(10)
+	require.NoError(t, err)
+	require.Len(t, tasks, 2)
+	assert.Equal(t, "task_billing_state_0", tasks[0].TaskID)
+	assert.Equal(t, "task_billing_state_1", tasks[1].TaskID)
+}
+
+func pointerToTaskSubmissionBillingState(state TaskSubmissionBillingState) *TaskSubmissionBillingState {
+	return &state
 }
 
 // ---------------------------------------------------------------------------

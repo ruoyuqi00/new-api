@@ -758,13 +758,21 @@ func RelayTask(c *gin.Context) {
 	}
 }
 
-func persistTaskSubmission(info *relaycommon.RelayInfo, platform constant.TaskPlatform, status model.TaskStatus, quota int, upstreamTaskID string, taskData []byte) error {
+type persistedTaskSubmission struct {
+	Task         *model.Task
+	Inserted     bool
+	BillingState *model.TaskSubmissionBillingState
+}
+
+func persistTaskSubmission(info *relaycommon.RelayInfo, platform constant.TaskPlatform, status model.TaskStatus, quota int, upstreamTaskID string, taskData []byte) (*persistedTaskSubmission, error) {
 	if info == nil || info.PublicTaskID == "" {
-		return errors.New("missing public task submission identity")
+		return nil, errors.New("missing public task submission identity")
 	}
 	submissionKey := info.PublicTaskID
+	billingState := model.TaskSubmissionBillingPending
 	task := model.InitTask(platform, info)
 	task.SubmissionKey = &submissionKey
+	task.SubmissionBillingState = &billingState
 	task.Status = status
 	task.PrivateData.UpstreamTaskID = upstreamTaskID
 	task.PrivateData.BillingSource = info.BillingSource
@@ -787,20 +795,20 @@ func persistTaskSubmission(info *relaycommon.RelayInfo, platform constant.TaskPl
 		DoNothing: true,
 	}).Create(task)
 	if result.Error != nil {
-		return result.Error
+		return nil, result.Error
 	}
 	if result.RowsAffected == 1 {
-		return nil
+		return &persistedTaskSubmission{Task: task, Inserted: true, BillingState: task.SubmissionBillingState}, nil
 	}
 
 	var existing model.Task
 	if err := model.DB.Where("submission_key = ?", submissionKey).First(&existing).Error; err != nil {
-		return err
+		return nil, err
 	}
 	if !sameTaskSubmissionRecord(&existing, task) {
-		return errors.New("task submission identity conflicts with existing frozen context")
+		return nil, errors.New("task submission identity conflicts with existing frozen context")
 	}
-	return nil
+	return &persistedTaskSubmission{Task: &existing, BillingState: existing.SubmissionBillingState}, nil
 }
 
 func sameTaskSubmissionRecord(existing, candidate *model.Task) bool {
@@ -837,10 +845,10 @@ func sameTaskBillingContext(existing, candidate *model.TaskBillingContext) bool 
 }
 
 func persistAndFinalizeTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, platform constant.TaskPlatform, status model.TaskStatus, quota int, upstreamTaskID string, taskData []byte, taskErr *dto.TaskError) error {
-	if err := persistTaskSubmission(info, platform, status, quota, upstreamTaskID, taskData); err != nil {
+	if _, err := persistTaskSubmission(info, platform, status, quota, upstreamTaskID, taskData); err != nil {
 		return err
 	}
-	return service.FinalizeTaskSubmissionBilling(c, info, taskErr, quota)
+	return service.FinalizePersistedTaskSubmissionBilling(c, info, taskErr, quota)
 }
 
 func setUnknownTaskSubmissionData(taskErr *dto.TaskError, taskID string) {

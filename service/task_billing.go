@@ -31,6 +31,37 @@ func FinalizeTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, 
 	if info == nil || info.TaskRelayInfo == nil || !info.TaskRelayInfo.BeginBillingFinalization() {
 		return nil
 	}
+	return finalizeTaskSubmissionBilling(c, info, taskErr, successfulQuota)
+}
+
+// FinalizePersistedTaskSubmissionBilling uses the persisted submission state
+// as the cross-process authority for terminal billing. A failed finalization is
+// deliberately left finalizing for operator review and must not be replayed.
+func FinalizePersistedTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, taskErr *dto.TaskError, successfulQuota int) error {
+	if info == nil || info.TaskRelayInfo == nil || info.PublicTaskID == "" {
+		return fmt.Errorf("missing public task submission identity")
+	}
+	claimed, err := model.ClaimTaskSubmissionBilling(info.PublicTaskID)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return nil
+	}
+	if err := finalizeTaskSubmissionBilling(c, info, taskErr, successfulQuota); err != nil {
+		return err
+	}
+	finalized, err := model.MarkTaskSubmissionBillingFinalized(info.PublicTaskID)
+	if err != nil {
+		return err
+	}
+	if !finalized {
+		return fmt.Errorf("task submission billing claim was not finalizing")
+	}
+	return nil
+}
+
+func finalizeTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, taskErr *dto.TaskError, successfulQuota int) error {
 	if taskErr != nil && ShouldRefundTaskSubmission(taskErr) {
 		if info.Billing != nil {
 			info.Billing.Refund(c)
@@ -43,9 +74,11 @@ func FinalizeTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, 
 		quota = FrozenTaskSubmissionQuota(info)
 	}
 	info.PriceData.Quota = quota
-	settleErr := SettleBilling(c, info, quota)
+	if err := SettleBilling(c, info, quota); err != nil {
+		return err
+	}
 	LogTaskConsumption(c, info)
-	return settleErr
+	return nil
 }
 
 func FrozenTaskSubmissionQuota(info *relaycommon.RelayInfo) int {
