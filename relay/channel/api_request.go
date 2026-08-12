@@ -507,17 +507,41 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
-	if c != nil && c.Request != nil && httptrace.ContextClientTrace(req.Context()) == nil {
-		req = req.WithContext(c.Request.Context())
+	requestContext := req.Context()
+	if c != nil && c.Request != nil && httptrace.ContextClientTrace(requestContext) == nil {
+		requestContext = c.Request.Context()
 	}
+	var attempt *common.UpstreamRequestAttempt
+	if info != nil {
+		attempt = info.BeginUpstreamRequestAttempt()
+		trace := &httptrace.ClientTrace{
+			GotConn: func(httptrace.GotConnInfo) {
+				attempt.MarkConnectionObtained()
+			},
+			WroteRequest: func(httptrace.WroteRequestInfo) {
+				attempt.MarkRequestWritten()
+			},
+			GotFirstResponseByte: func() {
+				attempt.MarkResponseHeadersReceived()
+			},
+		}
+		requestContext = httptrace.WithClientTrace(requestContext, trace)
+	}
+	req = req.WithContext(requestContext)
 	resp, err := client.Do(req)
 	if err != nil {
+		switch req.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
+		default:
+			attempt.MarkAmbiguousIfPotentiallySent()
+		}
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
 	}
+	attempt.MarkResponseHeadersReceived()
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)

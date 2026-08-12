@@ -91,11 +91,11 @@ func TestOaiResponsesStreamHandlerSanitizesUpstreamTerminalFailure(t *testing.T)
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
 
-	for _, eventType := range []string{"response.failed", "response.incomplete"} {
+	for _, eventType := range []string{"response.failed", "response.incomplete", "error"} {
 		t.Run(eventType, func(t *testing.T) {
 			ctx, recorder := clientResponseTestContext()
 			ctx.Request.URL.Path = "/v1/responses"
-			body := "data: {\"type\":\"" + eventType + "\",\"response\":{\"id\":\"resp_private\",\"model\":\"upstream-model\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"POST https://secret-upstream.example/v1/responses via 10.20.30.40 channel #73 Authorization Bearer sk-upstream-secret returned <html>private</html>\"},\"incomplete_details\":{\"reason\":\"redirect https://private-redirect.example\"},\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"private-output-marker\"}]}],\"metadata\":{\"private\":\"private-metadata-marker\"}}}\n\n"
+			body := "data: {\"type\":\"" + eventType + "\",\"error\":{\"message\":\"top-level-secret\"},\"response\":{\"id\":\"resp_private_request_id\",\"model\":\"upstream-model\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"POST https://secret-upstream.example/v1/responses via 10.20.30.40 channel #73 Authorization Bearer sk-upstream-secret returned <html>private</html>\"},\"incomplete_details\":{\"reason\":\"redirect https://private-redirect.example\"},\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"private-output-marker\"}]}],\"metadata\":{\"private\":\"private-metadata-marker\"}}}\n\n"
 			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
 
 			info := mappedClientResponseInfo()
@@ -116,11 +116,37 @@ func TestOaiResponsesStreamHandlerSanitizesUpstreamTerminalFailure(t *testing.T)
 				"private-redirect.example",
 				"private-output-marker",
 				"private-metadata-marker",
+				"top-level-secret",
+				"resp_private_request_id",
 			} {
 				require.NotContains(t, publicBody, secret)
 			}
 		})
 	}
+}
+
+func TestOaiResponsesStreamHandlerTreatsEmptyUsageAsUnconfirmed(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, _ := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"estimated output must remain diagnostic\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty_usage\",\"usage\":{}}}\n\n",
+		)),
+	}
+
+	info := mappedClientResponseInfo()
+	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.NotZero(t, usage.CompletionTokens)
+	require.False(t, info.StreamTerminalUsageSeen)
+	require.True(t, info.PreservePreConsumedQuota)
 }
 
 func TestOaiResponsesStreamHandlerClientGoneDoesNotWriteSyntheticFailure(t *testing.T) {
@@ -180,10 +206,11 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 		},
 		{
 			name:            "incomplete",
-			body:            "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"incomplete\"}}\n\n",
+			body:            "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"incomplete\",\"usage\":{\"input_tokens\":321,\"output_tokens\":12,\"total_tokens\":333,\"input_tokens_details\":{\"cached_tokens\":300}}}}\n\n",
 			terminalEvent:   "event: response.incomplete",
 			failureEventCnt: 0,
 			wantPreserve:    true,
+			terminalUsage:   true,
 		},
 		{
 			name:            "failed",
@@ -204,7 +231,7 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 			}
 
 			info := mappedClientResponseInfo()
-			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+			usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 			require.Nil(t, relayErr)
 			require.Equal(t, 1, strings.Count(recorder.Body.String(), tt.terminalEvent))
@@ -212,8 +239,37 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 			require.Equal(t, tt.wantPreserve, info.PreservePreConsumedQuota)
 			require.Equal(t, tt.terminalSuccess, info.StreamTerminalSuccess)
 			require.Equal(t, tt.terminalUsage, info.StreamTerminalUsageSeen)
+			if tt.name == "incomplete" {
+				require.Equal(t, 321, usage.PromptTokens)
+				require.Equal(t, 12, usage.CompletionTokens)
+				require.Equal(t, 300, usage.PromptTokensDetails.CachedTokens)
+			}
 		})
 	}
+}
+
+func TestOaiResponsesStreamHandlerPreservesPublishedResponseIDOnFailure(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_public\",\"model\":\"upstream-model\"}}\n\n" +
+				"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_private_failure\",\"error\":{\"message\":\"secret\"}}}\n\n",
+		)),
+	}
+
+	_, relayErr := OaiResponsesStreamHandler(ctx, mappedClientResponseInfo(), resp)
+
+	require.Nil(t, relayErr)
+	publicBody := recorder.Body.String()
+	require.Contains(t, publicBody, "resp_public")
+	require.NotContains(t, publicBody, "resp_private_failure")
+	require.NotContains(t, publicBody, "secret")
 }
 
 func TestOaiResponsesHandlerCapturesAffinityResponseID(t *testing.T) {

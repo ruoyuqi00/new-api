@@ -97,12 +97,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	defer service.CloseResponseBodyGracefully(resp)
 	info.StreamTerminalMarkersRequired = true
+	info.PreservePreConsumedQuota = false
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
 	terminalReceived := false
 	var nextSequenceNumber *int64
 	responseID := ""
+	publishedResponseID := ""
 	responseModel := ""
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
@@ -137,25 +139,76 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				responseModel = streamResponse.Response.Model
 			}
 		}
-		switch streamResponse.Type {
+		originalEventType := streamResponse.Type
+		switch originalEventType {
+		case "response.completed", "response.done", "response.incomplete", "response.failed", "response.error", "error":
+			if streamResponse.Response != nil && streamResponse.Response.Usage != nil {
+				terminalUsage := &dto.Usage{
+					PromptTokens:     streamResponse.Response.Usage.InputTokens,
+					CompletionTokens: streamResponse.Response.Usage.OutputTokens,
+					TotalTokens:      streamResponse.Response.Usage.TotalTokens,
+				}
+				if streamResponse.Response.Usage.InputTokensDetails != nil {
+					terminalUsage.PromptTokensDetails = *streamResponse.Response.Usage.InputTokensDetails
+				}
+				if !service.ValidUsage(terminalUsage) {
+					break
+				}
+				info.StreamTerminalUsageSeen = true
+				if terminalUsage.PromptTokens != 0 {
+					usage.PromptTokens = terminalUsage.PromptTokens
+				}
+				if terminalUsage.CompletionTokens != 0 {
+					usage.CompletionTokens = terminalUsage.CompletionTokens
+				}
+				if terminalUsage.TotalTokens != 0 {
+					usage.TotalTokens = terminalUsage.TotalTokens
+				}
+				usage.PromptTokensDetails = terminalUsage.PromptTokensDetails
+			}
+		}
+		terminalFailure := false
+		switch originalEventType {
 		case "response.completed", "response.done":
 			terminalReceived = true
 			info.StreamTerminalSuccess = true
-		case "response.incomplete", "response.failed", "response.error":
+		case "response.incomplete", "response.failed", "response.error", "error":
 			terminalReceived = true
 			info.StreamTerminalSuccess = false
-			publicResponse := &dto.OpenAIResponsesResponse{
-				ID:     responseID,
-				Object: "response",
-				Model:  responseModel,
-				Status: []byte(`"failed"`),
-				Output: []dto.ResponsesOutput{},
+			terminalFailure = true
+			publicResponseID := publishedResponseID
+			if publicResponseID == "" {
+				publicResponseID = "resp_" + c.GetString(common.RequestIdKey)
+				if publicResponseID == "resp_" {
+					publicResponseID = "resp_failed"
+				}
 			}
-			publicResponse.Error = map[string]any{
+			publicResponseModel := responseModel
+			if publicResponseModel == "" {
+				publicResponseModel = info.ClientResponseModelName()
+			}
+			publicError := map[string]any{
 				"code":    responsesFailedPublicCode,
 				"message": responsesFailedPublicMessage,
 			}
-			streamResponse.Response = publicResponse
+			streamResponse.Error = nil
+			if originalEventType == "error" {
+				streamResponse.Error = publicError
+				streamResponse.Response = nil
+			} else {
+				publicStatus := []byte(`"failed"`)
+				if originalEventType == "response.incomplete" {
+					publicStatus = []byte(`"incomplete"`)
+				}
+				streamResponse.Response = &dto.OpenAIResponsesResponse{
+					ID:     publicResponseID,
+					Object: "response",
+					Model:  publicResponseModel,
+					Status: publicStatus,
+					Error:  publicError,
+					Output: []dto.ResponsesOutput{},
+				}
+			}
 			sanitized, err := common.Marshal(&streamResponse)
 			if err != nil {
 				sr.Error(err)
@@ -167,25 +220,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Stop(err)
 			return
 		}
+		if !terminalFailure && streamResponse.Response != nil && streamResponse.Response.ID != "" {
+			publishedResponseID = streamResponse.Response.ID
+		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
 			if streamResponse.Response != nil {
-				if streamResponse.Response.Usage != nil {
-					info.StreamTerminalUsageSeen = true
-					if streamResponse.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
-					}
-					if streamResponse.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResponse.Response.Usage.OutputTokens
-					}
-					if streamResponse.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResponse.Response.Usage.TotalTokens
-					}
-					if streamResponse.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResponse.Response.Usage.InputTokensDetails.CachedTokens
-						usage.PromptTokensDetails.CacheWriteTokens = streamResponse.Response.Usage.InputTokensDetails.CacheWriteTokens
-					}
-				}
 				if streamResponse.Response.HasImageGenerationCall() {
 					c.Set("image_generation_call", true)
 					c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
@@ -213,7 +253,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
-	if !info.StreamTerminalUsageSeen {
+	if !info.StreamTerminalSuccess || !info.StreamTerminalUsageSeen {
 		info.PreservePreConsumedQuota = true
 	}
 	if !terminalReceived {
@@ -223,10 +263,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			case relaycommon.StreamEndReasonClientGone, relaycommon.StreamEndReasonHandlerStop:
 			default:
 				info.StreamStatus.RecordError(responsesIncompletePublicMessage)
-				if responseID == "" {
-					responseID = "resp_" + c.GetString(common.RequestIdKey)
-					if responseID == "resp_" {
-						responseID = "resp_incomplete"
+				publicResponseID := publishedResponseID
+				if publicResponseID == "" {
+					publicResponseID = "resp_" + c.GetString(common.RequestIdKey)
+					if publicResponseID == "resp_" {
+						publicResponseID = "resp_incomplete"
 					}
 				}
 				if responseModel == "" {
@@ -236,7 +277,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					Type:           "response.failed",
 					SequenceNumber: nextSequenceNumber,
 					Response: &dto.OpenAIResponsesResponse{
-						ID:     responseID,
+						ID:     publicResponseID,
 						Object: "response",
 						Status: []byte(`"failed"`),
 						Error: map[string]any{

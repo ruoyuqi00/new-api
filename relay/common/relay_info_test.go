@@ -32,6 +32,9 @@ func TestInitChannelMetaResetsStreamOutcomeForRetry(t *testing.T) {
 		StreamTerminalSuccess:             true,
 		StreamTerminalUsageSeen:           true,
 	}
+	attempt := info.BeginUpstreamRequestAttempt()
+	attempt.MarkRequestWritten()
+	attempt.MarkResponseHeadersReceived()
 
 	info.InitChannelMeta(c)
 
@@ -41,6 +44,9 @@ func TestInitChannelMetaResetsStreamOutcomeForRetry(t *testing.T) {
 	require.False(t, info.StreamTerminalMarkersRequired)
 	require.False(t, info.StreamTerminalSuccess)
 	require.False(t, info.StreamTerminalUsageSeen)
+	require.False(t, info.UpstreamRequestWasWritten())
+	require.False(t, info.UpstreamResponseHeadersWereReceived())
+	require.False(t, info.HasAmbiguousUpstreamSubmission())
 }
 
 func TestRelayInfoGetFinalRequestRelayFormatPrefersExplicitFinal(t *testing.T) {

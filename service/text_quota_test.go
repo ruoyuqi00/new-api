@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -700,6 +701,43 @@ func TestApplyPreConsumedQuotaFloor(t *testing.T) {
 			wantQuota:  1250,
 		},
 		{
+			name: "unconfirmed terminal usage cannot raise charge above frozen reservation",
+			relayInfo: &relaycommon.RelayInfo{
+				PreservePreConsumedQuota:      true,
+				FinalPreConsumedQuota:         1000,
+				StreamTerminalMarkersRequired: true,
+			},
+			calculated:    2500,
+			wantQuota:     1000,
+			wantPreserved: true,
+		},
+		{
+			name: "trusted billing uses frozen price estimate when no quota was reserved",
+			relayInfo: &relaycommon.RelayInfo{
+				PreservePreConsumedQuota:      true,
+				StreamTerminalMarkersRequired: true,
+				PriceData:                     types.PriceData{QuotaToPreConsume: 1400},
+			},
+			calculated:    2500,
+			wantQuota:     1400,
+			wantPreserved: true,
+		},
+		{
+			name: "current tiered estimate is the frozen reservation",
+			relayInfo: &relaycommon.RelayInfo{
+				PreservePreConsumedQuota:      true,
+				StreamTerminalMarkersRequired: true,
+				PriceData:                     types.PriceData{QuotaToPreConsume: 1400},
+				TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+					BillingMode:              "tiered_expr",
+					EstimatedQuotaAfterGroup: 900,
+				},
+			},
+			calculated:    2500,
+			wantQuota:     900,
+			wantPreserved: true,
+		},
+		{
 			name: "ordinary stream can settle below pre-consume",
 			relayInfo: &relaycommon.RelayInfo{
 				FinalPreConsumedQuota: 1000,
@@ -722,6 +760,111 @@ func TestApplyPreConsumedQuotaFloor(t *testing.T) {
 			require.Equal(t, tt.wantPreserved, preserved)
 		})
 	}
+}
+
+func TestAmbiguousTextBillingSettlesFrozenReservation(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	tests := []struct {
+		name string
+		info *relaycommon.RelayInfo
+		want int
+	}{
+		{
+			name: "legacy estimate",
+			info: &relaycommon.RelayInfo{
+				UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+				StartTime:   time.Now(),
+				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
+				PriceData:   types.PriceData{QuotaToPreConsume: 1250, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+			},
+			want: 1250,
+		},
+		{
+			name: "selected tier estimate",
+			info: &relaycommon.RelayInfo{
+				UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+				StartTime:   time.Now(),
+				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
+				PriceData:   types.PriceData{QuotaToPreConsume: 1250},
+				TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+					BillingMode:              "tiered_expr",
+					EstimatedQuotaAfterGroup: 875,
+				},
+			},
+			want: 875,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			billing := &recordingTaskBillingSettler{}
+			tt.info.Billing = billing
+			attempt := tt.info.BeginUpstreamRequestAttempt()
+			attempt.MarkRequestWritten()
+			attempt.MarkAmbiguousIfPotentiallySent()
+
+			gin.SetMode(gin.TestMode)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			err := SettleAmbiguousTextBilling(ctx, tt.info)
+
+			require.NoError(t, err)
+			require.Equal(t, []int{tt.want}, billing.settled)
+			require.True(t, tt.info.PreservePreConsumedQuota)
+			var logs []model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ?", tt.info.UserId).Find(&logs).Error)
+			require.Len(t, logs, 1)
+			require.Equal(t, tt.want, logs[0].Quota)
+			require.Contains(t, logs[0].Other, "usage_unconfirmed")
+
+			var user model.User
+			require.NoError(t, model.DB.First(&user, tt.info.UserId).Error)
+			require.Equal(t, tt.want, user.UsedQuota)
+			var channel model.Channel
+			require.NoError(t, model.DB.First(&channel, tt.info.ChannelId).Error)
+			require.Equal(t, int64(tt.want), channel.UsedQuota)
+
+			require.NoError(t, model.DB.Exec("UPDATE users SET used_quota = 0, request_count = 0 WHERE id = ?", tt.info.UserId).Error)
+			require.NoError(t, model.DB.Exec("UPDATE channels SET used_quota = 0 WHERE id = ?", tt.info.ChannelId).Error)
+			require.NoError(t, model.LOG_DB.Exec("DELETE FROM logs").Error)
+		})
+	}
+}
+
+func TestUnconfirmedTerminalUsageDoesNotRunTieredSettlement(t *testing.T) {
+	billing := &recordingTaskBillingSettler{preConsumed: 500}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                        1,
+		TokenId:                       1,
+		OriginModelName:               "gpt-test",
+		Billing:                       billing,
+		FinalPreConsumedQuota:         500,
+		PreservePreConsumedQuota:      true,
+		StreamTerminalMarkersRequired: true,
+		PriceData: types.PriceData{
+			ModelRatio:        1,
+			CompletionRatio:   1,
+			QuotaToPreConsume: 500,
+			GroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 1},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:              "tiered_expr",
+			ExprString:               `tier("local_estimate", p * 1000 + c * 1000)`,
+			GroupRatio:               1,
+			EstimatedQuotaAfterGroup: 500,
+			QuotaPerUnit:             500_000,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 1},
+	}
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	PostTextConsumeQuota(ctx, relayInfo, &dto.Usage{PromptTokens: 10_000, CompletionTokens: 10_000}, nil)
+
+	require.Equal(t, []int{500}, billing.settled)
 }
 
 func TestIncompleteResponsesUsageAlwaysUsesPreConsumedQuotaFloor(t *testing.T) {

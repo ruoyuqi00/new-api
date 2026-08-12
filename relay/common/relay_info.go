@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -26,6 +27,51 @@ type ThinkingContentInfo struct {
 	IsFirstThinkingContent  bool
 	SendLastThinkingContent bool
 	HasSentThinkingContent  bool
+}
+
+type UpstreamRequestAttempt struct {
+	connectionObtained      atomic.Bool
+	requestWritten          atomic.Bool
+	responseHeadersReceived atomic.Bool
+	ambiguous               atomic.Bool
+}
+
+func (attempt *UpstreamRequestAttempt) MarkConnectionObtained() {
+	if attempt != nil {
+		attempt.connectionObtained.Store(true)
+	}
+}
+
+func (attempt *UpstreamRequestAttempt) MarkRequestWritten() {
+	if attempt != nil {
+		attempt.requestWritten.Store(true)
+	}
+}
+
+func (attempt *UpstreamRequestAttempt) MarkResponseHeadersReceived() {
+	if attempt != nil {
+		attempt.responseHeadersReceived.Store(true)
+	}
+}
+
+func (attempt *UpstreamRequestAttempt) MarkAmbiguousIfPotentiallySent() {
+	if attempt != nil &&
+		(attempt.connectionObtained.Load() || attempt.requestWritten.Load()) &&
+		!attempt.responseHeadersReceived.Load() {
+		attempt.ambiguous.Store(true)
+	}
+}
+
+func (attempt *UpstreamRequestAttempt) RequestWasWritten() bool {
+	return attempt != nil && attempt.requestWritten.Load()
+}
+
+func (attempt *UpstreamRequestAttempt) ResponseHeadersWereReceived() bool {
+	return attempt != nil && attempt.responseHeadersReceived.Load()
+}
+
+func (attempt *UpstreamRequestAttempt) IsAmbiguous() bool {
+	return attempt != nil && attempt.ambiguous.Load()
 }
 
 const (
@@ -189,6 +235,7 @@ type RelayInfo struct {
 	StreamTerminalMarkersRequired     bool
 	StreamTerminalSuccess             bool
 	StreamTerminalUsageSeen           bool
+	upstreamAttempt                   atomic.Pointer[UpstreamRequestAttempt]
 
 	ThinkingContentInfo
 	TokenCountMeta
@@ -208,6 +255,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	info.StreamTerminalMarkersRequired = false
 	info.StreamTerminalSuccess = false
 	info.StreamTerminalUsageSeen = false
+	info.upstreamAttempt.Store(nil)
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)
@@ -258,6 +306,34 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	if info.Request != nil {
 		info.Request.SetModelName(info.OriginModelName)
 	}
+}
+
+func (info *RelayInfo) BeginUpstreamRequestAttempt() *UpstreamRequestAttempt {
+	if info == nil {
+		return nil
+	}
+	attempt := &UpstreamRequestAttempt{}
+	info.upstreamAttempt.Store(attempt)
+	return attempt
+}
+
+func (info *RelayInfo) currentUpstreamRequestAttempt() *UpstreamRequestAttempt {
+	if info == nil {
+		return nil
+	}
+	return info.upstreamAttempt.Load()
+}
+
+func (info *RelayInfo) UpstreamRequestWasWritten() bool {
+	return info.currentUpstreamRequestAttempt().RequestWasWritten()
+}
+
+func (info *RelayInfo) UpstreamResponseHeadersWereReceived() bool {
+	return info.currentUpstreamRequestAttempt().ResponseHeadersWereReceived()
+}
+
+func (info *RelayInfo) HasAmbiguousUpstreamSubmission() bool {
+	return info.currentUpstreamRequestAttempt().IsAmbiguous()
 }
 
 func (info *RelayInfo) ToString() string {

@@ -101,6 +101,17 @@ func TestShouldRetryRelayOutcomePreservesSafePreResponseRetry(t *testing.T) {
 	require.True(t, shouldRetryRelayOutcome(c, relayInfo, retryableRelayTestError(http.StatusServiceUnavailable), 1))
 }
 
+func TestShouldRetryRelayOutcomeStopsAfterAmbiguousWrittenSubmission(t *testing.T) {
+	c := newRelayRetryTestContext(t, false)
+	relayInfo := &relaycommon.RelayInfo{}
+	attempt := relayInfo.BeginUpstreamRequestAttempt()
+	attempt.MarkRequestWritten()
+	attempt.MarkAmbiguousIfPotentiallySent()
+
+	require.False(t, shouldRetryRelayOutcome(c, relayInfo, retryableRelayTestError(http.StatusServiceUnavailable), 1))
+	require.False(t, shouldRefundRelayFailure(relayInfo))
+}
+
 func TestShouldCommitChannelAffinityRequiresNormalRelayCompletion(t *testing.T) {
 	tests := []struct {
 		name       string

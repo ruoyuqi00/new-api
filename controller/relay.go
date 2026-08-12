@@ -215,7 +215,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		// Only return quota if downstream failed and quota was actually pre-consumed
 		if newAPIError != nil {
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
-			if relayInfo.Billing != nil {
+			if relayInfo.Billing != nil && shouldRefundRelayFailure(relayInfo) {
 				relayInfo.Billing.Refund(c)
 			}
 			service.ChargeViolationFeeIfNeeded(c, relayInfo, newAPIError)
@@ -280,9 +280,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
-		service.MaybeCooldownSelectedChannelPool(c, newAPIError)
-		service.MaybeCooldownSelectedProviderAccount(c, newAPIError)
+		if relayInfo.HasAmbiguousUpstreamSubmission() {
+			if billingErr := service.SettleAmbiguousTextBilling(c, relayInfo); billingErr != nil {
+				logger.LogError(c, "failed to retain billing for ambiguous upstream submission: "+billingErr.Error())
+			}
+		} else {
+			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+			service.MaybeCooldownSelectedChannelPool(c, newAPIError)
+			service.MaybeCooldownSelectedProviderAccount(c, newAPIError)
+		}
 		service.ReleaseCurrentChannelPoolLease(c)
 
 		if !shouldRetryRelayOutcome(c, relayInfo, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
@@ -453,6 +459,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 }
 
 func shouldRetryRelayOutcome(c *gin.Context, relayInfo *relaycommon.RelayInfo, openaiErr *types.NewAPIError, retryTimes int) bool {
+	if relayInfo != nil && relayInfo.HasAmbiguousUpstreamSubmission() {
+		return false
+	}
 	if relayInfo != nil && relayInfo.IsStream && relayInfo.StreamTerminalMarkersRequired {
 		if relayInfo.ReceivedResponseCount > 0 || relayInfo.ChannelAffinityResponseIDObserved {
 			return false
@@ -462,6 +471,10 @@ func shouldRetryRelayOutcome(c *gin.Context, relayInfo *relaycommon.RelayInfo, o
 		}
 	}
 	return shouldRetry(c, openaiErr, retryTimes)
+}
+
+func shouldRefundRelayFailure(relayInfo *relaycommon.RelayInfo) bool {
+	return relayInfo == nil || !relayInfo.HasAmbiguousUpstreamSubmission()
 }
 
 func shouldCommitChannelAffinity(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {

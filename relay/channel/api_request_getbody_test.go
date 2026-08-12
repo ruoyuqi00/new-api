@@ -165,6 +165,87 @@ func TestDoTaskApiRequestKeepsNativeReplayableGetBody(t *testing.T) {
 	}
 }
 
+func TestDoRequestMarksWrittenPostWithoutResponseHeadersAmbiguous(t *testing.T) {
+	service.InitHttpClient()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.Copy(io.Discard, r.Body)
+		require.NoError(t, err)
+		hijacker, ok := w.(http.Hijacker)
+		require.True(t, ok)
+		conn, _, err := hijacker.Hijack()
+		require.NoError(t, err)
+		require.NoError(t, conn.Close())
+	}))
+	t.Cleanup(server.Close)
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello"}`))
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	req, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{"input":"hello"}`))
+	require.NoError(t, err)
+
+	resp, err := doRequest(c, req, info)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	assert.True(t, info.UpstreamRequestWasWritten())
+	assert.False(t, info.UpstreamResponseHeadersWereReceived())
+	assert.True(t, info.HasAmbiguousUpstreamSubmission())
+}
+
+func TestDoRequestPreservesTaskRequestWriteTrace(t *testing.T) {
+	service.InitHttpClient()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.Copy(io.Discard, r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", strings.NewReader(`{"prompt":"hello"}`))
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	adaptor := &replayTaskAdaptor{baseURL: server.URL}
+
+	resp, err := DoTaskApiRequest(adaptor, c, info, strings.NewReader(`{"prompt":"hello"}`))
+
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	assert.True(t, info.TaskRelayInfo.RequestWritten)
+	assert.True(t, info.UpstreamRequestWasWritten())
+	assert.True(t, info.UpstreamResponseHeadersWereReceived())
+	assert.False(t, info.HasAmbiguousUpstreamSubmission())
+}
+
+func TestUpstreamAttemptStateCannotLeakIntoNextRetry(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	first := info.BeginUpstreamRequestAttempt()
+	second := info.BeginUpstreamRequestAttempt()
+
+	first.MarkRequestWritten()
+	first.MarkAmbiguousIfPotentiallySent()
+
+	assert.False(t, second.RequestWasWritten())
+	assert.False(t, second.IsAmbiguous())
+	assert.False(t, info.HasAmbiguousUpstreamSubmission())
+}
+
+func TestUpstreamAttemptRequiresPotentialNetworkSubmission(t *testing.T) {
+	attempt := (&relaycommon.RelayInfo{}).BeginUpstreamRequestAttempt()
+
+	attempt.MarkAmbiguousIfPotentiallySent()
+	assert.False(t, attempt.IsAmbiguous())
+
+	attempt.MarkConnectionObtained()
+	attempt.MarkAmbiguousIfPotentiallySent()
+	assert.True(t, attempt.IsAmbiguous())
+}
+
 type h2ReplayResult struct {
 	err           error
 	attemptBodies [][]byte

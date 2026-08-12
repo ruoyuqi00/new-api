@@ -405,6 +405,7 @@ const (
 // ResponsesStreamResponse 用于处理 /v1/responses 流式响应
 type ResponsesStreamResponse struct {
 	Type           string                   `json:"type"`
+	Error          any                      `json:"error,omitempty"`
 	SequenceNumber *int64                   `json:"sequence_number,omitempty"`
 	Response       *OpenAIResponsesResponse `json:"response,omitempty"`
 	Delta          string                   `json:"delta,omitempty"`
