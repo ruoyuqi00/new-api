@@ -159,16 +159,20 @@ func newResponseChainCommitTestContext(t *testing.T, body string, tokenID int, c
 
 func TestCommitResponseChainAffinityOutcome(t *testing.T) {
 	tests := []struct {
-		name      string
-		canceled  bool
-		streamEnd relaycommon.StreamEndReason
-		terminal  bool
-		wantFound bool
+		name       string
+		canceled   bool
+		streamEnd  relaycommon.StreamEndReason
+		terminal   bool
+		observed   bool
+		responseID bool
+		wantFound  bool
 	}{
-		{name: "completed", streamEnd: relaycommon.StreamEndReasonDone, terminal: true, wantFound: true},
-		{name: "client gone", streamEnd: relaycommon.StreamEndReasonClientGone, terminal: true},
-		{name: "context canceled", canceled: true, streamEnd: relaycommon.StreamEndReasonDone, terminal: true},
-		{name: "missing terminal success", streamEnd: relaycommon.StreamEndReasonDone},
+		{name: "completed", streamEnd: relaycommon.StreamEndReasonDone, terminal: true, observed: true, responseID: true, wantFound: true},
+		{name: "client gone after response created", streamEnd: relaycommon.StreamEndReasonClientGone, observed: true, responseID: true, wantFound: true},
+		{name: "canceled context after response created", canceled: true, streamEnd: relaycommon.StreamEndReasonClientGone, observed: true, responseID: true, wantFound: true},
+		{name: "eof after response created", streamEnd: relaycommon.StreamEndReasonEOF, observed: true, responseID: true, wantFound: true},
+		{name: "context canceled before response created", canceled: true, streamEnd: relaycommon.StreamEndReasonClientGone},
+		{name: "missing real response id", streamEnd: relaycommon.StreamEndReasonEOF},
 	}
 
 	for index, tt := range tests {
@@ -178,16 +182,21 @@ func TestCommitResponseChainAffinityOutcome(t *testing.T) {
 			first := newResponseChainCommitTestContext(t, `{"model":"gpt-5","input":"first"}`, tokenID, tt.canceled)
 			_, found := service.GetPreferredChannelByAffinity(first, "gpt-5", "gptpro")
 			require.False(t, found)
+			actualResponseID := ""
+			if tt.responseID {
+				actualResponseID = responseID
+			}
 			relayInfo := &relaycommon.RelayInfo{
-				IsStream:                      true,
-				RelayFormat:                   types.RelayFormatOpenAIResponses,
-				StreamStatus:                  relayStreamStatusForAffinityTest(tt.streamEnd, false),
-				StreamTerminalMarkersRequired: true,
-				StreamTerminalSuccess:         tt.terminal,
-				ChannelAffinityResponseID:     responseID,
+				IsStream:                          true,
+				RelayFormat:                       types.RelayFormatOpenAIResponses,
+				StreamStatus:                      relayStreamStatusForAffinityTest(tt.streamEnd, false),
+				StreamTerminalMarkersRequired:     true,
+				StreamTerminalSuccess:             tt.terminal,
+				ChannelAffinityResponseID:         actualResponseID,
+				ChannelAffinityResponseIDObserved: tt.observed,
 			}
 
-			commitChannelAffinityOutcome(first, relayInfo)
+			commitChannelAffinityOutcome(first, relayInfo, 9300+index)
 			service.RecordChannelAffinity(first, 9300+index)
 
 			nextBody := `{"model":"gpt-5","previous_response_id":"` + responseID + `","input":"next"}`

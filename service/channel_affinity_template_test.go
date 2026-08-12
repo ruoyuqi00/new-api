@@ -637,6 +637,28 @@ func TestResponsesChainAffinityContinuesSuccessfulChannel(t *testing.T) {
 	t.Cleanup(func() { ClearCurrentChannelAffinityCache(next) })
 }
 
+func TestProvisionalResponseChainAffinityContinuesInterruptedChannelOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	responseID := fmt.Sprintf("resp-provisional-%d", time.Now().UnixNano())
+	tokenID := 8202
+	first := newChannelAffinityRequestContext(t, `{"model":"gpt-5","prompt_cache_key":"primary-key","input":"first"}`, tokenID)
+	_, found := GetPreferredChannelByAffinity(first, "gpt-5", "gptpro")
+	require.False(t, found)
+
+	RecordProvisionalResponseChainAffinity(first, 9202, responseID)
+
+	next := responseChainLookupContext(t, responseID, tokenID)
+	channelID, found := GetPreferredChannelByAffinity(next, "gpt-5", "gptpro")
+	require.True(t, found)
+	assert.Equal(t, 9202, channelID)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(next) })
+
+	primary := newChannelAffinityRequestContext(t, `{"model":"gpt-5","prompt_cache_key":"primary-key","input":"next"}`, tokenID)
+	channelID, found = GetPreferredChannelByAffinity(primary, "gpt-5", "gptpro")
+	require.False(t, found)
+	assert.Zero(t, channelID)
+}
+
 func TestResponsesChainAffinityScopesAndSeparatesSharedTokenChains(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	suffix := time.Now().UnixNano()

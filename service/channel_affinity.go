@@ -32,6 +32,7 @@ const (
 
 	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
+	provisionalResponseChainTTLSeconds      = 15 * 60
 )
 
 var (
@@ -878,6 +879,46 @@ func SetChannelAffinityResponseID(c *gin.Context, responseID string) {
 		return
 	}
 	c.Set(ginKeyChannelAffinityResponseID, responseID)
+}
+
+func RecordProvisionalResponseChainAffinity(c *gin.Context, channelID int, responseID string) {
+	if c == nil || channelID <= 0 {
+		return
+	}
+	responseID = strings.TrimSpace(responseID)
+	if responseID == "" {
+		return
+	}
+	setting := operation_setting.GetChannelAffinitySetting()
+	if setting == nil || !setting.Enabled {
+		return
+	}
+	ruleContext, ok := getChannelAffinityRuleContext(c)
+	if !ok {
+		return
+	}
+	cacheKeySuffix, ok := buildScopedChannelAffinityCacheKeySuffix(
+		ruleContext.Rule,
+		"response_chain",
+		common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+		ruleContext.ModelName,
+		ruleContext.UsingGroup,
+		responseID,
+	)
+	if !ok {
+		return
+	}
+	ttlSeconds := ruleContext.Rule.TTLSeconds
+	if ttlSeconds <= 0 {
+		ttlSeconds = setting.DefaultTTLSeconds
+	}
+	if ttlSeconds <= 0 || ttlSeconds > provisionalResponseChainTTLSeconds {
+		ttlSeconds = provisionalResponseChainTTLSeconds
+	}
+	cacheKey := channelAffinityCacheNamespace + ":" + cacheKeySuffix
+	if err := getChannelAffinityCache().SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
+		common.SysError(fmt.Sprintf("provisional channel affinity response chain set failed: key=%s, err=%v", cacheKey, err))
+	}
 }
 
 func RecordChannelAffinity(c *gin.Context, channelID int) {
