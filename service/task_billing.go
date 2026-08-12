@@ -34,19 +34,47 @@ func FinalizeTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, 
 	return finalizeTaskSubmissionBilling(c, info, taskErr, successfulQuota)
 }
 
-// FinalizePersistedTaskSubmissionBilling uses the persisted submission state
-// as the cross-process authority for terminal billing. A failed finalization is
-// deliberately left finalizing for operator review and must not be replayed.
+// FinalizePersistedTaskSubmissionBilling finalizes only the request that
+// inserted the submission row. Async creation is fully pre-consumed before the
+// upstream write, so durable completion is allowed only when no quota delta is
+// required. The database claim is acquired before any terminal side effect;
+// failures remain finalizing for operator review and are never replayed.
 func FinalizePersistedTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, taskErr *dto.TaskError, successfulQuota int) error {
-	if info == nil || info.TaskRelayInfo == nil || info.PublicTaskID == "" {
+	if info == nil || info.TaskRelayInfo == nil || info.PublicTaskID == "" || !info.TaskRelayInfo.SubmissionIntentPersisted {
 		return fmt.Errorf("missing public task submission identity")
 	}
-	claimed, err := model.ClaimTaskSubmissionBilling(info.PublicTaskID)
+	billingState, err := model.GetTaskSubmissionBillingState(info.PublicTaskID)
+	if err != nil {
+		return err
+	}
+	if billingState != nil && *billingState == model.TaskSubmissionBillingFinalized {
+		return nil
+	}
+	if billingState != nil && *billingState == model.TaskSubmissionBillingFinalizing {
+		return nil
+	}
+	if billingState == nil || *billingState != model.TaskSubmissionBillingPending {
+		return fmt.Errorf("task submission billing is not pending")
+	}
+	preConsumedQuota := info.FinalPreConsumedQuota
+	if info.Billing != nil {
+		preConsumedQuota = info.Billing.GetPreConsumedQuota()
+	}
+	if successfulQuota != preConsumedQuota {
+		return fmt.Errorf("task submission quota %d does not match pre-consumed quota %d", successfulQuota, preConsumedQuota)
+	}
+	if !info.TaskRelayInfo.BeginBillingFinalization() {
+		return nil
+	}
+	claimed, billingState, err := model.ClaimTaskSubmissionBillingFinalization(info.PublicTaskID)
 	if err != nil {
 		return err
 	}
 	if !claimed {
-		return nil
+		if billingState != nil && (*billingState == model.TaskSubmissionBillingFinalizing || *billingState == model.TaskSubmissionBillingFinalized) {
+			return nil
+		}
+		return fmt.Errorf("task submission billing is not claimable")
 	}
 	if err := finalizeTaskSubmissionBilling(c, info, taskErr, successfulQuota); err != nil {
 		return err
@@ -56,7 +84,7 @@ func FinalizePersistedTaskSubmissionBilling(c *gin.Context, info *relaycommon.Re
 		return err
 	}
 	if !finalized {
-		return fmt.Errorf("task submission billing claim was not finalizing")
+		return fmt.Errorf("task submission billing was not finalizing")
 	}
 	return nil
 }
@@ -77,8 +105,7 @@ func finalizeTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, 
 	if err := SettleBilling(c, info, quota); err != nil {
 		return err
 	}
-	LogTaskConsumption(c, info)
-	return nil
+	return LogTaskConsumption(c, info)
 }
 
 func FrozenTaskSubmissionQuota(info *relaycommon.RelayInfo) int {
@@ -105,7 +132,7 @@ func FrozenTaskSubmissionQuota(info *relaycommon.RelayInfo) int {
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
-func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
+func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) error {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
 	// 支持任务仅按次计费
@@ -140,18 +167,32 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
 	attachQuotaClampAdminInfo(other, info.TaskQuotaClamp)
-	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-		ChannelId: info.ChannelId,
-		ModelName: info.OriginModelName,
-		TokenName: tokenName,
-		Quota:     info.PriceData.Quota,
-		Content:   logContent,
-		TokenId:   info.TokenId,
-		Group:     info.UsingGroup,
-		Other:     other,
-	})
-	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
-	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+	submissionKey := ""
+	if info.TaskRelayInfo != nil && info.TaskRelayInfo.SubmissionIntentPersisted {
+		submissionKey = info.PublicTaskID
+	}
+	if err := model.RecordConsumeLogWithError(c, info.UserId, model.RecordConsumeLogParams{
+		SubmissionKey: submissionKey,
+		ChannelId:     info.ChannelId,
+		ModelName:     info.OriginModelName,
+		TokenName:     tokenName,
+		Quota:         info.PriceData.Quota,
+		Content:       logContent,
+		TokenId:       info.TokenId,
+		Group:         info.UsingGroup,
+		Other:         other,
+	}); err != nil {
+		return err
+	}
+	if submissionKey == "" {
+		model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
+		model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+		return nil
+	}
+	if err := model.MarkTaskSubmissionLogRecorded(info.PublicTaskID); err != nil {
+		return err
+	}
+	return model.RecordTaskSubmissionUsage(info.PublicTaskID, info.UserId, info.ChannelId, info.PriceData.Quota)
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +322,13 @@ func taskModelName(task *model.Task) string {
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
+	if task == nil {
+		return false
+	}
+	if task.SubmissionKey != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("skip refund for upstream-charged task %s", task.TaskID))
+		return false
+	}
 	quota := task.Quota
 	if quota == 0 {
 		return true
@@ -326,10 +374,14 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 // actualQuota 是任务完成后的实际应扣额度，与预扣额度 (task.Quota) 做差额结算。
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, quotaClamps ...*common.QuotaClamp) {
-	if actualQuota <= 0 {
+	if task == nil || actualQuota <= 0 {
 		return
 	}
 	preConsumedQuota := task.Quota
+	if task.SubmissionKey != nil && actualQuota < preConsumedQuota {
+		logger.LogWarn(ctx, fmt.Sprintf("skip post-submit quota reduction for upstream-charged task %s", task.TaskID))
+		return
+	}
 	quotaDelta := actualQuota - preConsumedQuota
 
 	if quotaDelta == 0 {

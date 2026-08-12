@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm.DB, error) {
@@ -57,6 +58,7 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 }
 
 type Log struct {
+	SubmissionKey       *string `json:"-" gorm:"type:varchar(191);uniqueIndex:idx_logs_submission_key"`
 	Id                  int     `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
 	UserId              int     `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
 	CreatedAt           int64   `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
@@ -337,6 +339,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 }
 
 type RecordConsumeLogParams struct {
+	SubmissionKey       string                 `json:"-"`
 	ChannelId           int                    `json:"channel_id"`
 	PromptTokens        int                    `json:"prompt_tokens"`
 	CompletionTokens    int                    `json:"completion_tokens"`
@@ -354,8 +357,14 @@ type RecordConsumeLogParams struct {
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
+	if err := RecordConsumeLogWithError(c, userId, params); err != nil {
+		logger.LogError(c, "failed to record log: "+err.Error())
+	}
+}
+
+func RecordConsumeLogWithError(c *gin.Context, userId int, params RecordConsumeLogParams) error {
 	if !common.LogConsumeEnabled {
-		return
+		return nil
 	}
 	if params.ContentIsSensitive {
 		logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, sensitive content omitted", userId))
@@ -405,11 +414,34 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
 	}
-	err := createLog(log)
-	if err != nil {
-		logger.LogError(c, "failed to record log: "+err.Error())
+	inserted := true
+	if params.SubmissionKey != "" {
+		log.SubmissionKey = &params.SubmissionKey
+		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+			var count int64
+			if err := LOG_DB.Model(&Log{}).Where("submission_key = ?", params.SubmissionKey).Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				inserted = false
+			} else if err := createLog(log); err != nil {
+				return err
+			}
+		} else {
+			ensureLogRequestId(log)
+			result := LOG_DB.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "submission_key"}},
+				DoNothing: true,
+			}).Create(log)
+			if result.Error != nil {
+				return result.Error
+			}
+			inserted = result.RowsAffected == 1
+		}
+	} else if err := createLog(log); err != nil {
+		return err
 	}
-	if common.DataExportEnabled {
+	if inserted && common.DataExportEnabled {
 		LogQuotaData(QuotaDataLogParams{
 			UserID:    userId,
 			Username:  username,
@@ -423,6 +455,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			NodeName:  common.NodeName,
 		})
 	}
+	return nil
 }
 
 type RecordTaskBillingLogParams struct {

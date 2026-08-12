@@ -28,7 +28,24 @@ type TaskSubmitResult struct {
 	TaskData       []byte
 	Platform       constant.TaskPlatform
 	Quota          int
+	response       *taskResponseBuffer
 	//PerCallPrice   types.PriceData
+}
+
+func (r *TaskSubmitResult) CommitResponse(c *gin.Context) error {
+	if r == nil || r.response == nil {
+		return errors.New("missing buffered task response")
+	}
+	for key, values := range r.response.Header() {
+		c.Writer.Header()[key] = append([]string(nil), values...)
+	}
+	status := r.response.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	c.Writer.WriteHeader(status)
+	_, err := c.Writer.Write(r.response.body.Bytes())
+	return err
 }
 
 // ResolveOriginTask 处理基于已有任务的提交（remix / continuation）：
@@ -206,6 +223,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
+	if _, err := service.PersistTaskSubmissionIntent(info, platform); err != nil {
+		return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
+			WithSubmissionState(dto.TaskSubmissionNotSent)
+	}
 	if info.Billing == nil && !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
@@ -214,26 +235,54 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 8. 构建请求体
+	if _, err := service.PersistTaskSubmissionIntent(info, platform); err != nil {
+		return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
+			WithSubmissionState(dto.TaskSubmissionNotSent)
+	}
 	requestBody, err := adaptor.BuildRequestBody(c, info)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError).WithSubmissionState(dto.TaskSubmissionNotSent)
 	}
 
 	// 9. 发送请求
+	if err := service.MarkTaskSubmissionWritePossible(info); err != nil {
+		return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
+			WithSubmissionState(dto.TaskSubmissionNotSent)
+	}
 	info.BeginRequestAttempt()
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		state := classifyTaskSubmissionState(info.RequestWritten, 0, false)
+		if state == dto.TaskSubmissionNotSent {
+			if persistErr := service.MarkTaskSubmissionRejected(info); persistErr != nil {
+				return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
+					WithSubmissionState(dto.TaskSubmissionAmbiguous)
+			}
+		}
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError).WithSubmissionState(state)
 	}
 	if resp == nil {
+		state := classifyTaskSubmissionState(info.RequestWritten, 0, false)
+		if state == dto.TaskSubmissionNotSent {
+			if persistErr := service.MarkTaskSubmissionRejected(info); persistErr != nil {
+				return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
+					WithSubmissionState(dto.TaskSubmissionAmbiguous)
+			}
+		}
 		return nil, service.TaskErrorWrapper(errors.New("upstream returned no task submission response"), "invalid_response", http.StatusBadGateway).
-			WithSubmissionState(classifyTaskSubmissionState(info.RequestWritten, 0, false))
+			WithSubmissionState(state)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		_ = resp.Body.Close()
+		state := classifyTaskSubmissionState(info.RequestWritten, resp.StatusCode, false)
+		if state == dto.TaskSubmissionRejected || state == dto.TaskSubmissionNotSent {
+			if err := service.MarkTaskSubmissionRejected(info); err != nil {
+				return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
+					WithSubmissionState(dto.TaskSubmissionAmbiguous)
+			}
+		}
 		return nil, service.TaskErrorWrapper(fmt.Errorf("upstream rejected task submission with status %d", resp.StatusCode), "fail_to_fetch_task", resp.StatusCode).
-			WithSubmissionState(classifyTaskSubmissionState(info.RequestWritten, resp.StatusCode, false))
+			WithSubmissionState(state)
 	}
 
 	// 10. 返回 OtherRatios 给下游（header 必须在 DoResponse 写 body 之前设置）
@@ -245,8 +294,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	c.Header("X-New-Api-Other-Ratios", string(ratiosJSON))
 
 	// 11. 解析响应
-	upstreamTaskID, taskData, taskErr := doValidatedTaskResponse(c, adaptor, resp, info)
+	upstreamTaskID, taskData, response, taskErr := doValidatedTaskResponse(c, adaptor, resp, info)
 	if taskErr != nil {
+		if taskErr.SubmissionState() == dto.TaskSubmissionRejected {
+			if err := service.MarkTaskSubmissionRejected(info); err != nil {
+				return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
+					WithSubmissionState(dto.TaskSubmissionAmbiguous)
+			}
+		}
 		return nil, taskErr
 	}
 
@@ -266,6 +321,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		TaskData:       taskData,
 		Platform:       platform,
 		Quota:          finalQuota,
+		response:       response,
 	}, nil
 }
 
@@ -295,7 +351,7 @@ func (w *taskResponseBuffer) Write(data []byte) (int, error) {
 	return w.body.Write(data)
 }
 
-func doValidatedTaskResponse(c *gin.Context, adaptor channel.TaskAdaptor, resp *http.Response, info *relaycommon.RelayInfo) (string, []byte, *dto.TaskError) {
+func doValidatedTaskResponse(c *gin.Context, adaptor channel.TaskAdaptor, resp *http.Response, info *relaycommon.RelayInfo) (string, []byte, *taskResponseBuffer, *dto.TaskError) {
 	buffer := &taskResponseBuffer{}
 	bufferedContext, _ := gin.CreateTestContext(buffer)
 	bufferedContext.Request = c.Request
@@ -304,24 +360,17 @@ func doValidatedTaskResponse(c *gin.Context, adaptor channel.TaskAdaptor, resp *
 
 	upstreamTaskID, taskData, taskErr := adaptor.DoResponse(bufferedContext, resp, info)
 	if taskErr != nil {
-		return "", nil, service.TaskErrorWrapper(errors.New("upstream accepted task submission but returned an invalid response"), "invalid_response", http.StatusBadGateway).
+		if taskErr.SubmissionState() == dto.TaskSubmissionRejected {
+			return "", nil, nil, taskErr.WithSubmissionState(dto.TaskSubmissionRejected)
+		}
+		return "", nil, nil, service.TaskErrorWrapper(errors.New("upstream accepted task submission but returned an invalid response"), "invalid_response", http.StatusBadGateway).
 			WithSubmissionState(dto.TaskSubmissionAccepted)
 	}
 	if upstreamTaskID == "" {
-		return "", nil, service.TaskErrorWrapper(errors.New("upstream accepted task submission without a task id"), "invalid_response", http.StatusBadGateway).
+		return "", nil, nil, service.TaskErrorWrapper(errors.New("upstream accepted task submission without a task id"), "invalid_response", http.StatusBadGateway).
 			WithSubmissionState(dto.TaskSubmissionAccepted)
 	}
-
-	for key, values := range buffer.Header() {
-		c.Writer.Header()[key] = append([]string(nil), values...)
-	}
-	status := buffer.status
-	if status == 0 {
-		status = http.StatusOK
-	}
-	c.Writer.WriteHeader(status)
-	_, _ = c.Writer.Write(buffer.body.Bytes())
-	return upstreamTaskID, taskData, nil
+	return upstreamTaskID, taskData, buffer, nil
 }
 
 func classifyTaskSubmissionState(wroteRequest bool, statusCode int, acceptedResponse bool) dto.TaskSubmissionState {
@@ -334,6 +383,9 @@ func classifyTaskSubmissionState(wroteRequest bool, statusCode int, acceptedResp
 		return dto.TaskSubmissionRejected
 	}
 	if statusCode == http.StatusRequestTimeout {
+		return dto.TaskSubmissionAmbiguous
+	}
+	if statusCode != 0 {
 		return dto.TaskSubmissionAmbiguous
 	}
 	if wroteRequest {

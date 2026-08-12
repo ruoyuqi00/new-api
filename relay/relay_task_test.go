@@ -21,12 +21,41 @@ import (
 
 type responseWritingTaskAdaptor struct {
 	channel.TaskAdaptor
-	taskID string
+	taskID  string
+	taskErr *dto.TaskError
 }
 
 func (a *responseWritingTaskAdaptor) DoResponse(c *gin.Context, _ *http.Response, _ *relaycommon.RelayInfo) (string, []byte, *dto.TaskError) {
+	if a.taskErr != nil {
+		return "", nil, a.taskErr
+	}
 	c.JSON(http.StatusOK, map[string]any{"task_id": "public"})
 	return a.taskID, nil, nil
+}
+
+func TestTaskResponsePreservesExplicitBusinessRejection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	businessError := (&dto.TaskError{Code: "provider_rejected", StatusCode: http.StatusInternalServerError}).
+		WithSubmissionState(dto.TaskSubmissionRejected)
+
+	_, _, _, taskErr := doValidatedTaskResponse(c, &responseWritingTaskAdaptor{taskErr: businessError}, &http.Response{}, &relaycommon.RelayInfo{})
+
+	require.Same(t, businessError, taskErr)
+	assert.Equal(t, dto.TaskSubmissionRejected, taskErr.SubmissionState())
+	assert.True(t, service.ShouldRefundTaskSubmission(taskErr))
+}
+
+func TestTaskResponseTreatsUnmarked2xxBusinessErrorAsAccepted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	businessError := &dto.TaskError{Code: "provider_body_error", StatusCode: http.StatusBadRequest}
+
+	_, _, _, taskErr := doValidatedTaskResponse(c, &responseWritingTaskAdaptor{taskErr: businessError}, &http.Response{}, &relaycommon.RelayInfo{})
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, dto.TaskSubmissionAccepted, taskErr.SubmissionState())
+	assert.False(t, service.ShouldRefundTaskSubmission(taskErr))
 }
 
 func TestTaskResponseIsCommittedOnlyAfterTaskIDValidation(t *testing.T) {
@@ -34,16 +63,20 @@ func TestTaskResponseIsCommittedOnlyAfterTaskIDValidation(t *testing.T) {
 
 	invalidRecorder := httptest.NewRecorder()
 	invalidContext, _ := gin.CreateTestContext(invalidRecorder)
-	_, _, taskErr := doValidatedTaskResponse(invalidContext, &responseWritingTaskAdaptor{}, &http.Response{}, &relaycommon.RelayInfo{})
+	_, _, _, taskErr := doValidatedTaskResponse(invalidContext, &responseWritingTaskAdaptor{}, &http.Response{}, &relaycommon.RelayInfo{})
 	require.NotNil(t, taskErr)
 	assert.Equal(t, dto.TaskSubmissionAccepted, taskErr.SubmissionState())
 	assert.Empty(t, invalidRecorder.Body.String())
 
 	validRecorder := httptest.NewRecorder()
 	validContext, _ := gin.CreateTestContext(validRecorder)
-	taskID, _, taskErr := doValidatedTaskResponse(validContext, &responseWritingTaskAdaptor{taskID: "upstream-id"}, &http.Response{}, &relaycommon.RelayInfo{})
+	taskID, _, response, taskErr := doValidatedTaskResponse(validContext, &responseWritingTaskAdaptor{taskID: "upstream-id"}, &http.Response{}, &relaycommon.RelayInfo{})
 	require.Nil(t, taskErr)
 	assert.Equal(t, "upstream-id", taskID)
+	assert.Empty(t, validRecorder.Body.String(), "validated 2xx must remain buffered until durable persistence and billing finish")
+
+	result := &TaskSubmitResult{response: response}
+	require.NoError(t, result.CommitResponse(validContext))
 	assert.JSONEq(t, `{"task_id":"public"}`, validRecorder.Body.String())
 }
 
@@ -72,7 +105,8 @@ func TestTaskSubmissionClassification(t *testing.T) {
 		{name: "explicit rejection", wrote: true, statusCode: http.StatusUnprocessableEntity, want: dto.TaskSubmissionRejected},
 		{name: "timeout after write", wrote: true, statusCode: http.StatusRequestTimeout, want: dto.TaskSubmissionAmbiguous},
 		{name: "server error after write", wrote: true, statusCode: http.StatusBadGateway, want: dto.TaskSubmissionAmbiguous},
-		{name: "server error before write", statusCode: http.StatusBadGateway, want: dto.TaskSubmissionNotSent},
+		{name: "server response without trace is still ambiguous", statusCode: http.StatusBadGateway, want: dto.TaskSubmissionAmbiguous},
+		{name: "unknown response without trace is still ambiguous", statusCode: http.StatusTeapot, want: dto.TaskSubmissionAmbiguous},
 		{name: "request timeout is ambiguous without trace", statusCode: http.StatusRequestTimeout, want: dto.TaskSubmissionAmbiguous},
 		{name: "unparseable success", wrote: true, statusCode: http.StatusOK, accepted: true, want: dto.TaskSubmissionAccepted},
 		{name: "unspecified response after write", wrote: true, statusCode: http.StatusTeapot, want: dto.TaskSubmissionAmbiguous},

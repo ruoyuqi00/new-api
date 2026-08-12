@@ -449,6 +449,9 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseActualResponseModelMigrationSQL()).Error; err != nil {
 		return err
 	}
+	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS submission_key Nullable(String)").Error; err != nil {
+		return err
+	}
 	return syncClickHouseLogTTL(ttlDays)
 }
 
@@ -483,6 +486,7 @@ func clickHouseLogCreateTableSQL(ttlDays int) string {
 	return fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS logs (
 	id Int64 DEFAULT 0,
+	submission_key Nullable(String),
 	user_id Int32 DEFAULT 0,
 	created_at Int64 DEFAULT 0,
 	type Int32 DEFAULT 0,

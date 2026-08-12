@@ -4,17 +4,21 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
 
 type TaskSubmissionBillingState string
+
+type TaskSubmissionStage string
 
 func (t TaskStatus) ToVideoStatus() string {
 	var status string
@@ -49,6 +53,13 @@ const (
 	TaskSubmissionBillingFinalized  TaskSubmissionBillingState = "finalized"
 )
 
+const (
+	TaskSubmissionStagePreWrite      TaskSubmissionStage = "pre_write"
+	TaskSubmissionStageWritePossible TaskSubmissionStage = "write_possible"
+	TaskSubmissionStageRejected      TaskSubmissionStage = "rejected"
+	TaskSubmissionStageCompleted     TaskSubmissionStage = "completed"
+)
+
 // TaskRefundLegacyCutoff separates legacy timeout tasks that intentionally
 // do not receive automatic refunds from tasks covered by reconciliation.
 const TaskRefundLegacyCutoff int64 = 1740182400 // 2025-02-22 00:00:00 UTC
@@ -56,8 +67,11 @@ const TaskRefundLegacyCutoff int64 = 1740182400 // 2025-02-22 00:00:00 UTC
 type Task struct {
 	SubmissionKey                *string                     `json:"-" gorm:"type:varchar(191);uniqueIndex:idx_tasks_submission_key"`
 	SubmissionBillingState       *TaskSubmissionBillingState `json:"-" gorm:"type:varchar(20);index:idx_tasks_submission_billing_state"`
+	SubmissionStage              *TaskSubmissionStage        `json:"-" gorm:"type:varchar(20);index:idx_tasks_submission_stage"`
 	SubmissionBillingClaimedAt   *int64                      `json:"-"`
 	SubmissionBillingFinalizedAt *int64                      `json:"-"`
+	SubmissionLogRecordedAt      *int64                      `json:"-"`
+	SubmissionUsageRecordedAt    *int64                      `json:"-"`
 	ID                           int64                       `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
 	CreatedAt                    int64                       `json:"created_at" gorm:"index"`
 	UpdatedAt                    int64                       `json:"updated_at"`
@@ -81,21 +95,94 @@ type Task struct {
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
 }
 
-// ClaimTaskSubmissionBilling atomically assigns terminal billing to one
-// request. Rows already finalizing or finalized are intentionally untouched.
-func ClaimTaskSubmissionBilling(submissionKey string) (bool, error) {
+func MarkTaskSubmissionLogRecorded(submissionKey string) error {
 	result := DB.Model(&Task{}).
-		Where("submission_key = ? AND submission_billing_state = ?", submissionKey, TaskSubmissionBillingPending).
+		Where("submission_key = ? AND submission_billing_state = ? AND submission_log_recorded_at IS NULL", submissionKey, TaskSubmissionBillingFinalizing).
+		Update("submission_log_recorded_at", time.Now().Unix())
+	if result.Error != nil || result.RowsAffected == 1 {
+		return result.Error
+	}
+	var task Task
+	if err := DB.Select("submission_log_recorded_at").Where("submission_key = ?", submissionKey).First(&task).Error; err != nil {
+		return err
+	}
+	if task.SubmissionLogRecordedAt == nil {
+		return errors.New("task submission log state is no longer finalizing")
+	}
+	return nil
+}
+
+func RecordTaskSubmissionUsage(submissionKey string, userID, channelID, quota int) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var task Task
+		if err := tx.Select("id", "submission_billing_state", "submission_usage_recorded_at").
+			Where("submission_key = ?", submissionKey).First(&task).Error; err != nil {
+			return err
+		}
+		if task.SubmissionUsageRecordedAt != nil {
+			return nil
+		}
+		if task.SubmissionBillingState == nil || *task.SubmissionBillingState != TaskSubmissionBillingFinalizing {
+			return errors.New("task submission usage state is no longer finalizing")
+		}
+
+		userUpdate := tx.Model(&User{}).Where("id = ?", userID).Updates(map[string]any{
+			"used_quota":    gorm.Expr("used_quota + ?", quota),
+			"request_count": gorm.Expr("request_count + ?", 1),
+		})
+		if userUpdate.Error != nil {
+			return userUpdate.Error
+		}
+		if userUpdate.RowsAffected != 1 {
+			return errors.New("task submission user usage target does not exist")
+		}
+
+		var channel Channel
+		if err := tx.Select("id").Where("id = ?", channelID).First(&channel).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&Channel{}).Where("id = ?", channelID).
+			Update("used_quota", gorm.Expr("used_quota + ?", quota)).Error; err != nil {
+			return err
+		}
+
+		result := tx.Model(&Task{}).
+			Where("id = ? AND submission_billing_state = ? AND submission_usage_recorded_at IS NULL", task.ID, TaskSubmissionBillingFinalizing).
+			Update("submission_usage_recorded_at", time.Now().Unix())
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("task submission usage was recorded concurrently")
+		}
+		return nil
+	})
+}
+
+// ClaimTaskSubmissionBillingFinalization grants one process the durable right
+// to perform terminal settlement, logging, and usage writes.
+func ClaimTaskSubmissionBillingFinalization(submissionKey string) (bool, *TaskSubmissionBillingState, error) {
+	now := time.Now().Unix()
+	result := DB.Model(&Task{}).
+		Where("submission_key = ? AND submission_billing_state = ? AND submission_stage = ?", submissionKey, TaskSubmissionBillingPending, TaskSubmissionStageCompleted).
 		Updates(map[string]any{
 			"submission_billing_state":      TaskSubmissionBillingFinalizing,
-			"submission_billing_claimed_at": time.Now().Unix(),
+			"submission_billing_claimed_at": now,
 		})
-	return result.RowsAffected == 1, result.Error
+	if result.Error != nil {
+		return false, nil, result.Error
+	}
+	var task Task
+	if err := DB.Select("submission_billing_state").Where("submission_key = ?", submissionKey).First(&task).Error; err != nil {
+		return false, nil, err
+	}
+	return result.RowsAffected == 1, task.SubmissionBillingState, nil
 }
 
 func MarkTaskSubmissionBillingFinalized(submissionKey string) (bool, error) {
 	result := DB.Model(&Task{}).
-		Where("submission_key = ? AND submission_billing_state = ?", submissionKey, TaskSubmissionBillingFinalizing).
+		Where("submission_key = ? AND submission_billing_state = ? AND submission_stage = ?", submissionKey, TaskSubmissionBillingFinalizing, TaskSubmissionStageCompleted).
+		Where("submission_log_recorded_at IS NOT NULL AND submission_usage_recorded_at IS NOT NULL").
 		Updates(map[string]any{
 			"submission_billing_state":        TaskSubmissionBillingFinalized,
 			"submission_billing_finalized_at": time.Now().Unix(),
@@ -103,9 +190,16 @@ func MarkTaskSubmissionBillingFinalized(submissionKey string) (bool, error) {
 	return result.RowsAffected == 1, result.Error
 }
 
+func GetTaskSubmissionBillingState(submissionKey string) (*TaskSubmissionBillingState, error) {
+	var task Task
+	if err := DB.Select("submission_billing_state").Where("submission_key = ?", submissionKey).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return task.SubmissionBillingState, nil
+}
+
 // GetUnfinishedTaskSubmissionBillings exposes submissions that need operator
-// review. A finalizing row must not be replayed automatically because an
-// external billing side effect may have completed before the state was saved.
+// review. Pending rows are never replayed automatically.
 func GetUnfinishedTaskSubmissionBillings(limit int) ([]*Task, error) {
 	if limit <= 0 {
 		return nil, nil
@@ -114,7 +208,8 @@ func GetUnfinishedTaskSubmissionBillings(limit int) ([]*Task, error) {
 	err := DB.Where("submission_billing_state IN ?", []TaskSubmissionBillingState{
 		TaskSubmissionBillingPending,
 		TaskSubmissionBillingFinalizing,
-	}).Order("id").Limit(limit).Find(&tasks).Error
+	}).
+		Order("id").Limit(limit).Find(&tasks).Error
 	return tasks, err
 }
 
@@ -347,6 +442,7 @@ func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 	var tasks []*Task
 	err := DB.Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess, TaskStatusUnknown}).
+		Where("submission_billing_state IS NULL OR submission_billing_state = ?", TaskSubmissionBillingFinalized).
 		Where("submit_time < ?", cutoffUnix).
 		Order("submit_time").
 		Limit(limit).
@@ -368,6 +464,7 @@ func GetUnrefundedFailedTasks(updatedBefore int64, limit int) []*Task {
 	var tasks []*Task
 	err := DB.Where("status = ?", TaskStatusFailure).
 		Where("quota != ?", 0).
+		Where("submission_key IS NULL").
 		Where("updated_at <= ?", updatedBefore).
 		Where("(submit_time <= ? OR submit_time >= ?)", 0, TaskRefundLegacyCutoff).
 		Order("id").
@@ -385,6 +482,7 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 	// get all tasks progress is not 100%
 	err = DB.Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess, TaskStatusUnknown}).
+		Where("submission_billing_state IS NULL OR submission_billing_state = ?", TaskSubmissionBillingFinalized).
 		Limit(limit).
 		Order("id").
 		Find(&tasks).Error
@@ -403,6 +501,7 @@ func HasUnfinishedSyncTasks() bool {
 	err := DB.Model(&Task{}).
 		Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess, TaskStatusUnknown}).
+		Where("submission_billing_state IS NULL OR submission_billing_state = ?", TaskSubmissionBillingFinalized).
 		Limit(1).
 		Pluck("id", &id).Error
 	return err == nil && id != 0
@@ -419,6 +518,8 @@ func HasTaskPollingWork() bool {
 	err := DB.Model(&Task{}).
 		Where("status = ?", TaskStatusFailure).
 		Where("quota != ?", 0).
+		Where("submission_key IS NULL").
+		Where("submission_billing_state IS NULL OR submission_billing_state = ?", TaskSubmissionBillingFinalized).
 		Where("(submit_time <= ? OR submit_time >= ?)", 0, TaskRefundLegacyCutoff).
 		Limit(1).
 		Pluck("id", &id).Error

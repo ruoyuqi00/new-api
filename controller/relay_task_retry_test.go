@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -66,14 +67,11 @@ func TestAmbiguousTaskSubmissionPersistsUnknownTaskWithFrozenBilling(t *testing.
 		},
 	}
 
-	inserted, err := persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 1_050_000, "", json.RawMessage(nil))
+	inserted, err := service.PersistTaskSubmissionIntent(info, constant.TaskPlatform("cangyuan"))
 	require.NoError(t, err)
-	assert.True(t, inserted.Inserted)
-	assert.Equal(t, model.TaskSubmissionBillingPending, *inserted.BillingState)
-	existing, err := persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 1_050_000, "", json.RawMessage(nil))
-	require.NoError(t, err)
-	assert.False(t, existing.Inserted)
-	assert.Equal(t, model.TaskSubmissionBillingPending, *existing.BillingState)
+	assert.True(t, inserted)
+	require.NoError(t, service.MarkTaskSubmissionWritePossible(info))
+	require.NoError(t, service.CompleteTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 1_050_000, "", json.RawMessage(nil)))
 	assert.True(t, db.Migrator().HasIndex(&model.Task{}, "idx_tasks_submission_key"))
 	var count int64
 	require.NoError(t, db.Model(&model.Task{}).Count(&count).Error)
@@ -92,18 +90,10 @@ func TestAmbiguousTaskSubmissionPersistsUnknownTaskWithFrozenBilling(t *testing.
 	setUnknownTaskSubmissionData(taskErr, info.PublicTaskID)
 	assert.Equal(t, map[string]any{"task_id": "task_public_123", "submission_state": "unknown"}, taskErr.Data)
 
-	info.PriceData.Quota = 999_999
-	_, err = persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 999_999, "", nil)
-	require.Error(t, err)
-	info.PriceData.Quota = 1_050_000
-	_, err = persistTaskSubmission(info, constant.TaskPlatform("cangyuan"), model.TaskStatusNotStart, 1_050_000, "upstream-id", nil)
-	require.Error(t, err)
-	var unchanged model.Task
-	require.NoError(t, db.Where("submission_key = ?", "task_public_123").First(&unchanged).Error)
-	assert.EqualValues(t, model.TaskStatusUnknown, unchanged.Status)
-	assert.Empty(t, unchanged.PrivateData.UpstreamTaskID)
-	require.NotNil(t, unchanged.SubmissionBillingState)
-	assert.Equal(t, model.TaskSubmissionBillingPending, *unchanged.SubmissionBillingState)
+	require.NotNil(t, task.SubmissionBillingState)
+	assert.Equal(t, model.TaskSubmissionBillingPending, *task.SubmissionBillingState)
+	require.NotNil(t, task.SubmissionStage)
+	assert.Equal(t, model.TaskSubmissionStageCompleted, *task.SubmissionStage)
 }
 
 func TestTaskSubmissionKeyMigrationPreservesLegacyDuplicateTaskIDs(t *testing.T) {
@@ -147,10 +137,62 @@ func TestTaskPersistenceFailurePreventsTerminalBilling(t *testing.T) {
 	}
 	taskErr := (&dto.TaskError{}).WithSubmissionState(dto.TaskSubmissionAmbiguous)
 
+	_, err = service.PersistTaskSubmissionIntent(info, constant.TaskPlatform("cangyuan"))
+	require.Error(t, err)
 	err = persistAndFinalizeTaskSubmission(nil, info, constant.TaskPlatform("cangyuan"), model.TaskStatusUnknown, 300_000, "", nil, taskErr)
 	require.Error(t, err)
 	assert.Empty(t, billing.settled)
 	assert.Zero(t, billing.refunds)
+}
+
+func TestRejectedTaskRefundsEvenWhenIntentCleanupFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() { model.DB = originalDB })
+
+	billing := &recordingControllerBilling{}
+	info := &relaycommon.RelayInfo{
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			PublicTaskID:              "task_cleanup_failure",
+			SubmissionIntentPersisted: true,
+		},
+		Billing: billing,
+	}
+	taskErr := (&dto.TaskError{}).WithSubmissionState(dto.TaskSubmissionRejected)
+
+	// A database failure while deleting the owned intent must not suppress the refund.
+	require.Error(t, finalizeRejectedTaskSubmission(nil, info, taskErr))
+	assert.Equal(t, 1, billing.refunds)
+	assert.Empty(t, billing.settled)
+}
+
+func TestRejectedTaskNeverRefundsWritePossibleIntent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Task{}))
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() { model.DB = originalDB })
+
+	billing := &recordingControllerBilling{}
+	info := &relaycommon.RelayInfo{
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_possible_write", Action: "generate"},
+		ChannelMeta:   &relaycommon.ChannelMeta{ChannelId: 7},
+		UserId:        9,
+		UsingGroup:    "default",
+		Billing:       billing,
+		PriceData:     types.PriceData{Quota: 300_000},
+	}
+	_, err = service.PersistTaskSubmissionIntent(info, constant.TaskPlatform("cangyuan"))
+	require.NoError(t, err)
+	require.NoError(t, service.MarkTaskSubmissionWritePossible(info))
+
+	taskErr := (&dto.TaskError{}).WithSubmissionState(dto.TaskSubmissionRejected)
+	require.ErrorIs(t, finalizeRejectedTaskSubmission(nil, info, taskErr), service.ErrTaskSubmissionMayHaveBeenSent)
+	assert.Zero(t, billing.refunds)
+	assert.Empty(t, billing.settled)
 }
 
 func TestRetryTaskRelayHonorsSubmissionStateBeforeStatus(t *testing.T) {

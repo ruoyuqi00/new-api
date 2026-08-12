@@ -702,6 +702,10 @@ type TaskRelayInfo struct {
 	// 供 DoResponse 在返回给客户端时使用（避免暴露上游真实 ID）。
 	PublicTaskID   string
 	RequestWritten bool
+	// SubmissionIntentPersisted is set only after this request creates its
+	// durable pre-write submission row. It must never be inferred from a unique
+	// key conflict belonging to another request.
+	SubmissionIntentPersisted bool
 
 	ConsumeQuota     bool
 	billingMu        sync.Mutex

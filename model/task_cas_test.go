@@ -102,73 +102,74 @@ func insertTask(t *testing.T, task *Task) {
 	require.NoError(t, DB.Create(task).Error)
 }
 
-func TestTaskSubmissionBillingClaimConcurrentWinner(t *testing.T) {
+func TestTaskSubmissionBillingFinalizationRequiresDurableClaim(t *testing.T) {
 	truncateTables(t)
 
-	submissionKey := "task_billing_claim_race"
+	submissionKey := "task_billing_finalize_once"
+	finalizing := TaskSubmissionBillingFinalizing
+	completed := TaskSubmissionStageCompleted
+	recordedAt := time.Now().Unix()
+	insertTask(t, &Task{
+		SubmissionKey:             &submissionKey,
+		SubmissionBillingState:    &finalizing,
+		SubmissionStage:           &completed,
+		SubmissionLogRecordedAt:   &recordedAt,
+		SubmissionUsageRecordedAt: &recordedAt,
+		TaskID:                    submissionKey,
+		Status:                    TaskStatusUnknown,
+	})
+
+	finalized, err := MarkTaskSubmissionBillingFinalized(submissionKey)
+	require.NoError(t, err)
+	assert.True(t, finalized)
+	finalized, err = MarkTaskSubmissionBillingFinalized(submissionKey)
+	require.NoError(t, err)
+	assert.False(t, finalized)
+}
+
+func TestTaskSubmissionBillingFinalizationClaimHasOneDurableOwner(t *testing.T) {
+	truncateTables(t)
+
+	submissionKey := "task_billing_durable_claim"
 	pending := TaskSubmissionBillingPending
+	completed := TaskSubmissionStageCompleted
 	insertTask(t, &Task{
 		SubmissionKey:          &submissionKey,
 		SubmissionBillingState: &pending,
+		SubmissionStage:        &completed,
 		TaskID:                 submissionKey,
 		Status:                 TaskStatusUnknown,
 	})
 
-	const goroutines = 8
-	wins := make(chan bool, goroutines)
-	errs := make(chan error, goroutines)
-	var wg sync.WaitGroup
-	for range goroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			won, err := ClaimTaskSubmissionBilling(submissionKey)
-			wins <- won
-			errs <- err
-		}()
-	}
-	wg.Wait()
-	close(wins)
-	close(errs)
+	claimed, state, err := ClaimTaskSubmissionBillingFinalization(submissionKey)
+	require.NoError(t, err)
+	assert.True(t, claimed)
+	require.NotNil(t, state)
+	assert.Equal(t, TaskSubmissionBillingFinalizing, *state)
 
-	winCount := 0
-	for won := range wins {
-		if won {
-			winCount++
-		}
-	}
-	for err := range errs {
-		require.NoError(t, err)
-	}
-	assert.Equal(t, 1, winCount)
-
-	var task Task
-	require.NoError(t, DB.Where("submission_key = ?", submissionKey).First(&task).Error)
-	require.NotNil(t, task.SubmissionBillingState)
-	assert.Equal(t, TaskSubmissionBillingFinalizing, *task.SubmissionBillingState)
+	claimed, state, err = ClaimTaskSubmissionBillingFinalization(submissionKey)
+	require.NoError(t, err)
+	assert.False(t, claimed)
+	require.NotNil(t, state)
+	assert.Equal(t, TaskSubmissionBillingFinalizing, *state)
 }
 
 func TestTaskSubmissionBillingLifecyclePersistsInternalTimestamps(t *testing.T) {
 	truncateTables(t)
 
 	submissionKey := "task_billing_lifecycle_timestamps"
-	pending := TaskSubmissionBillingPending
+	finalizing := TaskSubmissionBillingFinalizing
+	completed := TaskSubmissionStageCompleted
+	recordedAt := time.Now().Unix()
 	insertTask(t, &Task{
-		SubmissionKey:          &submissionKey,
-		SubmissionBillingState: &pending,
-		TaskID:                 submissionKey,
-		Status:                 TaskStatusUnknown,
+		SubmissionKey:             &submissionKey,
+		SubmissionBillingState:    &finalizing,
+		SubmissionStage:           &completed,
+		SubmissionLogRecordedAt:   &recordedAt,
+		SubmissionUsageRecordedAt: &recordedAt,
+		TaskID:                    submissionKey,
+		Status:                    TaskStatusUnknown,
 	})
-
-	claimed, err := ClaimTaskSubmissionBilling(submissionKey)
-	require.NoError(t, err)
-	require.True(t, claimed)
-
-	var claimedTask Task
-	require.NoError(t, DB.Where("submission_key = ?", submissionKey).First(&claimedTask).Error)
-	require.NotNil(t, claimedTask.SubmissionBillingClaimedAt)
-	assert.Positive(t, *claimedTask.SubmissionBillingClaimedAt)
-	assert.Nil(t, claimedTask.SubmissionBillingFinalizedAt)
 
 	finalized, err := MarkTaskSubmissionBillingFinalized(submissionKey)
 	require.NoError(t, err)
@@ -177,11 +178,14 @@ func TestTaskSubmissionBillingLifecyclePersistsInternalTimestamps(t *testing.T) 
 	var finalizedTask Task
 	require.NoError(t, DB.Where("submission_key = ?", submissionKey).First(&finalizedTask).Error)
 	require.NotNil(t, finalizedTask.SubmissionBillingFinalizedAt)
-	assert.GreaterOrEqual(t, *finalizedTask.SubmissionBillingFinalizedAt, *claimedTask.SubmissionBillingClaimedAt)
+	assert.Positive(t, *finalizedTask.SubmissionBillingFinalizedAt)
 
 	payload, err := common.Marshal(finalizedTask)
 	require.NoError(t, err)
 	assert.NotContains(t, string(payload), "submission_billing")
+	assert.NotContains(t, string(payload), "submission_stage")
+	assert.NotContains(t, string(payload), "submission_log")
+	assert.NotContains(t, string(payload), "submission_usage")
 }
 
 func TestGetUnfinishedTaskSubmissionBillingsIncludesRecoverableStatesOnly(t *testing.T) {

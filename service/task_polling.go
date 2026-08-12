@@ -84,7 +84,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 			continue
 		}
 		timedOutCount++
-		if !isLegacy && task.Quota != 0 {
+		if !isLegacy && task.SubmissionKey == nil && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
 		}
 	}
@@ -340,7 +340,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			logger.LogError(ctx, fmt.Sprintf("UpdateSunoTask task %s error: %v", task.TaskID, err))
 		} else if !won {
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s CAS lost or no-op update, skip billing", task.TaskID))
-		} else if isFailure && previousStatus != model.TaskStatusFailure && task.Quota != 0 {
+		} else if isFailure && previousStatus != model.TaskStatusFailure && task.SubmissionKey == nil && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, task.FailReason)
 		}
 	}
@@ -597,7 +597,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		task.FailReason = taskResult.Reason
 		logger.LogInfo(ctx, fmt.Sprintf("Task %s failed: %s", task.TaskID, task.FailReason))
 		taskResult.Progress = taskcommon.ProgressComplete
-		if quota != 0 {
+		if task.SubmissionKey == nil && quota != 0 {
 			shouldRefund = true
 		}
 	default:

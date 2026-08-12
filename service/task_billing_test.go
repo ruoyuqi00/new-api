@@ -122,7 +122,7 @@ func TestFinalizeRetainedTaskSubmissionSettlesFrozenQuotaOnce(t *testing.T) {
 	}
 }
 
-func TestFinalizePersistedTaskSubmissionBillingDistinctDuplicatesSettleAndLogOnce(t *testing.T) {
+func TestFinalizePersistedTaskSubmissionBillingRepeatedCallSettlesAndLogsOnce(t *testing.T) {
 	tests := []struct {
 		name    string
 		taskErr *dto.TaskError
@@ -133,31 +133,31 @@ func TestFinalizePersistedTaskSubmissionBillingDistinctDuplicatesSettleAndLogOnc
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			truncate(t)
+			seedUser(t, 101, 0)
+			seedChannel(t, 201)
 			gin.SetMode(gin.TestMode)
 			c, _ := gin.CreateTestContext(nil)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 
 			submissionKey := "task_durable_billing_" + strings.ReplaceAll(tt.name, " ", "_")
 			pending := model.TaskSubmissionBillingPending
+			completed := model.TaskSubmissionStageCompleted
 			require.NoError(t, model.DB.Create(&model.Task{
 				SubmissionKey:          &submissionKey,
 				SubmissionBillingState: &pending,
+				SubmissionStage:        &completed,
 				TaskID:                 submissionKey,
 				Status:                 model.TaskStatusUnknown,
 			}).Error)
 
-			firstBilling := &recordingTaskBillingSettler{preConsumed: 300_000}
-			secondBilling := &recordingTaskBillingSettler{preConsumed: 300_000}
-			firstInfo := newPersistedTaskBillingTestInfo(submissionKey, firstBilling)
-			secondInfo := newPersistedTaskBillingTestInfo(submissionKey, secondBilling)
+			billing := &recordingTaskBillingSettler{preConsumed: 300_000}
+			info := newPersistedTaskBillingTestInfo(submissionKey, billing)
+			info.TaskRelayInfo.SubmissionIntentPersisted = true
+			require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, info, tt.taskErr, 300_000))
+			require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, info, tt.taskErr, 300_000))
 
-			require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, firstInfo, tt.taskErr, 300_000))
-			require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, secondInfo, tt.taskErr, 300_000))
-
-			assert.Equal(t, []int{300_000}, firstBilling.settled)
-			assert.Empty(t, secondBilling.settled)
-			assert.Zero(t, firstBilling.refunds)
-			assert.Zero(t, secondBilling.refunds)
+			assert.Equal(t, []int{300_000}, billing.settled)
+			assert.Zero(t, billing.refunds)
 			assert.Equal(t, int64(1), countLogs(t))
 			var task model.Task
 			require.NoError(t, model.DB.Where("submission_key = ?", submissionKey).First(&task).Error)
@@ -167,27 +167,31 @@ func TestFinalizePersistedTaskSubmissionBillingDistinctDuplicatesSettleAndLogOnc
 	}
 }
 
-func TestFinalizePersistedTaskSubmissionBillingConcurrentDuplicatesSettleOnce(t *testing.T) {
+func TestFinalizePersistedTaskSubmissionBillingConcurrentSameRequestSettlesOnce(t *testing.T) {
 	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
 	gin.SetMode(gin.TestMode)
 
 	submissionKey := "task_durable_billing_concurrent"
 	pending := model.TaskSubmissionBillingPending
+	completed := model.TaskSubmissionStageCompleted
 	require.NoError(t, model.DB.Create(&model.Task{
 		SubmissionKey:          &submissionKey,
 		SubmissionBillingState: &pending,
+		SubmissionStage:        &completed,
 		TaskID:                 submissionKey,
 		Status:                 model.TaskStatusNotStart,
 	}).Error)
 
 	const goroutines = 8
-	billings := make([]*recordingTaskBillingSettler, goroutines)
+	billing := &recordingTaskBillingSettler{preConsumed: 300_000}
+	info := newPersistedTaskBillingTestInfo(submissionKey, billing)
+	info.TaskRelayInfo.SubmissionIntentPersisted = true
 	errs := make(chan error, goroutines)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for i := range goroutines {
-		billings[i] = &recordingTaskBillingSettler{preConsumed: 300_000}
-		info := newPersistedTaskBillingTestInfo(submissionKey, billings[i])
+	for range goroutines {
 		c, _ := gin.CreateTestContext(nil)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 		wg.Add(1)
@@ -204,16 +208,68 @@ func TestFinalizePersistedTaskSubmissionBillingConcurrentDuplicatesSettleOnce(t 
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	settlementCount := 0
-	for _, billing := range billings {
-		settlementCount += len(billing.settled)
-	}
-	assert.Equal(t, 1, settlementCount)
+	assert.Len(t, billing.settled, 1)
 
 	var task model.Task
 	require.NoError(t, model.DB.Where("submission_key = ?", submissionKey).First(&task).Error)
 	require.NotNil(t, task.SubmissionBillingState)
 	assert.Equal(t, model.TaskSubmissionBillingFinalized, *task.SubmissionBillingState)
+}
+
+func TestFinalizePersistedTaskSubmissionBillingConcurrentProcessesHaveOneDurableClaimant(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	gin.SetMode(gin.TestMode)
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeClickHouse)
+	t.Cleanup(func() {
+		common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	})
+
+	submissionKey := "task_durable_billing_cross_process"
+	pending := model.TaskSubmissionBillingPending
+	completed := model.TaskSubmissionStageCompleted
+	require.NoError(t, model.DB.Create(&model.Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		SubmissionStage:        &completed,
+		TaskID:                 submissionKey,
+		Status:                 model.TaskStatusNotStart,
+	}).Error)
+
+	firstBilling := &recordingTaskBillingSettler{preConsumed: 300_000}
+	secondBilling := &recordingTaskBillingSettler{preConsumed: 300_000}
+	infos := []*relaycommon.RelayInfo{
+		newPersistedTaskBillingTestInfo(submissionKey, firstBilling),
+		newPersistedTaskBillingTestInfo(submissionKey, secondBilling),
+	}
+	for _, info := range infos {
+		info.TaskRelayInfo.SubmissionIntentPersisted = true
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, len(infos))
+	var wg sync.WaitGroup
+	for _, info := range infos {
+		info := info
+		c, _ := gin.CreateTestContext(nil)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- FinalizePersistedTaskSubmissionBilling(c, info, nil, 300_000)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, 1, len(firstBilling.settled)+len(secondBilling.settled))
+	assert.Equal(t, int64(1), countLogs(t), "ClickHouse count-then-insert must have only one durable writer")
 }
 
 func newPersistedTaskBillingTestInfo(submissionKey string, billing *recordingTaskBillingSettler) *relaycommon.RelayInfo {
@@ -233,7 +289,7 @@ func newPersistedTaskBillingTestInfo(submissionKey string, billing *recordingTas
 	}
 }
 
-func TestFinalizePersistedTaskSubmissionBillingSettlementErrorRemainsDiscoverable(t *testing.T) {
+func TestFinalizePersistedTaskSubmissionBillingSettlementErrorRemainsClaimed(t *testing.T) {
 	truncate(t)
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)
@@ -241,9 +297,11 @@ func TestFinalizePersistedTaskSubmissionBillingSettlementErrorRemainsDiscoverabl
 
 	submissionKey := "task_durable_billing_error"
 	pending := model.TaskSubmissionBillingPending
+	completed := model.TaskSubmissionStageCompleted
 	require.NoError(t, model.DB.Create(&model.Task{
 		SubmissionKey:          &submissionKey,
 		SubmissionBillingState: &pending,
+		SubmissionStage:        &completed,
 		TaskID:                 submissionKey,
 		Status:                 model.TaskStatusUnknown,
 	}).Error)
@@ -251,13 +309,173 @@ func TestFinalizePersistedTaskSubmissionBillingSettlementErrorRemainsDiscoverabl
 	info := newPersistedTaskBillingTestInfo(submissionKey, billing)
 	taskErr := (&dto.TaskError{}).WithSubmissionState(dto.TaskSubmissionAmbiguous)
 
-	require.Error(t, FinalizePersistedTaskSubmissionBilling(c, info, taskErr, 0))
+	info.TaskRelayInfo.SubmissionIntentPersisted = true
+	require.Error(t, FinalizePersistedTaskSubmissionBilling(c, info, taskErr, 300_000))
 	unfinished, err := model.GetUnfinishedTaskSubmissionBillings(10)
 	require.NoError(t, err)
 	require.Len(t, unfinished, 1)
 	require.NotNil(t, unfinished[0].SubmissionBillingState)
 	assert.Equal(t, model.TaskSubmissionBillingFinalizing, *unfinished[0].SubmissionBillingState)
+	assert.Equal(t, []int{300_000}, billing.settled)
 	assert.Zero(t, countLogs(t))
+}
+
+func TestFinalizePersistedTaskSubmissionBillingLogErrorRemainsClaimed(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+	submissionKey := "task_durable_billing_log_error"
+	pending := model.TaskSubmissionBillingPending
+	completed := model.TaskSubmissionStageCompleted
+	require.NoError(t, model.DB.Create(&model.Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		SubmissionStage:        &completed,
+		TaskID:                 submissionKey,
+		Status:                 model.TaskStatusUnknown,
+	}).Error)
+	billing := &recordingTaskBillingSettler{preConsumed: 300_000}
+	info := newPersistedTaskBillingTestInfo(submissionKey, billing)
+	info.TaskRelayInfo.SubmissionIntentPersisted = true
+
+	originalLogDB := model.LOG_DB
+	brokenLogDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	model.LOG_DB = brokenLogDB
+	t.Cleanup(func() { model.LOG_DB = originalLogDB })
+
+	require.Error(t, FinalizePersistedTaskSubmissionBilling(c, info, nil, 300_000))
+	var task model.Task
+	require.NoError(t, model.DB.Where("submission_key = ?", submissionKey).First(&task).Error)
+	require.NotNil(t, task.SubmissionBillingState)
+	assert.Equal(t, model.TaskSubmissionBillingFinalizing, *task.SubmissionBillingState)
+}
+
+func TestFinalizePersistedTaskSubmissionBillingUsageIsTransactionalAndIdempotent(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+	submissionKey := "task_durable_usage_once"
+	pending := model.TaskSubmissionBillingPending
+	completed := model.TaskSubmissionStageCompleted
+	require.NoError(t, model.DB.Create(&model.Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		SubmissionStage:        &completed,
+		TaskID:                 submissionKey,
+		Status:                 model.TaskStatusNotStart,
+	}).Error)
+	billing := &recordingTaskBillingSettler{preConsumed: 300_000}
+	info := newPersistedTaskBillingTestInfo(submissionKey, billing)
+	info.TaskRelayInfo.SubmissionIntentPersisted = true
+
+	originalBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() { common.BatchUpdateEnabled = originalBatchUpdateEnabled })
+	require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, info, nil, 300_000))
+
+	var user model.User
+	require.NoError(t, model.DB.First(&user, 101).Error)
+	assert.Equal(t, 300_000, user.UsedQuota)
+	assert.Equal(t, 1, user.RequestCount)
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, 201).Error)
+	assert.Equal(t, int64(300_000), channel.UsedQuota)
+	assert.Equal(t, int64(1), countLogs(t))
+
+	restarted := newPersistedTaskBillingTestInfo(submissionKey, &recordingTaskBillingSettler{preConsumed: 300_000})
+	restarted.TaskRelayInfo.SubmissionIntentPersisted = true
+	require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, restarted, nil, 300_000))
+	assert.Empty(t, restarted.Billing.(*recordingTaskBillingSettler).settled)
+	require.NoError(t, model.DB.First(&user, 101).Error)
+	assert.Equal(t, 300_000, user.UsedQuota)
+	assert.Equal(t, 1, user.RequestCount)
+	require.NoError(t, model.DB.First(&channel, 201).Error)
+	assert.Equal(t, int64(300_000), channel.UsedQuota)
+	assert.Equal(t, int64(1), countLogs(t))
+}
+
+func TestFinalizePersistedTaskSubmissionBillingLeavesPartialUsageForOperatorWithoutReexecution(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+	submissionKey := "task_durable_partial_usage"
+	pending := model.TaskSubmissionBillingPending
+	completed := model.TaskSubmissionStageCompleted
+	require.NoError(t, model.DB.Create(&model.Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		SubmissionStage:        &completed,
+		TaskID:                 submissionKey,
+		Status:                 model.TaskStatusNotStart,
+	}).Error)
+
+	firstBilling := &recordingTaskBillingSettler{preConsumed: 300_000}
+	first := newPersistedTaskBillingTestInfo(submissionKey, firstBilling)
+	first.TaskRelayInfo.SubmissionIntentPersisted = true
+	require.Error(t, FinalizePersistedTaskSubmissionBilling(c, first, nil, 300_000))
+	assert.Equal(t, int64(1), countLogs(t))
+	var user model.User
+	require.NoError(t, model.DB.First(&user, 101).Error)
+	assert.Zero(t, user.UsedQuota)
+	assert.Zero(t, user.RequestCount)
+
+	seedChannel(t, 201)
+	restartedBilling := &recordingTaskBillingSettler{preConsumed: 300_000}
+	restarted := newPersistedTaskBillingTestInfo(submissionKey, restartedBilling)
+	restarted.TaskRelayInfo.SubmissionIntentPersisted = true
+	require.NoError(t, FinalizePersistedTaskSubmissionBilling(c, restarted, nil, 300_000))
+	assert.Equal(t, int64(1), countLogs(t))
+	assert.Empty(t, restartedBilling.settled)
+	require.NoError(t, model.DB.First(&user, 101).Error)
+	assert.Zero(t, user.UsedQuota)
+	assert.Zero(t, user.RequestCount)
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, 201).Error)
+	assert.Zero(t, channel.UsedQuota)
+
+	var task model.Task
+	require.NoError(t, model.DB.Where("submission_key = ?", submissionKey).First(&task).Error)
+	require.NotNil(t, task.SubmissionBillingState)
+	assert.Equal(t, model.TaskSubmissionBillingFinalizing, *task.SubmissionBillingState)
+}
+
+func TestFinalizePersistedTaskSubmissionBillingRejectsQuotaAdjustment(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+	submissionKey := "task_durable_billing_adjustment"
+	pending := model.TaskSubmissionBillingPending
+	require.NoError(t, model.DB.Create(&model.Task{
+		SubmissionKey:          &submissionKey,
+		SubmissionBillingState: &pending,
+		TaskID:                 submissionKey,
+		Status:                 model.TaskStatusNotStart,
+	}).Error)
+	billing := &recordingTaskBillingSettler{preConsumed: 300_000}
+	info := newPersistedTaskBillingTestInfo(submissionKey, billing)
+
+	info.TaskRelayInfo.SubmissionIntentPersisted = true
+	err := FinalizePersistedTaskSubmissionBilling(c, info, nil, 300_001)
+	require.ErrorContains(t, err, "does not match")
+	assert.Empty(t, billing.settled)
+	assert.Zero(t, countLogs(t))
+
+	var task model.Task
+	require.NoError(t, model.DB.Where("submission_key = ?", submissionKey).First(&task).Error)
+	require.NotNil(t, task.SubmissionBillingState)
+	assert.Equal(t, model.TaskSubmissionBillingPending, *task.SubmissionBillingState)
 }
 
 func TestFinalizeRefundableTaskSubmissionRefundsWithoutSettlement(t *testing.T) {
@@ -351,6 +569,67 @@ func TestUnknownTaskIsExcludedFromPollingAndTimeoutRefundLifecycle(t *testing.T)
 
 	require.NoError(t, model.DB.Delete(active).Error)
 	assert.False(t, model.HasUnfinishedSyncTasks())
+}
+
+func TestPendingSubmissionBillingIsExcludedFromAutomatedTaskLifecycle(t *testing.T) {
+	truncate(t)
+	now := time.Now().Unix()
+	pendingState := model.TaskSubmissionBillingPending
+	pending := makeTask(1, 1, 300_000, 0, BillingSourceWallet, 0)
+	pending.TaskID = "task_pending_submission_billing"
+	pending.Status = model.TaskStatusNotStart
+	pending.Progress = "0%"
+	pending.SubmitTime = now - 3600
+	pending.UpdatedAt = now - 3600
+	pending.SubmissionKey = &pending.TaskID
+	pending.SubmissionBillingState = &pendingState
+	require.NoError(t, model.DB.Create(pending).Error)
+
+	assert.Empty(t, model.GetTimedOutUnfinishedTasks(now, 10))
+	assert.Empty(t, model.GetAllUnFinishSyncTasks(10))
+	assert.False(t, model.HasUnfinishedSyncTasks())
+
+	require.NoError(t, model.DB.Model(pending).Update("status", model.TaskStatusFailure).Error)
+	assert.Empty(t, model.GetUnrefundedFailedTasks(now, 10))
+}
+
+func TestFinalizedSubmissionFailureNeverEntersAutomaticRefund(t *testing.T) {
+	truncate(t)
+	now := time.Now().Unix()
+	finalizedState := model.TaskSubmissionBillingFinalized
+	completedStage := model.TaskSubmissionStageCompleted
+	task := makeTask(1, 1, 300_000, 0, BillingSourceWallet, 0)
+	task.TaskID = "task_upstream_charged_failure"
+	task.Status = model.TaskStatusFailure
+	task.Progress = "100%"
+	task.SubmitTime = now
+	task.UpdatedAt = now - 60
+	task.SubmissionKey = &task.TaskID
+	task.SubmissionBillingState = &finalizedState
+	task.SubmissionStage = &completedStage
+	require.NoError(t, model.DB.Create(task).Error)
+
+	assert.Empty(t, model.GetUnrefundedFailedTasks(now, 10))
+}
+
+func TestUpstreamChargedSubmissionRejectsDirectRefundAndQuotaReduction(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 500_000)
+	seedChannel(t, 201)
+	task := makeTask(101, 201, 300_000, 0, BillingSourceWallet, 0)
+	task.TaskID = "task_direct_refund_guard"
+	task.SubmissionKey = &task.TaskID
+	require.NoError(t, model.DB.Create(task).Error)
+
+	ctx := context.Background()
+	assert.False(t, RefundTaskQuota(ctx, task, "should not refund"))
+	assert.Equal(t, 300_000, task.Quota)
+	RecalculateTaskQuota(ctx, task, 100_000, "should not reduce")
+	assert.Equal(t, 300_000, task.Quota)
+
+	var user model.User
+	require.NoError(t, model.DB.First(&user, 101).Error)
+	assert.Equal(t, 500_000, user.Quota)
 }
 
 func TestMain(m *testing.M) {
