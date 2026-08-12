@@ -267,6 +267,9 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	if err := migrateTaskSubmissionKeyColumns(DB, true, true); err != nil {
+		return err
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -317,6 +320,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := ensureTaskSubmissionKeyIndexes(DB, true, true); err != nil {
+		return err
+	}
 	if err := ReconcileAffiliateCounts(); err != nil {
 		return err
 	}
@@ -339,6 +345,9 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := migrateTaskSubmissionKeyColumns(DB, true, true); err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 
@@ -412,6 +421,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := ensureTaskSubmissionKeyIndexes(DB, true, true); err != nil {
+		return err
+	}
 	if err := ReconcileAffiliateCounts(); err != nil {
 		return err
 	}
@@ -438,7 +450,75 @@ func migrateLOGDB() error {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		return migrateClickHouseLogDB()
 	}
-	return LOG_DB.AutoMigrate(&Log{})
+	if err := migrateTaskSubmissionKeyColumns(LOG_DB, true, false); err != nil {
+		return err
+	}
+	if err := LOG_DB.AutoMigrate(&Log{}); err != nil {
+		return err
+	}
+	return ensureTaskSubmissionKeyIndexes(LOG_DB, true, false)
+}
+
+type logSubmissionKeyIndex struct {
+	SubmissionKey *string `gorm:"column:submission_key;type:varchar(191);uniqueIndex:idx_logs_submission_key"`
+}
+
+type logSubmissionKeyColumn struct {
+	SubmissionKey *string `gorm:"column:submission_key;type:varchar(191)"`
+}
+
+func (logSubmissionKeyColumn) TableName() string {
+	return "logs"
+}
+
+func (logSubmissionKeyIndex) TableName() string {
+	return "logs"
+}
+
+type taskSubmissionKeyIndex struct {
+	SubmissionKey *string `gorm:"column:submission_key;type:varchar(191);uniqueIndex:idx_tasks_submission_key"`
+}
+
+type taskSubmissionKeyColumn struct {
+	SubmissionKey *string `gorm:"column:submission_key;type:varchar(191)"`
+}
+
+func (taskSubmissionKeyColumn) TableName() string {
+	return "tasks"
+}
+
+func migrateTaskSubmissionKeyColumns(db *gorm.DB, includeLog, includeTask bool) error {
+	migrator := db.Migrator()
+	if includeLog && migrator.HasTable(&Log{}) && !migrator.HasColumn(&Log{}, "SubmissionKey") {
+		if err := migrator.AddColumn(&logSubmissionKeyColumn{}, "SubmissionKey"); err != nil {
+			return err
+		}
+	}
+	if includeTask && migrator.HasTable(&Task{}) && !migrator.HasColumn(&Task{}, "SubmissionKey") {
+		if err := migrator.AddColumn(&taskSubmissionKeyColumn{}, "SubmissionKey"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (taskSubmissionKeyIndex) TableName() string {
+	return "tasks"
+}
+
+func ensureTaskSubmissionKeyIndexes(db *gorm.DB, includeLog, includeTask bool) error {
+	migrator := db.Migrator()
+	if includeLog && !migrator.HasIndex(&logSubmissionKeyIndex{}, "idx_logs_submission_key") {
+		if err := migrator.CreateIndex(&logSubmissionKeyIndex{}, "idx_logs_submission_key"); err != nil {
+			return err
+		}
+	}
+	if includeTask && !migrator.HasIndex(&taskSubmissionKeyIndex{}, "idx_tasks_submission_key") {
+		if err := migrator.CreateIndex(&taskSubmissionKeyIndex{}, "idx_tasks_submission_key"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func migrateClickHouseLogDB() error {
