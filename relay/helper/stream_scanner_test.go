@@ -138,6 +138,27 @@ type terminalCancellationBody struct {
 	err  error
 }
 
+type eagerTerminalErrorBody struct {
+	data        []byte
+	err         error
+	errReturned chan struct{}
+	errOnce     sync.Once
+}
+
+func (b *eagerTerminalErrorBody) Read(p []byte) (int, error) {
+	if len(b.data) > 0 {
+		n := copy(p, b.data)
+		b.data = b.data[n:]
+		return n, nil
+	}
+	b.errOnce.Do(func() { close(b.errReturned) })
+	return 0, b.err
+}
+
+func (b *eagerTerminalErrorBody) Close() error {
+	return nil
+}
+
 func (b *terminalCancellationBody) Read(p []byte) (int, error) {
 	if len(b.data) > 0 {
 		n := copy(p, b.data)
@@ -378,6 +399,34 @@ func TestStreamScannerHandlerExactTerminalCancellationIsDone(t *testing.T) {
 	snapshot := info.GetStreamRecoverySnapshot()
 	assert.Equal(t, relaycommon.StreamUsageStateExact, snapshot.UsageState)
 	assert.Equal(t, relaycommon.StreamDrainResultCompleted, snapshot.DrainResult)
+}
+
+func TestStreamScannerHandlerLateExactTerminalOverridesQueuedScannerError(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	c, _, info := setupStreamTest(t, nil)
+	info.DisablePing = true
+	info.ChannelMeta.ChannelId = 33
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(c.Request.Context())
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	errReturned := make(chan struct{})
+	body := &eagerTerminalErrorBody{
+		data:        []byte("data: terminal\n"),
+		err:         errors.New("http2: response body closed"),
+		errReturned: errReturned,
+	}
+	StreamScannerHandler(c, &http.Response{Body: body}, info, func(data string, _ *StreamResult) {
+		if data == "terminal" {
+			<-errReturned
+			info.MarkStreamTerminalUsage()
+		}
+	})
+
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+	assert.NoError(t, info.StreamStatus.EndError)
 }
 
 func TestStreamScannerHandlerPreTerminalReadErrorRemainsScannerError(t *testing.T) {

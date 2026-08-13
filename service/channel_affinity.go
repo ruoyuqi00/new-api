@@ -767,6 +767,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			}
 			cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
 			keyHint := buildChannelAffinityKeyHint(affinityValue)
+			keyFingerprint := affinityFingerprint(affinityValue)
 			if isScopedChannelAffinitySource(usedSourceType) {
 				var ok bool
 				cacheKeySuffix, ok = buildScopedChannelAffinityCacheKeySuffix(rule, usedSourceType, common.GetContextKeyInt(c, constant.ContextKeyTokenId), modelName, usingGroup, affinityValue)
@@ -774,6 +775,20 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 					continue
 				}
 				keyHint = ""
+			}
+			promptCacheKey := deriveChannelAffinityPromptCacheKey(
+				rule,
+				src,
+				usedSourceType,
+				common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+				modelName,
+				usingGroup,
+				affinityValue,
+			)
+			if promptCacheKey != "" {
+				keyHint = ""
+				keyFingerprint = affinityFingerprint(promptCacheKey)
+				cacheKeySuffix = buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, promptCacheKey)
 			}
 			cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
 			meta := channelAffinityMeta{
@@ -786,19 +801,11 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 				KeySourceKey:   strings.TrimSpace(src.Key),
 				KeySourcePath:  strings.TrimSpace(src.Path),
 				KeyHint:        keyHint,
-				KeyFingerprint: affinityFingerprint(affinityValue),
+				KeyFingerprint: keyFingerprint,
 				UsingGroup:     usingGroup,
 				ModelName:      modelName,
 				RequestPath:    path,
-				PromptCacheKey: deriveChannelAffinityPromptCacheKey(
-					rule,
-					src,
-					usedSourceType,
-					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-					modelName,
-					usingGroup,
-					affinityValue,
-				),
+				PromptCacheKey: promptCacheKey,
 			}
 			if !candidateFound {
 				candidateFound = true

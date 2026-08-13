@@ -438,6 +438,17 @@ func ErrOptionWithPublicError(public OpenAIError) NewAPIErrorOptions {
 	}
 }
 
+func ErrOptionWithPublicErrorFrom(source *NewAPIError, code ErrorCode) NewAPIErrorOptions {
+	return func(e *NewAPIError) {
+		if e == nil || source == nil || source.publicError == nil {
+			return
+		}
+		publicCopy := *source.publicError
+		publicCopy.Code = code
+		e.publicError = &publicCopy
+	}
+}
+
 func (e *NewAPIError) SetPublicUpstreamError() {
 	if e == nil {
 		return

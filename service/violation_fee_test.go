@@ -73,6 +73,28 @@ func TestViolationFeeReason(t *testing.T) {
 	}
 }
 
+func TestNormalizeViolationFeeErrorKeepsUpstreamDetailsPrivate(t *testing.T) {
+	privateMessage := CSAMViolationMarker + " POST https://private-upstream.example/v1 Authorization Bearer sk-private raw-body"
+	upstreamError := types.NewOpenAIError(
+		errors.New(privateMessage),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusBadRequest,
+	)
+	upstreamError.SetPublicUpstreamError()
+
+	normalized := NormalizeViolationFeeError(upstreamError)
+
+	require.Equal(t, types.ErrorCodeViolationFeeGrokCSAM, normalized.GetErrorCode())
+	require.Contains(t, normalized.Error(), CSAMViolationMarker)
+	public := normalized.ToPublicOpenAIError("req-violation")
+	assert.Equal(t, types.ErrorCodeViolationFeeGrokCSAM, public.Code)
+	assert.Equal(t, string(types.ErrorTypeUpstreamError), public.Type)
+	assert.Contains(t, public.Message, "req-violation")
+	assert.NotContains(t, public.Message, "private-upstream")
+	assert.NotContains(t, public.Message, "sk-private")
+	assert.NotContains(t, public.Message, "raw-body")
+}
+
 func TestCalcViolationFeeQuota(t *testing.T) {
 	require.Greater(t, common.QuotaPerUnit, 0.0)
 

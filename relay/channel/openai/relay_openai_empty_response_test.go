@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -70,6 +72,64 @@ func TestOAIStreamChunkHasSignalAcceptsContentFinishReasonToolAndUsage(t *testin
 	require.True(t, oaiStreamChunkHasSignal(&dto.ChatCompletionsStreamResponse{
 		Usage: &dto.Usage{PromptTokens: 1},
 	}))
+}
+
+func TestOaiStreamHandlerDoesNotForwardUpstreamErrorEnvelope(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	ctx.Set(common.RequestIdKey, "req-public-stream")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"id\":\"chatcmpl_1\",\"model\":\"upstream-model\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+				"data: {\"error\":{\"message\":\"POST https://private-upstream.example/v1 via 10.20.30.40 Authorization Bearer sk-private raw-body\",\"type\":\"server_error\",\"code\":\"upstream_failure\"}}\n\n",
+		)),
+	}
+	info := mappedClientResponseInfo()
+	info.IsStream = true
+	info.DisablePing = true
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+
+	_, relayErr := OaiStreamHandler(ctx, info, resp)
+
+	require.NotNil(t, relayErr)
+	require.Contains(t, relayErr.Error(), "private-upstream.example")
+	publicError := relayErr.ToPublicOpenAIError("req-public-stream")
+	require.Equal(t, string(types.ErrorTypeUpstreamError), publicError.Type)
+	require.Contains(t, publicError.Message, "req-public-stream")
+	publicOutput := recorder.Body.String() + publicError.Message
+	require.Contains(t, recorder.Body.String(), "hello")
+	for _, secret := range []string{"private-upstream.example", "10.20.30.40", "Authorization", "sk-private", "raw-body"} {
+		require.NotContains(t, publicOutput, secret)
+	}
+}
+
+func TestOaiStreamHandlerRejectsErrorEnvelopeWithoutMessage(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"error\":{\"code\":\"upstream_failure\",\"details\":\"private-body\"}}\n\n",
+		)),
+	}
+	info := mappedClientResponseInfo()
+	info.IsStream = true
+	info.DisablePing = true
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+
+	_, relayErr := OaiStreamHandler(ctx, info, resp)
+
+	require.NotNil(t, relayErr)
+	require.Equal(t, types.ErrorCodeBadResponse, relayErr.GetErrorCode())
+	require.Empty(t, recorder.Body.String())
+	require.NotContains(t, relayErr.ToPublicOpenAIError("req-code-only").Message, "private-body")
 }
 
 func TestOAIImageResponseHasSignal(t *testing.T) {

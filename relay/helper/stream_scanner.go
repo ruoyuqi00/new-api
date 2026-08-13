@@ -476,6 +476,12 @@ waitForStream:
 	}
 
 	cleanup()
+	if c.Request.Context().Err() == nil {
+		snapshot := info.GetStreamRecoverySnapshot()
+		if snapshot.Enabled && snapshot.UsageState == relaycommon.StreamUsageStateExact && snapshot.DrainResult == relaycommon.StreamDrainResultCompleted {
+			info.StreamStatus.ConfirmTerminalCompletion()
+		}
+	}
 	if drainLimit.Load() {
 		snapshot := info.GetStreamRecoverySnapshot()
 		if snapshot.UsageState != relaycommon.StreamUsageStateExact || snapshot.DrainResult != relaycommon.StreamDrainResultCompleted {

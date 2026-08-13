@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -139,6 +140,27 @@ func oaiTextResponseHasSignal(resp dto.OpenAITextResponse) bool {
 	return false
 }
 
+func parseOaiStreamError(data string) *types.NewAPIError {
+	var envelope dto.GeneralErrorResponse
+	if err := common.UnmarshalJsonStr(data, &envelope); err != nil {
+		return nil
+	}
+	rawError := strings.TrimSpace(string(envelope.Error))
+	if rawError == "" || rawError == "null" || rawError == "{}" {
+		return nil
+	}
+	message := envelope.ToMessage()
+	if message == "" {
+		message = "upstream stream returned an error"
+	}
+	apiError := types.NewOpenAIError(errors.New(message), types.ErrorCodeBadResponse, http.StatusBadGateway)
+	if openAIError := envelope.TryToOpenAIError(); openAIError != nil {
+		apiError = types.WithOpenAIError(*openAIError, http.StatusBadGateway)
+	}
+	apiError.SetPublicUpstreamError()
+	return apiError
+}
+
 func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
@@ -157,6 +179,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var hasStreamSignal bool
+	var streamError *types.NewAPIError
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 
 	// 检查是否为音频模型
@@ -168,6 +191,11 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
 			}
+		}
+		if upstreamError := parseOaiStreamError(data); upstreamError != nil {
+			streamError = upstreamError
+			sr.Stop(errors.New("upstream stream returned an error"))
+			return
 		}
 		if len(data) > 0 {
 			// 对音频模型，保存倒数第二个stream data
@@ -199,6 +227,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 		}
 	})
+
+	if streamError != nil {
+		if !containStreamUsage {
+			usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+			usage.CompletionTokens += toolCount * 7
+		}
+		applyUsagePostProcessing(info, usage, nil)
+		return usage, streamError
+	}
 
 	if !hasStreamSignal && !containStreamUsage {
 		return nil, types.NewOpenAIError(fmt.Errorf("empty OpenAI-compatible stream response"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)

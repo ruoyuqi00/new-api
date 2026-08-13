@@ -312,7 +312,16 @@ func TestChannelAffinityPromptCacheKeyIsStableAndScoped(t *testing.T) {
 		return ctx
 	}
 
-	first, ok := GetChannelAffinityPromptCacheKey(newContext(8301, "gptpro"))
+	firstContext := newContext(8301, "gptpro")
+	meta, hasMeta := getChannelAffinityMeta(firstContext)
+	require.True(t, hasMeta)
+	assert.Empty(t, meta.KeyHint)
+	assert.NotContains(t, meta.CacheKey, "raw-session-123")
+	adminInfo := map[string]interface{}{}
+	AppendChannelAffinityAdminInfo(firstContext, adminInfo)
+	assert.NotContains(t, fmt.Sprint(adminInfo), "raw-session-123")
+
+	first, ok := GetChannelAffinityPromptCacheKey(firstContext)
 	require.True(t, ok)
 	second, ok := GetChannelAffinityPromptCacheKey(newContext(8301, "gptpro"))
 	require.True(t, ok)

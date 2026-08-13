@@ -29,9 +29,9 @@ type StreamErrorEntry struct {
 }
 
 type StreamStatus struct {
-	EndReason  StreamEndReason
-	EndError   error
-	endOnce    sync.Once
+	EndReason StreamEndReason
+	EndError  error
+	endOnce   sync.Once
 
 	mu         sync.Mutex
 	Errors     []StreamErrorEntry
@@ -50,6 +50,17 @@ func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
 		s.EndReason = reason
 		s.EndError = err
 	})
+}
+
+// ConfirmTerminalCompletion is called after stream workers stop. A scanner
+// error queued behind an exact terminal usage event is transport cleanup, not
+// a failed stream.
+func (s *StreamStatus) ConfirmTerminalCompletion() {
+	if s == nil || s.EndReason != StreamEndReasonScannerErr {
+		return
+	}
+	s.EndReason = StreamEndReasonDone
+	s.EndError = nil
 }
 
 func (s *StreamStatus) RecordError(msg string) {
