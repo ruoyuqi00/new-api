@@ -3,6 +3,7 @@ package helper
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,6 +54,221 @@ func buildSSEBody(n int) string {
 	}
 	b.WriteString("data: [DONE]\n")
 	return b.String()
+}
+
+func configureStreamScannerRecoveryTest(t *testing.T) {
+	t.Helper()
+
+	originalEnabled := constant.StreamUsageDrainEnabled
+	originalMaxConcurrency := constant.StreamUsageDrainMaxConcurrency
+	originalMaxPerChannel := constant.StreamUsageDrainMaxPerChannel
+	originalTimeoutSeconds := constant.StreamUsageDrainTimeoutSeconds
+	originalMaxBytesMB := constant.StreamUsageDrainMaxBytesMB
+	t.Cleanup(func() {
+		constant.StreamUsageDrainEnabled = originalEnabled
+		constant.StreamUsageDrainMaxConcurrency = originalMaxConcurrency
+		constant.StreamUsageDrainMaxPerChannel = originalMaxPerChannel
+		constant.StreamUsageDrainTimeoutSeconds = originalTimeoutSeconds
+		constant.StreamUsageDrainMaxBytesMB = originalMaxBytesMB
+	})
+
+	constant.StreamUsageDrainEnabled = true
+	constant.StreamUsageDrainMaxConcurrency = 2
+	constant.StreamUsageDrainMaxPerChannel = 1
+	constant.StreamUsageDrainTimeoutSeconds = 30
+	constant.StreamUsageDrainMaxBytesMB = 1
+}
+
+func waitStreamScannerSignal(t *testing.T, signal <-chan struct{}, message string) {
+	t.Helper()
+	guard := time.NewTimer(2 * time.Second)
+	defer guard.Stop()
+	select {
+	case <-signal:
+	case <-guard.C:
+		require.FailNow(t, message)
+	}
+}
+
+func waitStreamScannerDetached(t *testing.T, info *relaycommon.RelayInfo) {
+	t.Helper()
+	guard := time.NewTimer(2 * time.Second)
+	defer guard.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if info.GetStreamRecoverySnapshot().Detached {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-guard.C:
+			require.FailNow(t, "stream did not detach")
+		}
+	}
+}
+
+type synchronizedStreamWriter struct {
+	gin.ResponseWriter
+	firstModelStarted chan struct{}
+	releaseFirstModel chan struct{}
+	secondModelWrote  chan struct{}
+	firstModelOnce    sync.Once
+	secondModelOnce   sync.Once
+}
+
+type pendingOnTryLock struct {
+	pending  *atomic.Int64
+	unlocked atomic.Bool
+}
+
+type stagedCountingBody struct {
+	first         []byte
+	rest          []byte
+	release       chan struct{}
+	closed        chan struct{}
+	closeOnce     sync.Once
+	info          *relaycommon.RelayInfo
+	detachedBytes atomic.Int64
+}
+
+func (b *stagedCountingBody) Read(p []byte) (int, error) {
+	if len(b.first) > 0 {
+		n := copy(p, b.first)
+		b.first = b.first[n:]
+		return n, nil
+	}
+	select {
+	case <-b.release:
+	case <-b.closed:
+		return 0, io.ErrClosedPipe
+	}
+	if len(b.rest) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, b.rest)
+	b.rest = b.rest[n:]
+	if b.info.IsStreamDetached() {
+		b.detachedBytes.Add(int64(n))
+	}
+	return n, nil
+}
+
+func (b *stagedCountingBody) Close() error {
+	b.closeOnce.Do(func() { close(b.closed) })
+	return nil
+}
+
+func (l *pendingOnTryLock) TryLock() bool {
+	l.pending.Add(1)
+	return true
+}
+
+func (l *pendingOnTryLock) Unlock() {
+	l.unlocked.Store(true)
+}
+
+func (w *synchronizedStreamWriter) Write(data []byte) (int, error) {
+	if strings.HasPrefix(string(data), "data: first") {
+		w.firstModelOnce.Do(func() { close(w.firstModelStarted) })
+		<-w.releaseFirstModel
+	}
+	n, err := w.ResponseWriter.Write(data)
+	if strings.HasPrefix(string(data), "data: second") {
+		w.secondModelOnce.Do(func() { close(w.secondModelWrote) })
+	}
+	return n, err
+}
+
+func TestTryWriteStreamPing(t *testing.T) {
+	t.Run("pending before acquisition", func(t *testing.T) {
+		var writeMutex sync.Mutex
+		var pending atomic.Int64
+		pending.Store(1)
+		called := false
+
+		wrote, err := tryWriteStreamPing(&writeMutex, &pending, func() error {
+			called = true
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.False(t, wrote)
+		assert.False(t, called)
+	})
+
+	t.Run("pending during acquisition", func(t *testing.T) {
+		var pending atomic.Int64
+		writeMutex := &pendingOnTryLock{pending: &pending}
+		called := false
+
+		wrote, err := tryWriteStreamPing(writeMutex, &pending, func() error {
+			called = true
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.False(t, wrote)
+		assert.False(t, called)
+		assert.True(t, writeMutex.unlocked.Load())
+	})
+
+	t.Run("idle", func(t *testing.T) {
+		var writeMutex sync.Mutex
+		var pending atomic.Int64
+		called := false
+
+		wrote, err := tryWriteStreamPing(&writeMutex, &pending, func() error {
+			called = true
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.True(t, wrote)
+		assert.True(t, called)
+	})
+}
+
+func TestStreamScannerHandlerPingErrorArbitration(t *testing.T) {
+	t.Run("client cancellation", func(t *testing.T) {
+		requestContext, cancelRequest := context.WithCancel(context.Background())
+		cancelRequest()
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil).WithContext(requestContext)
+		info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+
+		assert.False(t, handleStreamPingError(c, info, fmt.Errorf("ping: %w", context.Canceled)))
+		assert.Equal(t, relaycommon.StreamEndReasonNone, info.StreamStatus.EndReason)
+	})
+
+	t.Run("cancellation error with live request", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+		info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+
+		assert.True(t, handleStreamPingError(c, info, fmt.Errorf("ping: %w", context.Canceled)))
+		assert.Equal(t, relaycommon.StreamEndReasonPingFail, info.StreamStatus.EndReason)
+	})
+
+	t.Run("deadline error with live request", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+		info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+
+		assert.True(t, handleStreamPingError(c, info, fmt.Errorf("ping: %w", context.DeadlineExceeded)))
+		assert.Equal(t, relaycommon.StreamEndReasonPingFail, info.StreamStatus.EndReason)
+	})
+
+	t.Run("live client write failure", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+		info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+		pingErr := errors.New("broken response writer")
+
+		assert.True(t, handleStreamPingError(c, info, pingErr))
+		assert.Equal(t, relaycommon.StreamEndReasonPingFail, info.StreamStatus.EndReason)
+		assert.ErrorIs(t, info.StreamStatus.EndError, pingErr)
+	})
 }
 
 // ---------- Basic correctness ----------
@@ -239,7 +455,682 @@ func TestStreamScannerHandler_DataWithExtraSpaces(t *testing.T) {
 	assert.Equal(t, "{\"trimmed\":true}", got)
 }
 
-func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T) {
+func TestStreamScannerHandlerAcceptedDisconnectContinuesDetached(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 21},
+	}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	firstHandled := make(chan struct{})
+	secondHandled := make(chan struct{})
+	callbackErrors := make(chan error, 2)
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		defer close(callbackErrors)
+		StreamScannerHandler(c, &http.Response{Body: reader}, info, func(data string, sr *StreamResult) {
+			if !info.IsStreamDetached() {
+				callbackErrors <- StringData(c, data)
+			}
+			switch data {
+			case "first":
+				close(firstHandled)
+			case "second":
+				info.MarkStreamTerminalUsage()
+				close(secondHandled)
+			}
+		})
+	}()
+
+	_, err := fmt.Fprint(writer, "data: first\n")
+	require.NoError(t, err)
+	waitStreamScannerSignal(t, firstHandled, "first model event was not forwarded")
+	cancelRequest()
+	_, err = fmt.Fprint(writer, "data: second\ndata: [DONE]\n")
+	require.NoError(t, err)
+	waitStreamScannerSignal(t, secondHandled, "detached model event was not parsed")
+	waitStreamScannerSignal(t, handlerDone, "accepted detached stream did not finish")
+	for callbackErr := range callbackErrors {
+		require.NoError(t, callbackErr)
+	}
+
+	assert.Contains(t, recorder.Body.String(), "first")
+	assert.NotContains(t, recorder.Body.String(), "second")
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.True(t, snapshot.Detached)
+	assert.Equal(t, relaycommon.StreamUsageStateExact, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultCompleted, snapshot.DrainResult)
+
+	probe := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 21}}
+	probe.EnableStreamRecovery()
+	probe.StartStreamRecoveryAttempt(context.Background())
+	probe.MarkStreamAccepted()
+	require.True(t, probe.TryDetachStream(), "completed drain did not release its slot")
+	probe.FinishStreamRecovery()
+}
+
+func TestStreamScannerHandlerCountsRawDetachedLines(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 26}}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	firstHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		StreamScannerHandler(c, &http.Response{Body: reader}, info, func(data string, sr *StreamResult) {
+			if data == "first" {
+				close(firstHandled)
+			}
+		})
+	}()
+	require.NoError(t, func() error { _, err := fmt.Fprint(writer, "data: first\n"); return err }())
+	waitStreamScannerSignal(t, firstHandled, "raw-line test did not handle its first event")
+	cancelRequest()
+	waitStreamScannerDetached(t, info)
+
+	detachedBody := ": lf\n: crlf\r\ndata: [DONE]\r\n"
+	require.NoError(t, func() error { _, err := fmt.Fprint(writer, detachedBody); return err }())
+	waitStreamScannerSignal(t, handlerDone, "raw-line drain did not finish")
+
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, int64(len(detachedBody)), snapshot.DrainedBytes)
+	assert.Equal(t, relaycommon.StreamUsageStateUnknown, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultUpstreamError, snapshot.DrainResult)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestStreamScannerHandlerDetachedUpstreamEndWithoutUsageIsUnknown(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		closeWrite func(*io.PipeWriter) error
+	}{
+		{name: "EOF", closeWrite: func(writer *io.PipeWriter) error { return writer.Close() }},
+		{name: "scanner error", closeWrite: func(writer *io.PipeWriter) error { return writer.CloseWithError(errors.New("upstream read failed")) }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			configureStreamScannerRecoveryTest(t)
+
+			requestContext, cancelRequest := context.WithCancel(context.Background())
+			t.Cleanup(cancelRequest)
+			reader, writer := io.Pipe()
+			t.Cleanup(func() {
+				_ = reader.Close()
+				_ = writer.Close()
+			})
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+			info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 27}}
+			info.EnableStreamRecovery()
+			info.StartStreamRecoveryAttempt(requestContext)
+			info.MarkStreamAccepted()
+			t.Cleanup(info.FinishStreamRecovery)
+
+			firstHandled := make(chan struct{})
+			handlerDone := make(chan struct{})
+			go func() {
+				defer close(handlerDone)
+				StreamScannerHandler(c, &http.Response{Body: reader}, info, func(data string, sr *StreamResult) {
+					if data == "first" {
+						close(firstHandled)
+					}
+				})
+			}()
+			require.NoError(t, func() error { _, err := fmt.Fprint(writer, "data: first\n"); return err }())
+			waitStreamScannerSignal(t, firstHandled, "upstream-end test did not handle its first event")
+			cancelRequest()
+			waitStreamScannerDetached(t, info)
+			require.NoError(t, testCase.closeWrite(writer))
+			waitStreamScannerSignal(t, handlerDone, "detached upstream end did not finish")
+
+			snapshot := info.GetStreamRecoverySnapshot()
+			assert.Equal(t, relaycommon.StreamUsageStateUnknown, snapshot.UsageState)
+			assert.Equal(t, relaycommon.StreamDrainResultUpstreamError, snapshot.DrainResult)
+			assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+		})
+	}
+}
+
+func TestStreamScannerHandlerCapacityFallbackClosesUpstream(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+	constant.StreamUsageDrainMaxConcurrency = 1
+
+	holder := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 22}}
+	holder.EnableStreamRecovery()
+	holder.StartStreamRecoveryAttempt(context.Background())
+	holder.MarkStreamAccepted()
+	require.True(t, holder.TryDetachStream())
+	t.Cleanup(holder.FinishStreamRecovery)
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 22}}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+
+	firstHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		StreamScannerHandler(c, &http.Response{Body: reader}, info, func(data string, sr *StreamResult) {
+			close(firstHandled)
+		})
+	}()
+	require.NoError(t, func() error { _, err := fmt.Fprint(writer, "data: first\n"); return err }())
+	waitStreamScannerSignal(t, firstHandled, "capacity test did not handle its first event")
+	cancelRequest()
+	waitStreamScannerSignal(t, handlerDone, "capacity fallback queued instead of returning")
+	_, err := fmt.Fprint(writer, "data: second\n")
+	require.ErrorIs(t, err, io.ErrClosedPipe)
+
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, relaycommon.StreamUsageStateUnknown, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultCapacity, snapshot.DrainResult)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+
+	holder.FinishStreamRecovery()
+	probe := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 22}}
+	probe.EnableStreamRecovery()
+	probe.StartStreamRecoveryAttempt(context.Background())
+	probe.MarkStreamAccepted()
+	require.True(t, probe.TryDetachStream(), "capacity accounting did not return to baseline")
+	probe.FinishStreamRecovery()
+}
+
+func TestStreamScannerHandlerDrainSizeLimitClosesUpstream(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 23}}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+	body := &stagedCountingBody{
+		first:   []byte("data: first\n"),
+		rest:    []byte(strings.Repeat("x", (1<<20)+1) + "\n"),
+		release: make(chan struct{}),
+		closed:  make(chan struct{}),
+		info:    info,
+	}
+	t.Cleanup(func() { _ = body.Close() })
+
+	firstHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		StreamScannerHandler(c, &http.Response{Body: body}, info, func(data string, sr *StreamResult) {
+			if data == "first" {
+				close(firstHandled)
+			}
+		})
+	}()
+	waitStreamScannerSignal(t, firstHandled, "size test did not handle its first event")
+	cancelRequest()
+	waitStreamScannerDetached(t, info)
+	close(body.release)
+	waitStreamScannerSignal(t, handlerDone, "size-limited drain did not return")
+	select {
+	case <-body.closed:
+	default:
+		require.FailNow(t, "size-limited drain did not close the upstream body")
+	}
+
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, relaycommon.StreamUsageStateUnknown, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultSizeLimit, snapshot.DrainResult)
+	assert.Equal(t, int64(1<<20), snapshot.DrainedBytes)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestStreamDrainReaderCapsUpstreamReadsAfterDetach(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 29}}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	body := &stagedCountingBody{
+		first:   []byte("data: first\n"),
+		rest:    []byte(strings.Repeat("x", 2<<20) + "\r\n"),
+		release: make(chan struct{}),
+		closed:  make(chan struct{}),
+		info:    info,
+	}
+	t.Cleanup(func() { _ = body.Close() })
+	firstHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		StreamScannerHandler(c, &http.Response{Body: body}, info, func(data string, sr *StreamResult) {
+			if data == "first" {
+				close(firstHandled)
+			}
+		})
+	}()
+	waitStreamScannerSignal(t, firstHandled, "drain-reader test did not handle its first event")
+	cancelRequest()
+	waitStreamScannerDetached(t, info)
+	close(body.release)
+	waitStreamScannerSignal(t, handlerDone, "drain reader did not stop at its byte budget")
+
+	const oneMegabyte = int64(1 << 20)
+	assert.Equal(t, oneMegabyte, body.detachedBytes.Load())
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, oneMegabyte, snapshot.DrainedBytes)
+	assert.Equal(t, relaycommon.StreamUsageStateUnknown, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultSizeLimit, snapshot.DrainResult)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestStreamDrainReaderExactBudgetTerminalUsageStaysExact(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 30}}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	const oneMegabyte = 1 << 20
+	const prefix = "data: "
+	const suffix = "terminal\n"
+	exactTerminalLine := prefix + strings.Repeat("x", oneMegabyte-len(prefix)-len(suffix)) + suffix
+	require.Len(t, exactTerminalLine, oneMegabyte)
+	body := &stagedCountingBody{
+		first:   []byte("data: first\n"),
+		rest:    []byte(exactTerminalLine),
+		release: make(chan struct{}),
+		closed:  make(chan struct{}),
+		info:    info,
+	}
+	t.Cleanup(func() { _ = body.Close() })
+	firstHandled := make(chan struct{})
+	terminalHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		StreamScannerHandler(c, &http.Response{Body: body}, info, func(data string, sr *StreamResult) {
+			if data == "first" {
+				close(firstHandled)
+			}
+			if strings.HasSuffix(data, "terminal") {
+				info.MarkStreamTerminalUsage()
+				close(terminalHandled)
+			}
+		})
+	}()
+	waitStreamScannerSignal(t, firstHandled, "exact-budget test did not handle its first event")
+	cancelRequest()
+	waitStreamScannerDetached(t, info)
+	close(body.release)
+	waitStreamScannerSignal(t, terminalHandled, "exact-budget terminal usage was not handled")
+	waitStreamScannerSignal(t, handlerDone, "exact-budget terminal stream did not finish")
+
+	assert.Equal(t, int64(oneMegabyte), body.detachedBytes.Load())
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, int64(oneMegabyte), snapshot.DrainedBytes)
+	assert.Equal(t, relaycommon.StreamUsageStateExact, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultCompleted, snapshot.DrainResult)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestStreamDrainReaderExactBudgetWithoutTerminalIsSizeLimit(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 31}}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	const oneMegabyte = 1 << 20
+	body := &stagedCountingBody{
+		first:   []byte("data: first\n"),
+		rest:    []byte(strings.Repeat("x", oneMegabyte)),
+		release: make(chan struct{}),
+		closed:  make(chan struct{}),
+		info:    info,
+	}
+	t.Cleanup(func() { _ = body.Close() })
+	firstHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		StreamScannerHandler(c, &http.Response{Body: body}, info, func(data string, sr *StreamResult) {
+			if data == "first" {
+				close(firstHandled)
+			}
+		})
+	}()
+	waitStreamScannerSignal(t, firstHandled, "exact nonterminal test did not handle its first event")
+	cancelRequest()
+	waitStreamScannerDetached(t, info)
+	close(body.release)
+	waitStreamScannerSignal(t, handlerDone, "exact nonterminal stream did not finish")
+
+	assert.Equal(t, int64(oneMegabyte), body.detachedBytes.Load())
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, int64(oneMegabyte), snapshot.DrainedBytes)
+	assert.Equal(t, relaycommon.StreamUsageStateUnknown, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultSizeLimit, snapshot.DrainResult)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestStreamScannerHandlerDrainTimeoutClosesUpstream(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+	constant.StreamUsageDrainTimeoutSeconds = 1
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 24}}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	firstHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		StreamScannerHandler(c, &http.Response{Body: reader}, info, func(data string, sr *StreamResult) {
+			close(firstHandled)
+		})
+	}()
+	require.NoError(t, func() error { _, err := fmt.Fprint(writer, "data: first\n"); return err }())
+	waitStreamScannerSignal(t, firstHandled, "timeout test did not handle its first event")
+	cancelRequest()
+	waitStreamScannerSignal(t, handlerDone, "recovery timeout did not wake the scanner handler")
+	_, err := fmt.Fprint(writer, "data: second\n")
+	require.ErrorIs(t, err, io.ErrClosedPipe)
+
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, relaycommon.StreamUsageStateUnknown, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultTimeout, snapshot.DrainResult)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+
+	probe := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 24}}
+	probe.EnableStreamRecovery()
+	probe.StartStreamRecoveryAttempt(context.Background())
+	probe.MarkStreamAccepted()
+	require.True(t, probe.TryDetachStream(), "timed-out drain did not release its slot")
+	probe.FinishStreamRecovery()
+}
+
+func TestStreamScannerHandlerModelWriteHasPriorityOverPing(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	synchronizedWriter := &synchronizedStreamWriter{
+		ResponseWriter:    c.Writer,
+		firstModelStarted: make(chan struct{}),
+		releaseFirstModel: make(chan struct{}),
+		secondModelWrote:  make(chan struct{}),
+	}
+	c.Writer = synchronizedWriter
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 25}}
+	firstCallbackBlocked := make(chan struct{})
+	releaseFirstCallback := make(chan struct{})
+	secondQueued := make(chan struct{})
+	pingTicks := make(chan time.Time, 1)
+	pingTickDone := make(chan struct{})
+	cleanupPending := make(chan int64, 1)
+	var pingCalled atomic.Bool
+	callbackErrors := make(chan error, 2)
+
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		defer close(callbackErrors)
+		streamScannerHandler(c, &http.Response{Body: reader}, info, func(data string, sr *StreamResult) {
+			callbackErrors <- StringData(c, data)
+			if data == "first" {
+				close(firstCallbackBlocked)
+				<-releaseFirstCallback
+			}
+		}, streamScannerOptions{
+			pingTicks: pingTicks,
+			writePing: func(c *gin.Context) error {
+				pingCalled.Store(true)
+				return PingData(c)
+			},
+			pingTickDone: func() {
+				close(pingTickDone)
+			},
+			dataQueued: func(data string) {
+				if data == "second" {
+					close(secondQueued)
+				}
+			},
+			cleanupDone: func(pending int64) {
+				cleanupPending <- pending
+			},
+		})
+	}()
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		_, _ = fmt.Fprint(writer, "data: first\ndata: second\n")
+	}()
+	waitStreamScannerSignal(t, synchronizedWriter.firstModelStarted, "first model write did not reach the synchronized writer")
+	close(synchronizedWriter.releaseFirstModel)
+	waitStreamScannerSignal(t, firstCallbackBlocked, "first model callback did not hold write contention")
+	waitStreamScannerSignal(t, secondQueued, "second model event was not queued")
+	pingTicks <- time.Time{}
+	waitStreamScannerSignal(t, pingTickDone, "priority ping tick was not handled")
+	close(releaseFirstCallback)
+	waitStreamScannerSignal(t, writeDone, "priority stream input was not scanned")
+	waitStreamScannerSignal(t, synchronizedWriter.secondModelWrote, "second model write did not complete")
+	_, err := fmt.Fprint(writer, "data: [DONE]\n")
+	require.NoError(t, err)
+	waitStreamScannerSignal(t, handlerDone, "priority stream did not finish")
+	for callbackErr := range callbackErrors {
+		require.NoError(t, callbackErr)
+	}
+	assert.False(t, pingCalled.Load())
+	assert.Equal(t, int64(0), <-cleanupPending)
+
+	body := recorder.Body.String()
+	firstIndex := strings.Index(body, "data: first")
+	secondIndex := strings.Index(body, "data: second")
+	require.NotEqual(t, -1, firstIndex)
+	require.NotEqual(t, -1, secondIndex)
+	assert.NotContains(t, body[firstIndex:secondIndex], ": PING", "heartbeat overtook a ready model event")
+}
+
+func TestStreamScannerHandlerCleanupClearsBufferedPendingData(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		panic bool
+	}{
+		{name: "handler stop"},
+		{name: "handler panic", panic: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := strings.NewReader("data: first\ndata: second\ndata: third\ndata: [DONE]\n")
+			c, resp, info := setupStreamTest(t, body)
+			thirdQueued := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			cleanupPending := make(chan int64, 1)
+			handlerDone := make(chan struct{})
+			var callbackCount atomic.Int64
+
+			go func() {
+				defer close(handlerDone)
+				streamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+					callbackCount.Add(1)
+					<-releaseFirst
+					if testCase.panic {
+						panic("handler failed")
+					}
+					sr.Stop(nil)
+				}, streamScannerOptions{
+					dataQueued: func(data string) {
+						if data == "third" {
+							close(thirdQueued)
+						}
+					},
+					cleanupDone: func(pending int64) {
+						cleanupPending <- pending
+					},
+				})
+			}()
+			waitStreamScannerSignal(t, thirdQueued, "buffered data was not queued")
+			close(releaseFirst)
+			waitStreamScannerSignal(t, handlerDone, "buffered-data cleanup did not finish")
+
+			assert.Equal(t, int64(1), callbackCount.Load())
+			assert.Equal(t, int64(0), <-cleanupPending)
+		})
+	}
+}
+
+func TestStreamScannerHandlerClientCancellationWinsPingError(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	t.Cleanup(cancelRequest)
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestContext)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 28}}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	pingTicks := make(chan time.Time, 1)
+	pingEntered := make(chan struct{})
+	releasePing := make(chan struct{})
+	firstHandled := make(chan struct{})
+	firstProcessingDone := make(chan struct{})
+	var firstProcessingOnce sync.Once
+	terminalHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		streamScannerHandler(c, &http.Response{Body: reader}, info, func(data string, sr *StreamResult) {
+			switch data {
+			case "first":
+				close(firstHandled)
+			case "terminal":
+				info.MarkStreamTerminalUsage()
+				close(terminalHandled)
+			}
+		}, streamScannerOptions{
+			pingTicks: pingTicks,
+			dataHandled: func() {
+				firstProcessingOnce.Do(func() { close(firstProcessingDone) })
+			},
+			writePing: func(c *gin.Context) error {
+				close(pingEntered)
+				<-releasePing
+				return fmt.Errorf("ping canceled: %w", c.Request.Context().Err())
+			},
+		})
+	}()
+
+	require.NoError(t, func() error { _, err := fmt.Fprint(writer, "data: first\n"); return err }())
+	waitStreamScannerSignal(t, firstHandled, "ping-race test did not handle its first event")
+	waitStreamScannerSignal(t, firstProcessingDone, "ping-race test did not finish its first event")
+	pingTicks <- time.Time{}
+	waitStreamScannerSignal(t, pingEntered, "ping callback was not entered")
+	cancelRequest()
+	close(releasePing)
+	waitStreamScannerDetached(t, info)
+	require.NoError(t, func() error { _, err := fmt.Fprint(writer, "data: terminal\ndata: [DONE]\n"); return err }())
+	waitStreamScannerSignal(t, terminalHandled, "detached terminal event was not handled")
+	waitStreamScannerSignal(t, handlerDone, "ping-race stream did not finish")
+
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.True(t, snapshot.Detached)
+	assert.Equal(t, relaycommon.StreamUsageStateExact, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultCompleted, snapshot.DrainResult)
+}
+
+func TestStreamScannerHandlerIneligibleDisconnectStillAborts(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

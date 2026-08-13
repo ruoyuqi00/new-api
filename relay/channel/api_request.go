@@ -550,7 +550,6 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
 		info.MarkStreamAccepted()
 	}
-	info.Timings.MarkUpstreamHeaders(time.Now())
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)

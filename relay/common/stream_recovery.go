@@ -233,6 +233,19 @@ func (info *RelayInfo) IsStreamDetached() bool {
 	return info.StreamRecovery.detached
 }
 
+func (info *RelayInfo) StreamRecoveryDone() <-chan struct{} {
+	if info == nil || info.StreamRecovery == nil {
+		return nil
+	}
+	recovery := info.StreamRecovery
+	recovery.mu.Lock()
+	defer recovery.mu.Unlock()
+	if recovery.upstreamContext == nil {
+		return nil
+	}
+	return recovery.upstreamContext.Done()
+}
+
 func (info *RelayInfo) AddDrainedStreamBytes(n int64) bool {
 	if info == nil || info.StreamRecovery == nil {
 		return false
@@ -307,6 +320,30 @@ func (info *RelayInfo) MarkStreamUsageUnknown(result StreamDrainResult) {
 		return
 	}
 	recovery.usageState = StreamUsageStateUnknown
+	recovery.drainResult = result
+	hook := recovery.testTransitionHook
+	cleanup := recovery.finishLocked()
+	recovery.mu.Unlock()
+	if hook != nil {
+		hook(streamRecoveryTransitionUnknown)
+	}
+	cleanup.run()
+}
+
+func (info *RelayInfo) MarkStreamDrainIncomplete(result StreamDrainResult) {
+	if info == nil || info.StreamRecovery == nil {
+		return
+	}
+
+	recovery := info.StreamRecovery
+	recovery.mu.Lock()
+	if recovery.finished {
+		recovery.mu.Unlock()
+		return
+	}
+	if recovery.usageState != StreamUsageStatePartial {
+		recovery.usageState = StreamUsageStateUnknown
+	}
 	recovery.drainResult = result
 	hook := recovery.testTransitionHook
 	cleanup := recovery.finishLocked()

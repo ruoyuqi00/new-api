@@ -119,6 +119,45 @@ func TestStreamRecoveryPostAcceptCancellationKeepsUpstreamAlive(t *testing.T) {
 	assert.ErrorIs(t, upstream.Err(), context.Canceled)
 }
 
+func TestStreamRecoveryDoneTracksCurrentUpstreamAttempt(t *testing.T) {
+	configureStreamRecoveryTest(t)
+
+	info := newStreamRecoveryTestInfo(11)
+	assert.Nil(t, info.StreamRecoveryDone())
+	info.EnableStreamRecovery()
+	assert.Nil(t, info.StreamRecoveryDone())
+
+	upstream := info.StartStreamRecoveryAttempt(context.Background())
+	require.NotNil(t, info.StreamRecoveryDone())
+	info.FinishStreamRecovery()
+	waitForStreamRecoverySignal(t, info.StreamRecoveryDone(), "stream recovery completion did not cancel the upstream attempt")
+	assert.ErrorIs(t, upstream.Err(), context.Canceled)
+}
+
+func TestStreamRecoveryDoneChangesOnPreAcceptRetry(t *testing.T) {
+	configureStreamRecoveryTest(t)
+
+	info := newStreamRecoveryTestInfo(11)
+	info.EnableStreamRecovery()
+	firstParent, cancelFirstParent := context.WithCancel(context.Background())
+	info.StartStreamRecoveryAttempt(firstParent)
+	firstDone := info.StreamRecoveryDone()
+	cancelFirstParent()
+	waitForStreamRecoverySignal(t, firstDone, "first upstream attempt was not canceled")
+
+	second := info.StartStreamRecoveryAttempt(context.Background())
+	secondDone := info.StreamRecoveryDone()
+	require.NotNil(t, secondDone)
+	assert.NotEqual(t, firstDone, secondDone)
+	assert.Equal(t, second.Done(), secondDone)
+	select {
+	case <-secondDone:
+		require.FailNow(t, "pre-accept retry exposed the completed prior attempt")
+	default:
+	}
+	info.FinishStreamRecovery()
+}
+
 func TestStreamRecoveryAdmissionIsNonBlockingAndPerChannel(t *testing.T) {
 	configureStreamRecoveryTest(t)
 
@@ -419,6 +458,23 @@ func TestStreamRecoveryAuthoritativeUsageMarksPartialWithoutFinishing(t *testing
 	assert.Equal(t, StreamUsageStatePartial, snapshot.UsageState)
 	assert.Equal(t, StreamDrainResultNone, snapshot.DrainResult)
 	assert.NoError(t, upstream.Err())
+}
+
+func TestStreamRecoveryIncompleteDrainPreservesAuthoritativePartialUsage(t *testing.T) {
+	configureStreamRecoveryTest(t)
+
+	info := newStreamRecoveryTestInfo(11)
+	info.EnableStreamRecovery()
+	upstream := info.StartStreamRecoveryAttempt(context.Background())
+	info.MarkStreamAccepted()
+	info.MarkStreamAuthoritativeUsage()
+
+	info.MarkStreamDrainIncomplete(StreamDrainResultUpstreamError)
+
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, StreamUsageStatePartial, snapshot.UsageState)
+	assert.Equal(t, StreamDrainResultUpstreamError, snapshot.DrainResult)
+	assert.ErrorIs(t, upstream.Err(), context.Canceled)
 }
 
 func TestStreamRecoveryTerminalUsageFromPendingMarksExactAndFinishes(t *testing.T) {

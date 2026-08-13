@@ -801,9 +801,14 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
 		maybeMarkClaudeRefusal(c, *claudeResponse.Delta.StopReason)
 	}
+	formatted := FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
+	if claudeResponse.Type == "message_start" && claudeResponse.Message != nil && claudeResponse.Message.Usage != nil {
+		info.MarkStreamAuthoritativeUsage()
+	}
+	if claudeResponse.Type == "message_delta" && claudeResponse.Usage != nil {
+		info.MarkStreamTerminalUsage()
+	}
 	if info.RelayFormat == types.RelayFormatClaude {
-		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
-
 		if claudeResponse.Type == "message_start" {
 			// message_start, 获取usage
 			if claudeResponse.Message != nil {
@@ -816,27 +821,56 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 				data = patchClaudeMessageDeltaUsageData(data, buildMessageDeltaPatchUsage(&claudeResponse, claudeInfo))
 			}
 		}
-		helper.ClaudeChunkData(c, claudeResponse, data)
+		if !info.IsStreamDetached() {
+			err = helper.ClaudeChunkData(c, claudeResponse, data)
+			if err != nil {
+				snapshot := info.GetStreamRecoverySnapshot()
+				if snapshot.Accepted && c.Request.Context().Err() != nil {
+					return nil
+				}
+				return types.NewError(err, types.ErrorCodeBadResponseBody)
+			}
+		}
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
 		response := StreamResponseClaude2OpenAI(&claudeResponse)
 
-		if !FormatClaudeResponseInfo(&claudeResponse, response, claudeInfo) {
+		if !formatted {
 			return nil
 		}
+		response.Id = claudeInfo.ResponseId
+		response.Created = claudeInfo.Created
+		response.Model = claudeInfo.Model
 
-		err = helper.ObjectData(c, response)
-		if err != nil {
-			logger.LogError(c, "send_stream_response_failed: "+err.Error())
+		if !info.IsStreamDetached() {
+			err = helper.ObjectData(c, response)
+			if err != nil {
+				snapshot := info.GetStreamRecoverySnapshot()
+				if snapshot.Accepted && c.Request.Context().Err() != nil {
+					return nil
+				}
+				logger.LogError(c, "send_stream_response_failed: "+err.Error())
+				return types.NewError(err, types.ErrorCodeBadResponseBody)
+			}
 		}
 	}
 	return nil
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+	snapshot := info.GetStreamRecoverySnapshot()
+	if snapshot.Accepted && snapshot.UsageState != relaycommon.StreamUsageStateExact && snapshot.UsageState != relaycommon.StreamUsageStateUnknown {
+		info.MarkStreamDrainIncomplete(relaycommon.StreamDrainResultUpstreamError)
+		snapshot = info.GetStreamRecoverySnapshot()
+	}
+	acceptedInexactUsage := snapshot.Accepted &&
+		(snapshot.UsageState == relaycommon.StreamUsageStatePartial || snapshot.UsageState == relaycommon.StreamUsageStateUnknown)
+	if acceptedInexactUsage {
+		info.PreservePreConsumedQuota = true
+	}
 	if claudeInfo.Usage.PromptTokens == 0 {
 		//上游出错
 	}
-	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
+	if !acceptedInexactUsage && (claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done) {
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
 		}
@@ -853,6 +887,9 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	}
 	if claudeInfo.Usage != nil {
 		claudeInfo.Usage.UsageSemantic = "anthropic"
+	}
+	if info.IsStreamDetached() {
+		return
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
