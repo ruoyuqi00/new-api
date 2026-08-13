@@ -286,6 +286,122 @@ func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 	require.Equal(t, buildChannelAffinityKeyHint(affinityValue), meta.KeyHint)
 }
 
+func TestChannelAffinityPromptCacheKeyIsStableAndScoped(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	originalRules := setting.Rules
+	setting.Rules = []operation_setting.ChannelAffinityRule{
+		{
+			Name:                 "prompt-cache-session",
+			ModelRegex:           []string{"^gpt-.*$"},
+			PathRegex:            []string{"^/v1/responses$"},
+			KeySources:           []operation_setting.ChannelAffinityKeySource{{Type: "request_header", Key: "Session_id"}},
+			InjectPromptCacheKey: true,
+			IncludeUsingGroup:    true,
+			IncludeModelName:     true,
+			IncludeRuleName:      true,
+		},
+	}
+	t.Cleanup(func() { setting.Rules = originalRules })
+
+	newContext := func(tokenID int, usingGroup string) *gin.Context {
+		ctx := newChannelAffinityRequestContext(t, `{"model":"gpt-5","input":"hello"}`, tokenID)
+		ctx.Request.Header.Set("Session_id", "raw-session-123")
+		common.SetContextKey(ctx, constant.ContextKeyUsingGroup, usingGroup)
+		_, found := GetPreferredChannelByAffinity(ctx, "gpt-5", usingGroup)
+		require.False(t, found)
+		return ctx
+	}
+
+	first, ok := GetChannelAffinityPromptCacheKey(newContext(8301, "gptpro"))
+	require.True(t, ok)
+	second, ok := GetChannelAffinityPromptCacheKey(newContext(8301, "gptpro"))
+	require.True(t, ok)
+	otherToken, ok := GetChannelAffinityPromptCacheKey(newContext(8302, "gptpro"))
+	require.True(t, ok)
+	otherGroup, ok := GetChannelAffinityPromptCacheKey(newContext(8301, "other"))
+	require.True(t, ok)
+
+	assert.Equal(t, first, second)
+	assert.NotEqual(t, first, otherToken)
+	assert.NotEqual(t, first, otherGroup)
+	assert.NotContains(t, first, "raw-session-123")
+	assert.True(t, strings.HasPrefix(first, "yuapi-pck-v1-"))
+}
+
+func TestChannelAffinityPromptCacheKeyRequiresSafeSourceAndOptIn(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		body    string
+		tokenID int
+		enabled bool
+		sources []operation_setting.ChannelAffinityKeySource
+		headers map[string]string
+	}{
+		{
+			name: "disabled rule", path: "/v1/responses", body: `{"model":"gpt-5"}`, tokenID: 8401,
+			sources: []operation_setting.ChannelAffinityKeySource{{Type: "request_header", Key: "Session_id"}},
+			headers: map[string]string{"Session_id": "session-disabled"},
+		},
+		{
+			name: "explicit prompt cache key", path: "/v1/responses", body: `{"model":"gpt-5","prompt_cache_key":"client-key"}`, tokenID: 8402, enabled: true,
+			sources: []operation_setting.ChannelAffinityKeySource{{Type: "gjson", Path: "prompt_cache_key"}, {Type: "request_header", Key: "Session_id"}},
+			headers: map[string]string{"Session_id": "session-explicit"},
+		},
+		{
+			name: "response chain", path: "/v1/responses", body: `{"model":"gpt-5","previous_response_id":"resp-existing"}`, tokenID: 8403, enabled: true,
+			sources: []operation_setting.ChannelAffinityKeySource{{Type: "context_string", Key: operation_setting.ChannelAffinityResponseChainContextKey}},
+		},
+		{
+			name: "unsupported path", path: "/v1/chat/completions", body: `{"model":"gpt-5"}`, tokenID: 8404, enabled: true,
+			sources: []operation_setting.ChannelAffinityKeySource{{Type: "request_header", Key: "Session_id"}},
+			headers: map[string]string{"Session_id": "session-path"},
+		},
+		{
+			name: "missing token", path: "/v1/responses", body: `{"model":"gpt-5"}`, enabled: true,
+			sources: []operation_setting.ChannelAffinityKeySource{{Type: "request_header", Key: "Session_id"}},
+			headers: map[string]string{"Session_id": "session-no-token"},
+		},
+		{
+			name: "missing stable source", path: "/v1/responses", body: `{"model":"gpt-5"}`, tokenID: 8405, enabled: true,
+			sources: []operation_setting.ChannelAffinityKeySource{{Type: "request_header", Key: "Session_id"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setting := operation_setting.GetChannelAffinitySetting()
+			originalRules := setting.Rules
+			setting.Rules = []operation_setting.ChannelAffinityRule{{
+				Name:                 "prompt-cache-negative",
+				ModelRegex:           []string{"^gpt-.*$"},
+				PathRegex:            []string{"^/v1/responses$"},
+				KeySources:           tt.sources,
+				InjectPromptCacheKey: tt.enabled,
+			}}
+			t.Cleanup(func() { setting.Rules = originalRules })
+
+			ctx := newChannelAffinityRequestContext(t, tt.body, tt.tokenID)
+			ctx.Request.URL.Path = tt.path
+			for key, value := range tt.headers {
+				ctx.Request.Header.Set(key, value)
+			}
+			_, _ = GetPreferredChannelByAffinity(ctx, "gpt-5", "gptpro")
+			key, ok := GetChannelAffinityPromptCacheKey(ctx)
+			assert.False(t, ok)
+			assert.Empty(t, key)
+		})
+	}
+}
+
+func TestDefaultCodexAffinityEnablesPromptCacheKeyInjection(t *testing.T) {
+	rules := operation_setting.GetChannelAffinitySetting().Rules
+	require.NotEmpty(t, rules)
+	assert.Equal(t, "codex cli trace", rules[0].Name)
+	assert.True(t, rules[0].InjectPromptCacheKey)
+	assert.False(t, operation_setting.ChannelAffinityRule{}.InjectPromptCacheKey)
+}
+
 func TestClearCurrentChannelAffinityCache(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

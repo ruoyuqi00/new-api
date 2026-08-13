@@ -24,6 +24,7 @@ type ChannelAffinityRule struct {
 	TTLSeconds int    `json:"ttl_seconds"`
 
 	ParamOverrideTemplate map[string]interface{} `json:"param_override_template,omitempty"`
+	InjectPromptCacheKey  bool                   `json:"inject_prompt_cache_key,omitempty"`
 
 	SkipRetryOnFailure bool `json:"skip_retry_on_failure"`
 
@@ -101,6 +102,7 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			ValueRegex:            "",
 			TTLSeconds:            0,
 			ParamOverrideTemplate: buildPassHeaderTemplate(codexCliPassThroughHeaders),
+			InjectPromptCacheKey:  true,
 			SkipRetryOnFailure:    false,
 			IncludeUsingGroup:     true,
 			IncludeRuleName:       true,

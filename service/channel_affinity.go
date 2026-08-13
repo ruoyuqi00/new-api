@@ -59,6 +59,7 @@ type channelAffinityMeta struct {
 	UsingGroup     string
 	ModelName      string
 	RequestPath    string
+	PromptCacheKey string
 }
 
 type channelAffinityRuleContext struct {
@@ -551,6 +552,53 @@ func buildChannelAffinityKeyHint(s string) string {
 	return s[:4] + "..." + s[len(s)-4:]
 }
 
+func deriveChannelAffinityPromptCacheKey(rule operation_setting.ChannelAffinityRule, source operation_setting.ChannelAffinityKeySource, sourceType string, tokenID int, modelName string, usingGroup string, value string) string {
+	if !rule.InjectPromptCacheKey || tokenID <= 0 || strings.TrimSpace(value) == "" {
+		return ""
+	}
+	if sourceType != "conversation" && sourceType != "request_header" {
+		return ""
+	}
+	sourceIdentity := strings.TrimSpace(source.Key) + "\x00" + strings.TrimSpace(source.Path)
+	payload := fmt.Sprintf(
+		"pck-v1\x00%d\x00%d:%s\x00%d:%s\x00%d:%s\x00%d:%s\x00%d:%s",
+		tokenID,
+		len(usingGroup), usingGroup,
+		len(modelName), modelName,
+		len(sourceType), sourceType,
+		len(sourceIdentity), sourceIdentity,
+		len(value), value,
+	)
+	digest := common.GenerateHMAC(payload)
+	if len(digest) > 48 {
+		digest = digest[:48]
+	}
+	return "yuapi-pck-v1-" + digest
+}
+
+func GetChannelAffinityPromptCacheKey(c *gin.Context) (string, bool) {
+	if c == nil || c.Request == nil || c.Request.URL == nil || c.Request.URL.Path != "/v1/responses" {
+		return "", false
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return "", false
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		return "", false
+	}
+	existing := gjson.GetBytes(body, "prompt_cache_key")
+	if existing.Exists() && strings.TrimSpace(existing.String()) != "" {
+		return "", false
+	}
+	meta, ok := getChannelAffinityMeta(c)
+	if !ok || meta.PromptCacheKey == "" {
+		return "", false
+	}
+	return meta.PromptCacheKey, true
+}
+
 func cloneStringAnyMap(src map[string]interface{}) map[string]interface{} {
 	if len(src) == 0 {
 		return map[string]interface{}{}
@@ -742,6 +790,15 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 				UsingGroup:     usingGroup,
 				ModelName:      modelName,
 				RequestPath:    path,
+				PromptCacheKey: deriveChannelAffinityPromptCacheKey(
+					rule,
+					src,
+					usedSourceType,
+					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+					modelName,
+					usingGroup,
+					affinityValue,
+				),
 			}
 			if !candidateFound {
 				candidateFound = true
