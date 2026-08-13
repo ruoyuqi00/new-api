@@ -152,13 +152,14 @@ func TestShouldCommitChannelAffinityRequiresNormalRelayCompletion(t *testing.T) 
 			},
 		},
 		{
-			name: "responses stream completed",
+			name: "responses stream completed with terminal usage",
 			relayInfo: &relaycommon.RelayInfo{
 				IsStream:                      true,
 				RelayFormat:                   types.RelayFormatOpenAIResponses,
 				StreamStatus:                  relayStreamStatusForAffinityTest(relaycommon.StreamEndReasonDone, false),
 				StreamTerminalMarkersRequired: true,
 				StreamTerminalSuccess:         true,
+				StreamTerminalUsageSeen:       true,
 			},
 			wantCommit: true,
 		},

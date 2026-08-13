@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -120,6 +121,29 @@ func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {
 
 	require.NotNil(t, newAPIError)
 	require.Equal(t, message, newAPIError.Error())
+}
+
+func TestRelayErrorHandlerProjectsStructuredUpstreamErrorSafely(t *testing.T) {
+	privateMessage := "POST https://private-upstream.example/v1 IP 10.0.0.8 channel secret-channel Authorization Bearer sk-private raw-body"
+	body := `{"error":{"message":"` + privateMessage + `","type":"server_error","code":"server_error"}}`
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, privateMessage, newAPIError.Error())
+	public := newAPIError.ToPublicOpenAIError("req-upstream")
+	assert.Equal(t, "upstream_error", public.Type)
+	assert.Equal(t, types.ErrorCodeBadResponseStatusCode, public.Code)
+	assert.Contains(t, public.Message, "req-upstream")
+	assert.NotContains(t, public.Message, "private-upstream")
+	assert.NotContains(t, public.Message, "10.0.0.8")
+	assert.NotContains(t, public.Message, "secret-channel")
+	assert.NotContains(t, public.Message, "sk-private")
+	assert.NotContains(t, public.Message, "raw-body")
 }
 
 func TestRelayErrorHandlerLogsStructuredEmptyErrorBody(t *testing.T) {

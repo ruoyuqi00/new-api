@@ -97,6 +97,7 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+	publicError    *OpenAIError
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.
@@ -237,6 +238,27 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 	if result.Message == "" {
 		result.Message = string(e.errorType)
 	}
+	return result
+}
+
+func (e *NewAPIError) ToPublicOpenAIError(requestID string) OpenAIError {
+	result := e.ToOpenAIError()
+	if e != nil && e.publicError != nil {
+		result = *e.publicError
+	}
+	result.Message = common.MessageWithRequestId(result.Message, requestID)
+	return result
+}
+
+func (e *NewAPIError) ToPublicClaudeError(requestID string) ClaudeError {
+	if e != nil && e.publicError != nil {
+		return ClaudeError{
+			Type:    e.publicError.Type,
+			Message: common.MessageWithRequestId(e.publicError.Message, requestID),
+		}
+	}
+	result := e.ToClaudeError()
+	result.Message = common.MessageWithRequestId(result.Message, requestID)
 	return result
 }
 
@@ -404,6 +426,31 @@ func ErrOptionWithHideErrMsg(replaceStr string) NewAPIErrorOptions {
 		}
 		e.Err = errors.New(replaceStr)
 	}
+}
+
+func ErrOptionWithPublicError(public OpenAIError) NewAPIErrorOptions {
+	return func(e *NewAPIError) {
+		if e == nil {
+			return
+		}
+		publicCopy := public
+		e.publicError = &publicCopy
+	}
+}
+
+func (e *NewAPIError) SetPublicUpstreamError() {
+	if e == nil {
+		return
+	}
+	message := "The upstream service rejected the request."
+	if e.StatusCode >= http.StatusInternalServerError {
+		message = "The upstream service is temporarily unavailable."
+	}
+	ErrOptionWithPublicError(OpenAIError{
+		Message: message,
+		Type:    string(ErrorTypeUpstreamError),
+		Code:    ErrorCodeBadResponseStatusCode,
+	})(e)
 }
 
 func IsRecordErrorLog(e *NewAPIError) bool {

@@ -140,3 +140,37 @@ func TestResponsesHelperInjectsScopedPromptCacheKey(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesHelperMarksEmbeddedUpstreamErrorForPublicProjection(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+
+	privateMessage := "POST https://private-upstream.example/v1 IP 10.0.0.8 Authorization Bearer sk-private raw-body"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":{"message":"` + privateMessage + `","type":"server_error","code":"server_error"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-test","input":"hello"}`))
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
+	common.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-test")
+
+	request := &dto.OpenAIResponsesRequest{Model: "gpt-test", Input: []byte(`"hello"`)}
+	info := relaycommon.GenRelayInfoResponses(c, request)
+	newAPIError := ResponsesHelper(c, info)
+	require.NotNil(t, newAPIError)
+	require.Equal(t, privateMessage, newAPIError.Error())
+
+	public := newAPIError.ToPublicOpenAIError("req-embedded")
+	assert.Equal(t, "upstream_error", public.Type)
+	assert.Contains(t, public.Message, "req-embedded")
+	assert.NotContains(t, public.Message, "private-upstream")
+	assert.NotContains(t, public.Message, "10.0.0.8")
+	assert.NotContains(t, public.Message, "sk-private")
+	assert.NotContains(t, public.Message, "raw-body")
+}
