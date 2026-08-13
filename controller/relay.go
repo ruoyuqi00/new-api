@@ -462,6 +462,9 @@ func shouldRetryRelayOutcome(c *gin.Context, relayInfo *relaycommon.RelayInfo, o
 	if relayInfo != nil && relayInfo.HasAmbiguousUpstreamSubmission() {
 		return false
 	}
+	if relayInfo != nil && relayInfo.GetStreamRecoverySnapshot().Accepted {
+		return false
+	}
 	if relayInfo != nil && relayInfo.IsStream && relayInfo.StreamTerminalMarkersRequired {
 		if relayInfo.ReceivedResponseCount > 0 || relayInfo.ChannelAffinityResponseIDObserved {
 			return false
@@ -474,7 +477,7 @@ func shouldRetryRelayOutcome(c *gin.Context, relayInfo *relaycommon.RelayInfo, o
 }
 
 func shouldRefundRelayFailure(relayInfo *relaycommon.RelayInfo) bool {
-	return relayInfo == nil || !relayInfo.HasAmbiguousUpstreamSubmission()
+	return relayInfo == nil || !relayInfo.HasAmbiguousUpstreamSubmission() && !relayInfo.GetStreamRecoverySnapshot().Accepted
 }
 
 func shouldCommitChannelAffinity(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {

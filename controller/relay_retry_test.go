@@ -112,6 +112,22 @@ func TestShouldRetryRelayOutcomeStopsAfterAmbiguousWrittenSubmission(t *testing.
 	require.False(t, shouldRefundRelayFailure(relayInfo))
 }
 
+func TestAcceptedStreamNeverRetriesOrRefunds(t *testing.T) {
+	oldEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = oldEnabled })
+
+	c := newRelayRetryTestContext(t, false)
+	relayInfo := &relaycommon.RelayInfo{IsStream: true}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.StartStreamRecoveryAttempt(c.Request.Context())
+	relayInfo.MarkStreamAccepted()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
+
+	require.False(t, shouldRetryRelayOutcome(c, relayInfo, retryableRelayTestError(http.StatusServiceUnavailable), 1))
+	require.False(t, shouldRefundRelayFailure(relayInfo))
+}
+
 func TestShouldCommitChannelAffinityRequiresNormalRelayCompletion(t *testing.T) {
 	tests := []struct {
 		name       string

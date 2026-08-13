@@ -295,7 +295,6 @@ func TestDoRequestEligibleStreamCancelsBeforeAcceptance(t *testing.T) {
 		IsStream:    true,
 		DisablePing: true,
 		ChannelMeta: &relaycommon.ChannelMeta{},
-		Timings:     relaycommon.NewRelayTimings(),
 	}
 	info.EnableStreamRecovery()
 
@@ -387,7 +386,6 @@ func TestDoRequestEligibleStreamSurvivesClientCancelAfterHeaders(t *testing.T) {
 		IsStream:    true,
 		DisablePing: true,
 		ChannelMeta: &relaycommon.ChannelMeta{},
-		Timings:     relaycommon.NewRelayTimings(),
 	}
 	info.EnableStreamRecovery()
 	t.Cleanup(info.FinishStreamRecovery)
@@ -444,7 +442,6 @@ func TestDoRequestEligibleStreamDoesNotAcceptNon2xx(t *testing.T) {
 		IsStream:    true,
 		DisablePing: true,
 		ChannelMeta: &relaycommon.ChannelMeta{},
-		Timings:     relaycommon.NewRelayTimings(),
 	}
 	info.EnableStreamRecovery()
 	t.Cleanup(info.FinishStreamRecovery)
@@ -476,7 +473,6 @@ func TestDoRequestRetryResetsRecoveryAttempt(t *testing.T) {
 		IsStream:    true,
 		DisablePing: true,
 		ChannelMeta: &relaycommon.ChannelMeta{},
-		Timings:     relaycommon.NewRelayTimings(),
 	}
 	info.EnableStreamRecovery()
 
@@ -534,32 +530,4 @@ func TestDoRequestRetryResetsRecoveryAttempt(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, resp)
 	require.Equal(t, int32(1), requests.Load(), "accepted recovery must not start another upstream attempt")
-}
-
-func TestDoRequestRecordsRelayTimings(t *testing.T) {
-	service.InitHttpClient()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(server.Close)
-
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader("{}"))
-	upstreamRequest, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader("{}"))
-	require.NoError(t, err)
-
-	info := &relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{},
-		Timings:     relaycommon.NewRelayTimings(),
-	}
-	info.Timings.MarkRequestConversionStart(time.Now().Add(-time.Millisecond))
-	resp, err := DoRequest(c, upstreamRequest, info)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	t.Cleanup(func() { _ = resp.Body.Close() })
-
-	timings := info.Timings.SnapshotMilliseconds()
-	require.Greater(t, timings["request_conversion_ms"], 0.0)
-	require.Greater(t, timings["upstream_headers_ms"], 0.0)
 }

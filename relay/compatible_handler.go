@@ -63,6 +63,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 
 	info.ShouldIncludeUsage = includeUsage
+	if constant.StreamUsageDrainEnabled && info.IsStream {
+		info.EnableStreamRecovery()
+	}
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
@@ -78,6 +81,16 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		applySystemPromptIfNeeded(c, info, request)
 		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, request)
 		if newApiErr != nil {
+			if info.GetStreamRecoverySnapshot().Accepted {
+				if usage == nil {
+					usage = &dto.Usage{}
+				}
+				info.MarkStreamDrainIncomplete(relaycommon.StreamDrainResultUpstreamError)
+				if billingErr := service.SettleAcceptedTextBilling(c, info, usage); billingErr != nil {
+					logger.LogError(c, "failed to settle accepted converted stream billing: "+billingErr.Error())
+				}
+				return types.NewError(newApiErr, newApiErr.GetErrorCode(), types.ErrOptionWithSkipRetry())
+			}
 			return newApiErr
 		}
 
@@ -189,6 +202,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	if err != nil {
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
+	defer info.FinishStreamRecovery()
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 
@@ -205,6 +219,18 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	usage, newApiErr := adaptor.DoResponse(c, httpResp, info)
 	if newApiErr != nil {
+		if info.GetStreamRecoverySnapshot().Accepted {
+			textUsage, ok := usage.(*dto.Usage)
+			if !ok || textUsage == nil {
+				textUsage = &dto.Usage{}
+			}
+			info.MarkStreamDrainIncomplete(relaycommon.StreamDrainResultUpstreamError)
+			if billingErr := service.SettleAcceptedTextBilling(c, info, textUsage); billingErr != nil {
+				logger.LogError(c, "failed to settle accepted stream billing: "+billingErr.Error())
+			}
+			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
+			return types.NewError(newApiErr, newApiErr.GetErrorCode(), types.ErrOptionWithSkipRetry())
+		}
 		// reset status code 重置状态码
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return newApiErr

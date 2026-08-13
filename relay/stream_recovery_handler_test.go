@@ -75,7 +75,6 @@ func newResponsesStreamRecoveryFixture(t *testing.T, serverURL string, isStream 
 		DisablePing:     true,
 		RelayMode:       relayconstant.RelayModeResponses,
 		RequestURLPath:  "/v1/responses",
-		Timings:         relaycommon.NewRelayTimings(),
 	}
 	return c, info, cancel
 }
@@ -103,7 +102,6 @@ func newClaudeStreamRecoveryFixture(t *testing.T, serverURL string, isStream boo
 		RelayMode:       relayconstant.RelayModeChatCompletions,
 		RelayFormat:     types.RelayFormatClaude,
 		RequestURLPath:  "/v1/messages",
-		Timings:         relaycommon.NewRelayTimings(),
 	}
 	return c, info, cancel
 }
@@ -352,7 +350,6 @@ func TestChatCompletionsViaResponsesStreamRecoveryConvertedSuccess(t *testing.T)
 		DisablePing:    true,
 		RelayMode:      relayconstant.RelayModeChatCompletions,
 		RequestURLPath: "/v1/messages",
-		Timings:        relaycommon.NewRelayTimings(),
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType:       constant.ChannelTypeOpenAI,
 			ChannelBaseUrl:    server.URL,
@@ -431,7 +428,6 @@ func TestResponsesHelperFinishesNon200RecoveryAfterParsingError(t *testing.T) {
 		DisablePing:     true,
 		RelayMode:       relayconstant.RelayModeResponses,
 		RequestURLPath:  "/v1/responses",
-		Timings:         relaycommon.NewRelayTimings(),
 	}
 
 	newAPIError := ResponsesHelper(c, info)
@@ -481,7 +477,6 @@ func TestClaudeHelperFinishesNon200RecoveryAfterParsingError(t *testing.T) {
 		RelayMode:       relayconstant.RelayModeChatCompletions,
 		RelayFormat:     types.RelayFormatClaude,
 		RequestURLPath:  "/v1/messages",
-		Timings:         relaycommon.NewRelayTimings(),
 	}
 
 	newAPIError := ClaudeHelper(c, info)
@@ -542,7 +537,6 @@ func TestChatCompletionsViaResponsesFinishesNon200AfterParsingError(t *testing.T
 		DisablePing:    true,
 		RelayMode:      relayconstant.RelayModeChatCompletions,
 		RequestURLPath: "/v1/messages",
-		Timings:        relaycommon.NewRelayTimings(),
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType:       constant.ChannelTypeOpenAI,
 			ChannelBaseUrl:    server.URL,

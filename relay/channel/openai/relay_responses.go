@@ -155,6 +155,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					break
 				}
 				info.StreamTerminalUsageSeen = true
+				info.MarkStreamTerminalUsage()
+				terminalUsage.UsageSource = "upstream"
 				if terminalUsage.PromptTokens != 0 {
 					usage.PromptTokens = terminalUsage.PromptTokens
 				}
@@ -165,6 +167,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					usage.TotalTokens = terminalUsage.TotalTokens
 				}
 				usage.PromptTokensDetails = terminalUsage.PromptTokensDetails
+				usage.UsageSource = terminalUsage.UsageSource
 			}
 		}
 		terminalFailure := false
@@ -319,7 +322,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 	}
 
-	if usage.PromptTokens == 0 && usage.CompletionTokens != 0 {
+	if !info.StreamTerminalUsageSeen {
+		usage.UsageSource = "estimated"
+	}
+	if usage.PromptTokens == 0 && !info.StreamTerminalUsageSeen {
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 	}
 

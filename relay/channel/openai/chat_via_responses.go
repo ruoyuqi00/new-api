@@ -201,6 +201,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 
 	sendChatChunk := func(chunk dto.ChatCompletionsStreamResponse) bool {
+		if info.IsStreamDetached() {
+			return true
+		}
 		if len(chunk.Choices) == 0 && chunk.Usage == nil {
 			return true
 		}
@@ -256,6 +259,10 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			sr.Stop(streamErr)
 			return
 		}
+		if (streamResp.Type == "response.completed" || streamResp.Type == "response.done") && service.ValidUsage(state.Usage) {
+			state.Usage.UsageSource = "upstream"
+			info.MarkStreamTerminalUsage()
+		}
 		for _, chunk := range chunks {
 			if !sendChatChunk(chunk) {
 				sr.Stop(streamErr)
@@ -265,7 +272,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	})
 
 	if streamErr != nil {
-		return nil, streamErr
+		usage := state.Usage
+		if usage == nil || usage.TotalTokens == 0 {
+			usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		}
+		return usage, streamErr
 	}
 
 	usage := state.Usage
@@ -282,13 +293,13 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return nil, streamErr
 		}
 	}
-	if info.RelayFormat == types.RelayFormatOpenAI && info.ShouldIncludeUsage && usage != nil {
+	if info.RelayFormat == types.RelayFormatOpenAI && info.ShouldIncludeUsage && usage != nil && !info.IsStreamDetached() {
 		if err := helper.ObjectData(c, helper.GenerateFinalUsageResponse(responseId, state.Created, state.Model, *usage)); err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}
 	}
 
-	if info.RelayFormat == types.RelayFormatOpenAI {
+	if info.RelayFormat == types.RelayFormatOpenAI && !info.IsStreamDetached() {
 		helper.Done(c)
 	}
 	return usage, nil

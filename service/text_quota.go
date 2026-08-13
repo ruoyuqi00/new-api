@@ -359,10 +359,6 @@ func applyPreConsumedQuotaFloor(relayInfo *relaycommon.RelayInfo, calculatedQuot
 		return calculatedQuota, false
 	}
 	frozenQuota := frozenTextReservationQuota(relayInfo)
-	if relayInfo.HasAmbiguousUpstreamSubmission() ||
-		(relayInfo.StreamTerminalMarkersRequired && !relayInfo.StreamTerminalUsageSeen) {
-		return frozenQuota, true
-	}
 	if calculatedQuota >= frozenQuota {
 		return calculatedQuota, false
 	}
@@ -397,13 +393,55 @@ func SettleAmbiguousTextBilling(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return nil
 	}
 	relayInfo.PreservePreConsumedQuota = true
-	quota := frozenTextReservationQuota(relayInfo)
-	relayInfo.PriceData.Quota = quota
-	return postTextConsumeQuota(ctx, relayInfo, nil, []string{"upstream submission status unknown; settled at frozen reservation"})
+	usage := ResponseText2Usage(ctx, "", relayInfo.UpstreamModelName, relayInfo.GetEstimatePromptTokens())
+	return postTextConsumeQuota(ctx, relayInfo, usage, []string{"upstream submission status unknown; usage estimated locally"})
+}
+
+func SettleAcceptedTextBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) error {
+	if relayInfo == nil {
+		return nil
+	}
+	relayInfo.PreservePreConsumedQuota = true
+	return postTextConsumeQuota(ctx, relayInfo, usage, []string{"accepted upstream stream ended before a confirmed terminal result"})
+}
+
+func isAuthoritativeTextUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
+	if usage == nil || usage.UsageSource == "estimated" {
+		return false
+	}
+	if relayInfo == nil {
+		return true
+	}
+	if relayInfo.StreamTerminalMarkersRequired && !relayInfo.StreamTerminalUsageSeen {
+		return false
+	}
+	snapshot := relayInfo.GetStreamRecoverySnapshot()
+	return !snapshot.Enabled || !snapshot.Accepted || snapshot.UsageState == relaycommon.StreamUsageStateExact
+}
+
+func normalizeTextSettlementUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage, authoritative bool) *dto.Usage {
+	if usage == nil {
+		usage = &dto.Usage{}
+	} else {
+		clone := *usage
+		usage = &clone
+	}
+	if authoritative {
+		if usage.UsageSource == "" {
+			usage.UsageSource = "upstream"
+		}
+		return usage
+	}
+	if usage.PromptTokens <= 0 && relayInfo != nil {
+		usage.PromptTokens = relayInfo.GetEstimatePromptTokens()
+	}
+	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	usage.UsageSource = "estimated"
+	return usage
 }
 
 func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
-	if usage == nil {
+	if !isAuthoritativeTextUsage(relayInfo, usage) {
 		return false
 	}
 	if ctx != nil && ctx.Request != nil && ctx.Request.Context().Err() != nil {
@@ -430,8 +468,14 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) error {
 	originUsage := usage
-	if usage == nil {
-		extraContent = append(extraContent, "上游无计费信息")
+	authoritativeUsage := isAuthoritativeTextUsage(relayInfo, originUsage)
+	usage = normalizeTextSettlementUsage(relayInfo, usage, authoritativeUsage)
+	if !authoritativeUsage {
+		recovery := relayInfo.GetStreamRecoverySnapshot()
+		if relayInfo.HasAmbiguousUpstreamSubmission() || recovery.Accepted {
+			relayInfo.PreservePreConsumedQuota = true
+		}
+		extraContent = append(extraContent, "authoritative terminal usage unavailable; tokens estimated locally")
 	}
 	if shouldObserveConfirmedChannelAffinityUsage(ctx, relayInfo, originUsage) {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
@@ -444,8 +488,6 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	var tieredResult *billingexpr.TieredResult
 	tieredBillingApplied := false
-	authoritativeUsage := originUsage != nil &&
-		(!relayInfo.StreamTerminalMarkersRequired || relayInfo.StreamTerminalUsageSeen)
 	if authoritativeUsage {
 		var tieredUsedVars map[string]bool
 		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
@@ -459,8 +501,10 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		}
 	}
 
+	settledFromReservation := false
 	if quota, preserved := applyPreConsumedQuotaFloor(relayInfo, summary.Quota); preserved {
 		summary.Quota = quota
+		settledFromReservation = true
 		logger.LogWarn(ctx, "accepted upstream stream ended incomplete; preserving pre-consumed quota")
 	}
 
@@ -481,13 +525,14 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 
 	ambiguousSubmission := relayInfo.HasAmbiguousUpstreamSubmission()
-	if ambiguousSubmission {
+	retainedSubmission := ambiguousSubmission || relayInfo.GetStreamRecoverySnapshot().Accepted
+	if retainedSubmission {
 		if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
 			return fmt.Errorf("settle billing: %w", err)
 		}
 	}
 
-	if summary.TotalTokens == 0 && !summary.ImageGenerationOnlyBilling && !ambiguousSubmission {
+	if summary.TotalTokens == 0 && !summary.ImageGenerationOnlyBilling && !retainedSubmission {
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
@@ -495,7 +540,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if !ambiguousSubmission {
+	if !retainedSubmission {
 		if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
 			logger.LogError(ctx, "error settling billing: "+err.Error())
 		}
@@ -530,6 +575,17 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	if !authoritativeUsage {
 		other["usage_unconfirmed"] = true
+		other["usage_source"] = "estimated"
+		if settledFromReservation {
+			other["settled_from_reservation"] = true
+		}
+		recovery := relayInfo.GetStreamRecoverySnapshot()
+		if recovery.DrainResult != relaycommon.StreamDrainResultNone {
+			other["stream_recovery_result"] = recovery.DrainResult
+		}
+		relayInfo.SetStreamBillingBasis(relaycommon.StreamBillingBasisEstimatedPreconsume)
+	} else {
+		other["usage_source"] = usage.UsageSource
 	}
 	if summary.ImageTokens != 0 {
 		other["image"] = true
@@ -593,7 +649,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 		if !authoritativeUsage {
 			other["estimated_tier"] = relayInfo.TieredBillingSnapshot.EstimatedTier
-			other["settled_from_reservation"] = true
+			other["settled_from_reservation"] = settledFromReservation
 		}
 	}
 

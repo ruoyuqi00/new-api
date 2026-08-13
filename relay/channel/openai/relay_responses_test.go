@@ -54,6 +54,7 @@ func TestOaiResponsesStreamHandlerParsesResponseDoneUsage(t *testing.T) {
 	require.Equal(t, 25, usage.CompletionTokens)
 	require.Equal(t, 1024, usage.PromptTokensDetails.CachedTokens)
 	require.Equal(t, 128, usage.PromptTokensDetails.CacheWriteTokens)
+	require.Equal(t, "upstream", usage.UsageSource)
 	require.True(t, info.StreamTerminalMarkersRequired)
 	require.True(t, info.StreamTerminalSuccess)
 	require.True(t, info.StreamTerminalUsageSeen)
@@ -150,10 +151,14 @@ func TestOaiResponsesStreamHandlerTreatsEmptyUsageAsUnconfirmed(t *testing.T) {
 	}
 
 	info := mappedClientResponseInfo()
+	info.SetEstimatePromptTokens(1234)
 	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 	require.Nil(t, relayErr)
 	require.NotZero(t, usage.CompletionTokens)
+	require.Equal(t, 1234, usage.PromptTokens)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Zero(t, usage.PromptTokensDetails.CachedTokens)
 	require.False(t, info.StreamTerminalUsageSeen)
 	require.True(t, info.PreservePreConsumedQuota)
 }
