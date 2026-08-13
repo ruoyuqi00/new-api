@@ -16,6 +16,7 @@ import (
 	basecommon "github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -138,7 +139,6 @@ func TestDoTaskApiRequestKeepsNativeReplayableGetBody(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(server.Close)
-
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", bytes.NewReader(payload))
@@ -151,7 +151,7 @@ func TestDoTaskApiRequestKeepsNativeReplayableGetBody(t *testing.T) {
 	upstreamResult := <-received
 	require.NoError(t, upstreamResult.err)
 	assert.Equal(t, payload, upstreamResult.body)
-	assert.True(t, info.TaskRelayInfo.RequestWritten)
+	assert.True(t, info.TaskRelayInfo.RequestWasWritten())
 
 	require.NotNil(t, adaptor.capturedReq)
 	require.NotNil(t, adaptor.capturedReq.GetBody)
@@ -177,7 +177,6 @@ func TestDoRequestMarksWrittenPostWithoutResponseHeadersAmbiguous(t *testing.T) 
 		require.NoError(t, conn.Close())
 	}))
 	t.Cleanup(server.Close)
-
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello"}`))
@@ -192,6 +191,52 @@ func TestDoRequestMarksWrittenPostWithoutResponseHeadersAmbiguous(t *testing.T) 
 	assert.True(t, info.UpstreamRequestWasWritten())
 	assert.False(t, info.UpstreamResponseHeadersWereReceived())
 	assert.True(t, info.HasAmbiguousUpstreamSubmission())
+}
+
+func TestDoRequestMarksRedirectedPostWithoutFinalResponseAmbiguous(t *testing.T) {
+	for _, statusCode := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			service.InitHttpClient()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/redirect" {
+					http.Redirect(w, r, "/target", statusCode)
+					return
+				}
+				_, err := io.Copy(io.Discard, r.Body)
+				require.NoError(t, err)
+				hijacker, ok := w.(http.Hijacker)
+				require.True(t, ok)
+				conn, _, err := hijacker.Hijack()
+				require.NoError(t, err)
+				require.NoError(t, conn.Close())
+			}))
+			t.Cleanup(server.Close)
+			port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
+			fetchSetting := system_setting.GetFetchSetting()
+			oldAllowedPorts := append([]string(nil), fetchSetting.AllowedPorts...)
+			oldAllowPrivateIP := fetchSetting.AllowPrivateIp
+			fetchSetting.AllowedPorts = append(fetchSetting.AllowedPorts, port)
+			fetchSetting.AllowPrivateIp = true
+			t.Cleanup(func() {
+				fetchSetting.AllowedPorts = oldAllowedPorts
+				fetchSetting.AllowPrivateIp = oldAllowPrivateIP
+			})
+
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello"}`))
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+			req, err := http.NewRequest(http.MethodPost, server.URL+"/redirect", strings.NewReader(`{"input":"hello"}`))
+			require.NoError(t, err)
+
+			resp, err := doRequest(c, req, info)
+
+			require.Error(t, err)
+			require.Nil(t, resp)
+			assert.True(t, info.UpstreamRequestWasWritten())
+			assert.True(t, info.HasAmbiguousUpstreamSubmission())
+		})
+	}
 }
 
 func TestDoRequestPreservesTaskRequestWriteTrace(t *testing.T) {
@@ -216,10 +261,21 @@ func TestDoRequestPreservesTaskRequestWriteTrace(t *testing.T) {
 
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
-	assert.True(t, info.TaskRelayInfo.RequestWritten)
+	assert.True(t, info.TaskRelayInfo.RequestWasWritten())
 	assert.True(t, info.UpstreamRequestWasWritten())
 	assert.True(t, info.UpstreamResponseHeadersWereReceived())
 	assert.False(t, info.HasAmbiguousUpstreamSubmission())
+}
+
+func TestTaskRequestAttemptStateCannotLeakIntoNextRetry(t *testing.T) {
+	info := &relaycommon.TaskRelayInfo{}
+	first := info.BeginRequestAttempt()
+	second := info.BeginRequestAttempt()
+
+	first.MarkRequestWritten()
+
+	assert.False(t, second.RequestWasWritten())
+	assert.False(t, info.RequestWasWritten())
 }
 
 func TestUpstreamAttemptStateCannotLeakIntoNextRetry(t *testing.T) {
@@ -231,6 +287,21 @@ func TestUpstreamAttemptStateCannotLeakIntoNextRetry(t *testing.T) {
 	first.MarkAmbiguousIfPotentiallySent()
 
 	assert.False(t, second.RequestWasWritten())
+	assert.False(t, second.IsAmbiguous())
+	assert.False(t, info.HasAmbiguousUpstreamSubmission())
+}
+
+func TestUpstreamAttemptLateWriteStillMarksOnlyOriginalAttemptAmbiguous(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	first := info.BeginUpstreamRequestAttempt()
+	first.MarkConnectionObtained()
+	first.MarkResponseHeadersReceived()
+	second := info.BeginUpstreamRequestAttempt()
+
+	first.MarkRequestWritten()
+	first.MarkAmbiguousIfPotentiallySent()
+
+	assert.True(t, first.IsAmbiguous())
 	assert.False(t, second.IsAmbiguous())
 	assert.False(t, info.HasAmbiguousUpstreamSubmission())
 }

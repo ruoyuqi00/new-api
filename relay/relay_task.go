@@ -252,7 +252,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	info.BeginRequestAttempt()
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		state := classifyTaskSubmissionState(info.RequestWritten, 0, false)
+		state := classifyTaskSubmissionState(info.TaskSubmissionMayHaveBeenSent(), 0, false)
 		if state == dto.TaskSubmissionNotSent {
 			if persistErr := service.MarkTaskSubmissionRejected(info); persistErr != nil {
 				return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
@@ -262,7 +262,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError).WithSubmissionState(state)
 	}
 	if resp == nil {
-		state := classifyTaskSubmissionState(info.RequestWritten, 0, false)
+		state := classifyTaskSubmissionState(info.TaskSubmissionMayHaveBeenSent(), 0, false)
 		if state == dto.TaskSubmissionNotSent {
 			if persistErr := service.MarkTaskSubmissionRejected(info); persistErr != nil {
 				return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).
@@ -274,7 +274,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		_ = resp.Body.Close()
-		state := classifyTaskSubmissionState(info.RequestWritten, resp.StatusCode, false)
+		state := classifyTaskSubmissionState(info.TaskSubmissionMayHaveBeenSent(), resp.StatusCode, false)
 		if state == dto.TaskSubmissionRejected || state == dto.TaskSubmissionNotSent {
 			if err := service.MarkTaskSubmissionRejected(info); err != nil {
 				return nil, service.TaskErrorWrapperLocal(errors.New("task submission state could not be persisted"), "task_persistence_failed", http.StatusInternalServerError).

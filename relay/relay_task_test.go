@@ -81,16 +81,29 @@ func TestTaskResponseIsCommittedOnlyAfterTaskIDValidation(t *testing.T) {
 }
 
 func TestRejectedRetryThenPreWriteFailureIsNotAmbiguous(t *testing.T) {
-	info := &relaycommon.TaskRelayInfo{RequestWritten: true}
-	assert.Equal(t, dto.TaskSubmissionRejected, classifyTaskSubmissionState(info.RequestWritten, http.StatusTooManyRequests, false))
+	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	info.BeginRequestAttempt().MarkRequestWritten()
+	assert.Equal(t, dto.TaskSubmissionRejected, classifyTaskSubmissionState(info.TaskSubmissionMayHaveBeenSent(), http.StatusTooManyRequests, false))
 
 	info.BeginRequestAttempt()
-	assert.False(t, info.RequestWritten)
+	assert.False(t, info.RequestWasWritten())
 	secondError := (&dto.TaskError{StatusCode: http.StatusInternalServerError}).WithSubmissionState(
-		classifyTaskSubmissionState(info.RequestWritten, 0, false),
+		classifyTaskSubmissionState(info.TaskSubmissionMayHaveBeenSent(), 0, false),
 	)
 	assert.Equal(t, dto.TaskSubmissionNotSent, secondError.SubmissionState())
 	assert.True(t, service.ShouldRefundTaskSubmission(secondError))
+}
+
+func TestTaskSubmissionUsesConservativeNetworkAttemptWhenWriteCallbackIsLate(t *testing.T) {
+	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	info.BeginRequestAttempt()
+	networkAttempt := info.BeginUpstreamRequestAttempt()
+	networkAttempt.MarkConnectionObtained()
+	networkAttempt.MarkAmbiguousIfPotentiallySent()
+
+	assert.False(t, info.RequestWasWritten())
+	assert.True(t, info.TaskSubmissionMayHaveBeenSent())
+	assert.Equal(t, dto.TaskSubmissionAmbiguous, classifyTaskSubmissionState(info.TaskSubmissionMayHaveBeenSent(), 0, false))
 }
 
 func TestTaskSubmissionClassification(t *testing.T) {

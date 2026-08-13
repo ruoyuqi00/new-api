@@ -96,6 +96,9 @@ func TestOaiResponsesStreamHandlerSanitizesUpstreamTerminalFailure(t *testing.T)
 			ctx, recorder := clientResponseTestContext()
 			ctx.Request.URL.Path = "/v1/responses"
 			body := "data: {\"type\":\"" + eventType + "\",\"error\":{\"message\":\"top-level-secret\"},\"response\":{\"id\":\"resp_private_request_id\",\"model\":\"upstream-model\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"POST https://secret-upstream.example/v1/responses via 10.20.30.40 channel #73 Authorization Bearer sk-upstream-secret returned <html>private</html>\"},\"incomplete_details\":{\"reason\":\"redirect https://private-redirect.example\"},\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"private-output-marker\"}]}],\"metadata\":{\"private\":\"private-metadata-marker\"}}}\n\n"
+			if eventType == "error" {
+				body = "data: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"POST https://secret-upstream.example Authorization Bearer sk-upstream-secret\",\"param\":\"private-param\",\"sequence_number\":7}\n\n"
+			}
 			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
 
 			info := mappedClientResponseInfo()
@@ -106,6 +109,11 @@ func TestOaiResponsesStreamHandlerSanitizesUpstreamTerminalFailure(t *testing.T)
 			require.Equal(t, 1, strings.Count(publicBody, "event: "+eventType))
 			require.Contains(t, publicBody, `"code":"upstream_response_failed"`)
 			require.Contains(t, publicBody, "The response failed before completion. Please retry later.")
+			if eventType == "error" {
+				require.Contains(t, publicBody, `"type":"error","code":"upstream_response_failed"`)
+				require.Contains(t, publicBody, `"param":null`)
+				require.NotContains(t, publicBody, `"error":{`)
+			}
 			for _, secret := range []string{
 				"secret-upstream.example",
 				"10.20.30.40",
@@ -117,6 +125,7 @@ func TestOaiResponsesStreamHandlerSanitizesUpstreamTerminalFailure(t *testing.T)
 				"private-output-marker",
 				"private-metadata-marker",
 				"top-level-secret",
+				"private-param",
 				"resp_private_request_id",
 			} {
 				require.NotContains(t, publicBody, secret)

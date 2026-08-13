@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -791,6 +792,7 @@ func TestAmbiguousTextBillingSettlesFrozenReservation(t *testing.T) {
 				TieredBillingSnapshot: &billingexpr.BillingSnapshot{
 					BillingMode:              "tiered_expr",
 					EstimatedQuotaAfterGroup: 875,
+					EstimatedTier:            "selected-at-reservation",
 				},
 			},
 			want: 875,
@@ -818,6 +820,11 @@ func TestAmbiguousTextBillingSettlesFrozenReservation(t *testing.T) {
 			require.Len(t, logs, 1)
 			require.Equal(t, tt.want, logs[0].Quota)
 			require.Contains(t, logs[0].Other, "usage_unconfirmed")
+			if tt.info.TieredBillingSnapshot != nil {
+				require.Contains(t, logs[0].Other, `"billing_mode":"tiered_expr"`)
+				require.Contains(t, logs[0].Other, `"estimated_tier":"selected-at-reservation"`)
+				require.Contains(t, logs[0].Other, `"settled_from_reservation":true`)
+			}
 
 			var user model.User
 			require.NoError(t, model.DB.First(&user, tt.info.UserId).Error)
@@ -831,6 +838,39 @@ func TestAmbiguousTextBillingSettlesFrozenReservation(t *testing.T) {
 			require.NoError(t, model.LOG_DB.Exec("DELETE FROM logs").Error)
 		})
 	}
+}
+
+func TestAmbiguousTextBillingDoesNotRecordConsumptionWhenSettlementFails(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{settleErr: errors.New("settlement failed")}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+		StartTime: time.Now(), Billing: billing,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData:   types.PriceData{QuotaToPreConsume: 1250, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+	}
+	attempt := relayInfo.BeginUpstreamRequestAttempt()
+	attempt.MarkRequestWritten()
+	attempt.MarkAmbiguousIfPotentiallySent()
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	err := SettleAmbiguousTextBilling(ctx, relayInfo)
+
+	require.Error(t, err)
+	require.Equal(t, []int{1250}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Empty(t, logs)
+	var user model.User
+	require.NoError(t, model.DB.First(&user, relayInfo.UserId).Error)
+	require.Zero(t, user.UsedQuota)
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, relayInfo.ChannelId).Error)
+	require.Zero(t, channel.UsedQuota)
 }
 
 func TestUnconfirmedTerminalUsageDoesNotRunTieredSettlement(t *testing.T) {

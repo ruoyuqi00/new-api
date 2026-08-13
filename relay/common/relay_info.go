@@ -30,15 +30,16 @@ type ThinkingContentInfo struct {
 }
 
 type UpstreamRequestAttempt struct {
-	connectionObtained      atomic.Bool
+	connectionsObtained     atomic.Int64
 	requestWritten          atomic.Bool
-	responseHeadersReceived atomic.Bool
+	responseHeadersReceived atomic.Int64
+	finalResponseReceived   atomic.Bool
 	ambiguous               atomic.Bool
 }
 
 func (attempt *UpstreamRequestAttempt) MarkConnectionObtained() {
 	if attempt != nil {
-		attempt.connectionObtained.Store(true)
+		attempt.connectionsObtained.Add(1)
 	}
 }
 
@@ -50,14 +51,23 @@ func (attempt *UpstreamRequestAttempt) MarkRequestWritten() {
 
 func (attempt *UpstreamRequestAttempt) MarkResponseHeadersReceived() {
 	if attempt != nil {
-		attempt.responseHeadersReceived.Store(true)
+		attempt.responseHeadersReceived.Add(1)
+	}
+}
+
+func (attempt *UpstreamRequestAttempt) MarkFinalResponseReceived() {
+	if attempt != nil {
+		attempt.finalResponseReceived.Store(true)
 	}
 }
 
 func (attempt *UpstreamRequestAttempt) MarkAmbiguousIfPotentiallySent() {
-	if attempt != nil &&
-		(attempt.connectionObtained.Load() || attempt.requestWritten.Load()) &&
-		!attempt.responseHeadersReceived.Load() {
+	if attempt == nil || attempt.finalResponseReceived.Load() {
+		return
+	}
+	connections := attempt.connectionsObtained.Load()
+	responses := attempt.responseHeadersReceived.Load()
+	if attempt.requestWritten.Load() || connections > responses {
 		attempt.ambiguous.Store(true)
 	}
 }
@@ -67,7 +77,7 @@ func (attempt *UpstreamRequestAttempt) RequestWasWritten() bool {
 }
 
 func (attempt *UpstreamRequestAttempt) ResponseHeadersWereReceived() bool {
-	return attempt != nil && attempt.responseHeadersReceived.Load()
+	return attempt != nil && (attempt.finalResponseReceived.Load() || attempt.responseHeadersReceived.Load() > 0)
 }
 
 func (attempt *UpstreamRequestAttempt) IsAmbiguous() bool {
@@ -334,6 +344,13 @@ func (info *RelayInfo) UpstreamResponseHeadersWereReceived() bool {
 
 func (info *RelayInfo) HasAmbiguousUpstreamSubmission() bool {
 	return info.currentUpstreamRequestAttempt().IsAmbiguous()
+}
+
+func (info *RelayInfo) TaskSubmissionMayHaveBeenSent() bool {
+	if info == nil {
+		return false
+	}
+	return info.TaskRelayInfo != nil && info.TaskRelayInfo.RequestWasWritten() || info.HasAmbiguousUpstreamSubmission()
 }
 
 func (info *RelayInfo) ToString() string {
@@ -779,7 +796,7 @@ type TaskRelayInfo struct {
 	// PublicTaskID 是提交时预生成的 task_xxxx 格式公开 ID，
 	// 供 DoResponse 在返回给客户端时使用（避免暴露上游真实 ID）。
 	PublicTaskID   string
-	RequestWritten bool
+	requestAttempt atomic.Pointer[UpstreamRequestAttempt]
 	// SubmissionIntentPersisted is set only after this request creates its
 	// durable pre-write submission row. It must never be inferred from a unique
 	// key conflict belonging to another request.
@@ -808,10 +825,24 @@ func (info *TaskRelayInfo) BeginBillingFinalization() bool {
 	return true
 }
 
-func (info *TaskRelayInfo) BeginRequestAttempt() {
-	if info != nil {
-		info.RequestWritten = false
+func (info *TaskRelayInfo) BeginRequestAttempt() *UpstreamRequestAttempt {
+	if info == nil {
+		return nil
 	}
+	attempt := &UpstreamRequestAttempt{}
+	info.requestAttempt.Store(attempt)
+	return attempt
+}
+
+func (info *TaskRelayInfo) CurrentRequestAttempt() *UpstreamRequestAttempt {
+	if info == nil {
+		return nil
+	}
+	return info.requestAttempt.Load()
+}
+
+func (info *TaskRelayInfo) RequestWasWritten() bool {
+	return info.CurrentRequestAttempt().RequestWasWritten()
 }
 
 type TaskSubmitReq struct {

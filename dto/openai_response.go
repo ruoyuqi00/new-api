@@ -406,6 +406,9 @@ const (
 type ResponsesStreamResponse struct {
 	Type           string                   `json:"type"`
 	Error          any                      `json:"error,omitempty"`
+	Code           string                   `json:"code,omitempty"`
+	Message        string                   `json:"message,omitempty"`
+	Param          json.RawMessage          `json:"param,omitempty"`
 	SequenceNumber *int64                   `json:"sequence_number,omitempty"`
 	Response       *OpenAIResponsesResponse `json:"response,omitempty"`
 	Delta          string                   `json:"delta,omitempty"`

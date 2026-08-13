@@ -541,7 +541,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if resp == nil {
 		return nil, errors.New("resp is nil")
 	}
-	attempt.MarkResponseHeadersReceived()
+	attempt.MarkFinalResponseReceived()
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
@@ -562,11 +562,16 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
 	ApplyUpstreamBodyMetadata(req, requestBody)
+	var taskAttempt *common.UpstreamRequestAttempt
+	if info != nil && info.TaskRelayInfo != nil {
+		taskAttempt = info.TaskRelayInfo.CurrentRequestAttempt()
+		if taskAttempt == nil {
+			taskAttempt = info.TaskRelayInfo.BeginRequestAttempt()
+		}
+	}
 	trace := &httptrace.ClientTrace{
 		WroteRequest: func(httptrace.WroteRequestInfo) {
-			if info != nil && info.TaskRelayInfo != nil {
-				info.TaskRelayInfo.RequestWritten = true
-			}
+			taskAttempt.MarkRequestWritten()
 		},
 	}
 	requestContext := req.Context()

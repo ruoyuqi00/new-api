@@ -192,8 +192,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				"message": responsesFailedPublicMessage,
 			}
 			streamResponse.Error = nil
+			streamResponse.Code = ""
+			streamResponse.Message = ""
+			streamResponse.Param = nil
 			if originalEventType == "error" {
-				streamResponse.Error = publicError
+				streamResponse.Code = responsesFailedPublicCode
+				streamResponse.Message = responsesFailedPublicMessage
+				streamResponse.Param = []byte(`null`)
 				streamResponse.Response = nil
 			} else {
 				publicStatus := []byte(`"failed"`)

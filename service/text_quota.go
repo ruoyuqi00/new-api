@@ -399,8 +399,7 @@ func SettleAmbiguousTextBilling(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	relayInfo.PreservePreConsumedQuota = true
 	quota := frozenTextReservationQuota(relayInfo)
 	relayInfo.PriceData.Quota = quota
-	PostTextConsumeQuota(ctx, relayInfo, nil, []string{"upstream submission status unknown; settled at frozen reservation"})
-	return nil
+	return postTextConsumeQuota(ctx, relayInfo, nil, []string{"upstream submission status unknown; settled at frozen reservation"})
 }
 
 func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
@@ -424,6 +423,12 @@ func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *rel
 }
 
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
+	if err := postTextConsumeQuota(ctx, relayInfo, usage, extraContent); err != nil {
+		logger.LogError(ctx, "error recording text consumption: "+err.Error())
+	}
+}
+
+func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) error {
 	originUsage := usage
 	if usage == nil {
 		extraContent = append(extraContent, "上游无计费信息")
@@ -475,7 +480,14 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
 
-	if summary.TotalTokens == 0 && !summary.ImageGenerationOnlyBilling && !relayInfo.HasAmbiguousUpstreamSubmission() {
+	ambiguousSubmission := relayInfo.HasAmbiguousUpstreamSubmission()
+	if ambiguousSubmission {
+		if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
+			return fmt.Errorf("settle billing: %w", err)
+		}
+	}
+
+	if summary.TotalTokens == 0 && !summary.ImageGenerationOnlyBilling && !ambiguousSubmission {
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
@@ -483,8 +495,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	if !ambiguousSubmission {
+		if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
+			logger.LogError(ctx, "error settling billing: "+err.Error())
+		}
 	}
 
 	logModel := summary.ModelName
@@ -575,11 +589,15 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		// prompt/cache fields here, otherwise old upstream payloads may be double-counted.
 		other["input_tokens_total"] = usage.InputTokens
 	}
-	if tieredBillingApplied {
+	if tieredBillingApplied || !authoritativeUsage && relayInfo.TieredBillingSnapshot != nil {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
+		if !authoritativeUsage {
+			other["estimated_tier"] = relayInfo.TieredBillingSnapshot.EstimatedTier
+			other["settled_from_reservation"] = true
+		}
 	}
 
-	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
+	if err := model.RecordConsumeLogWithError(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:           relayInfo.ChannelId,
 		PromptTokens:        summary.PromptTokens,
 		CompletionTokens:    summary.CompletionTokens,
@@ -593,8 +611,15 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		IsStream:            relayInfo.IsStream,
 		Group:               relayInfo.UsingGroup,
 		Other:               other,
-	})
+	}); err != nil {
+		if !ambiguousSubmission {
+			logger.LogError(ctx, "failed to record consume log: "+err.Error())
+			return nil
+		}
+		return fmt.Errorf("record consume log: %w", err)
+	}
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})
+	return nil
 }
