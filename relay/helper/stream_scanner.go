@@ -416,7 +416,13 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		}
 
 		if err := scanner.Err(); err != nil {
-			if err != io.EOF && !errors.Is(err, errStreamDrainLimit) {
+			snapshot := info.GetStreamRecoverySnapshot()
+			terminalCompleted := snapshot.Enabled &&
+				snapshot.UsageState == relaycommon.StreamUsageStateExact &&
+				snapshot.DrainResult == relaycommon.StreamDrainResultCompleted
+			if terminalCompleted {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+			} else if err != io.EOF && !errors.Is(err, errStreamDrainLimit) {
 				logger.LogError(c, "scanner error: "+err.Error())
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
 			}

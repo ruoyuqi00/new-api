@@ -132,6 +132,26 @@ type stagedCountingBody struct {
 	detachedBytes atomic.Int64
 }
 
+type terminalCancellationBody struct {
+	data []byte
+	done <-chan struct{}
+	err  error
+}
+
+func (b *terminalCancellationBody) Read(p []byte) (int, error) {
+	if len(b.data) > 0 {
+		n := copy(p, b.data)
+		b.data = b.data[n:]
+		return n, nil
+	}
+	<-b.done
+	return 0, b.err
+}
+
+func (b *terminalCancellationBody) Close() error {
+	return nil
+}
+
 func (b *stagedCountingBody) Read(p []byte) (int, error) {
 	if len(b.first) > 0 {
 		n := copy(p, b.first)
@@ -329,6 +349,46 @@ func TestStreamScannerHandler_EmptyBody(t *testing.T) {
 	})
 
 	assert.False(t, called.Load(), "handler should not be called for empty body")
+}
+
+func TestStreamScannerHandlerExactTerminalCancellationIsDone(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	c, _, info := setupStreamTest(t, nil)
+	info.DisablePing = true
+	info.ChannelMeta.ChannelId = 32
+	info.EnableStreamRecovery()
+	upstream := info.StartStreamRecoveryAttempt(c.Request.Context())
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	body := &terminalCancellationBody{
+		data: []byte("data: terminal\n"),
+		done: upstream.Done(),
+		err:  errors.New("http2: response body closed"),
+	}
+	StreamScannerHandler(c, &http.Response{Body: body}, info, func(data string, _ *StreamResult) {
+		if data == "terminal" {
+			info.MarkStreamTerminalUsage()
+		}
+	})
+
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+	assert.False(t, info.StreamStatus.HasErrors())
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.Equal(t, relaycommon.StreamUsageStateExact, snapshot.UsageState)
+	assert.Equal(t, relaycommon.StreamDrainResultCompleted, snapshot.DrainResult)
+}
+
+func TestStreamScannerHandlerPreTerminalReadErrorRemainsScannerError(t *testing.T) {
+	c, _, info := setupStreamTest(t, nil)
+	reader, writer := io.Pipe()
+	require.NoError(t, writer.CloseWithError(errors.New("upstream read failed")))
+
+	StreamScannerHandler(c, &http.Response{Body: reader}, info, func(string, *StreamResult) {})
+
+	assert.Equal(t, relaycommon.StreamEndReasonScannerErr, info.StreamStatus.EndReason)
+	require.Error(t, info.StreamStatus.EndError)
 }
 
 func TestStreamScannerHandlerCapturesRawUpstreamModel(t *testing.T) {
