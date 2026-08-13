@@ -203,6 +203,9 @@ export interface LogOtherData {
   violation_fee_marker?: string
   violation_fee_reason?: string
   fee_quota?: number
+  requested_quota?: number
+  charged_quota?: number
+  charge_succeeded?: boolean
   sensitive_words?: string[]
   sensitive_input_original_bytes?: number
   sensitive_input_truncated?: boolean

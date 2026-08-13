@@ -20,7 +20,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import type { UsageLog } from '../data/schema'
-import { formatModelName } from './format'
+import { formatModelName, getViolationFeeDisplay } from './format'
 
 function usageLog(overrides: Partial<UsageLog>): UsageLog {
   return {
@@ -77,6 +77,71 @@ describe('formatModelName', () => {
       isMapped: false,
       forwardedModel: undefined,
       actualResponseModel: undefined,
+    })
+  })
+})
+
+describe('getViolationFeeDisplay', () => {
+  test('labels an unsuccessful charge as a blocked violation with an attempted fee', () => {
+    const result = getViolationFeeDisplay(
+      {
+        violation_fee: true,
+        charge_succeeded: false,
+        requested_quota: 2500,
+      },
+      0
+    )
+
+    assert.deepEqual(result, {
+      statusKey: 'Violation blocked, charge failed',
+      amountKey: 'Attempted fee',
+      amount: 2500,
+    })
+  })
+
+  test('falls back to the stored log amount for an older failed charge record', () => {
+    const result = getViolationFeeDisplay(
+      {
+        violation_fee: true,
+        charge_succeeded: false,
+      },
+      900
+    )
+
+    assert.equal(result.amount, 900)
+  })
+
+  test('shows the charged amount for a successful violation fee', () => {
+    const result = getViolationFeeDisplay(
+      {
+        violation_fee: true,
+        charge_succeeded: true,
+        charged_quota: 1800,
+        fee_quota: 1700,
+      },
+      1600
+    )
+
+    assert.deepEqual(result, {
+      statusKey: 'Violation Fee',
+      amountKey: 'Fee',
+      amount: 1800,
+    })
+  })
+
+  test('preserves the fee display for legacy violation records', () => {
+    const result = getViolationFeeDisplay(
+      {
+        violation_fee: true,
+        fee_quota: 1200,
+      },
+      1100
+    )
+
+    assert.deepEqual(result, {
+      statusKey: 'Violation Fee',
+      amountKey: 'Fee',
+      amount: 1200,
     })
   })
 })

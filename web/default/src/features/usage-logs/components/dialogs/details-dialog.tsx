@@ -50,6 +50,7 @@ import {
   parseAuditLine,
   decodeBillingExprB64,
   getTieredBillingSummary,
+  getViolationFeeDisplay,
   hasAnyCacheTokens,
   isViolationFeeLog,
   getFirstResponseTimeColor,
@@ -430,6 +431,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const typeConfig = getLogTypeConfig(props.log.type)
 
   const isViolation = isViolationFeeLog(other)
+  const violationDisplay =
+    isViolation && other
+      ? getViolationFeeDisplay(other, props.log.quota)
+      : null
   const isLocalSensitiveViolation =
     other?.violation_fee_reason === 'local_sensitive_word'
   const showSensitiveInputEvidence = props.isAdmin && isLocalSensitiveViolation
@@ -766,10 +771,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Violation fee info */}
-        {isViolation && other && (
+        {violationDisplay && other && (
           <DetailSection
             icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
-            label={t('Violation Fee')}
+            label={t(violationDisplay.statusKey)}
             variant='danger'
           >
             {other.violation_fee_code && (
@@ -809,8 +814,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
               />
             )}
             <DetailRow
-              label={t('Fee Amount')}
-              value={formatLogQuota(other.fee_quota ?? props.log.quota)}
+              label={t(violationDisplay.amountKey)}
+              value={formatLogQuota(violationDisplay.amount)}
               mono
             />
           </DetailSection>

@@ -50,6 +50,7 @@ import {
   getFirstResponseTimeColor,
   getResponseTimeColor,
   getTieredBillingSummary,
+  getViolationFeeDisplay,
   hasAnyCacheTokens,
   parseLogOther,
   isViolationFeeLog,
@@ -122,9 +123,10 @@ function buildDetailSegments(
   if (log.type !== 2) return []
 
   const isViolation = isViolationFeeLog(other)
-  if (isViolation) {
+  if (isViolation && other) {
+    const display = getViolationFeeDisplay(other, log.quota)
     const segments: DetailSegment[] = []
-    segments.push({ text: t('Violation Fee'), danger: true })
+    segments.push({ text: t(display.statusKey), danger: true })
     if (other?.violation_fee_code) {
       segments.push({
         text: other.violation_fee_code,
@@ -132,7 +134,7 @@ function buildDetailSegments(
       })
     }
     segments.push({
-      text: `${t('Fee')}: ${formatLogQuota(other?.fee_quota ?? log.quota)}`,
+      text: `${t(display.amountKey)}: ${formatLogQuota(display.amount)}`,
       muted: true,
     })
     return segments

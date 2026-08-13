@@ -92,6 +92,39 @@ export function isViolationFeeLog(other: LogOtherData | null): boolean {
   )
 }
 
+export type ViolationFeeDisplay = {
+  statusKey: 'Violation Fee' | 'Violation blocked, charge failed'
+  amountKey: 'Fee' | 'Attempted fee'
+  amount: number
+}
+
+export function getViolationFeeDisplay(
+  other: LogOtherData,
+  logQuota: number
+): ViolationFeeDisplay {
+  if (other.charge_succeeded === false) {
+    return {
+      statusKey: 'Violation blocked, charge failed',
+      amountKey: 'Attempted fee',
+      amount: other.requested_quota ?? logQuota,
+    }
+  }
+
+  if (other.charge_succeeded === true) {
+    return {
+      statusKey: 'Violation Fee',
+      amountKey: 'Fee',
+      amount: other.charged_quota ?? other.fee_quota ?? logQuota,
+    }
+  }
+
+  return {
+    statusKey: 'Violation Fee',
+    amountKey: 'Fee',
+    amount: other.fee_quota ?? logQuota,
+  }
+}
+
 /**
  * Parse the 'other' field from JSON string to object
  */
