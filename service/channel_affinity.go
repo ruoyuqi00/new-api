@@ -699,79 +699,79 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 				RequestPath: path,
 			})
 		}
-		var affinityValue string
-		var usedSource operation_setting.ChannelAffinityKeySource
-		var usedSourceType string
+		candidateFound := false
 		for _, src := range rule.KeySources {
-			affinityValue = extractChannelAffinityValue(c, src)
-			if affinityValue != "" {
-				usedSource = src
-				usedSourceType = scopedChannelAffinitySourceType(src)
-				if usedSourceType == "" {
-					usedSourceType = strings.TrimSpace(src.Type)
-				}
-				break
-			}
-		}
-		if affinityValue == "" {
-			if ruleHasChannelAffinitySource(rule, "response_chain") {
-				c.Set(ginKeyChannelAffinityLogInfo, map[string]interface{}{
-					"reason":       rule.Name,
-					"rule_name":    rule.Name,
-					"using_group":  usingGroup,
-					"model":        modelName,
-					"request_path": path,
-					"key_source":   "none",
-					"missing_key":  true,
-				})
-			}
-			continue
-		}
-		if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, affinityValue) {
-			continue
-		}
-
-		ttlSeconds := rule.TTLSeconds
-		if ttlSeconds <= 0 {
-			ttlSeconds = setting.DefaultTTLSeconds
-		}
-		cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
-		keyHint := buildChannelAffinityKeyHint(affinityValue)
-		if isScopedChannelAffinitySource(usedSourceType) {
-			var ok bool
-			cacheKeySuffix, ok = buildScopedChannelAffinityCacheKeySuffix(rule, usedSourceType, common.GetContextKeyInt(c, constant.ContextKeyTokenId), modelName, usingGroup, affinityValue)
-			if !ok {
+			affinityValue := extractChannelAffinityValue(c, src)
+			if affinityValue == "" {
 				continue
 			}
-			keyHint = ""
-		}
-		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
-		setChannelAffinityContext(c, channelAffinityMeta{
-			CacheKey:       cacheKeyFull,
-			TTLSeconds:     ttlSeconds,
-			RuleName:       rule.Name,
-			SkipRetry:      rule.SkipRetryOnFailure,
-			ParamTemplate:  cloneStringAnyMap(rule.ParamOverrideTemplate),
-			KeySourceType:  usedSourceType,
-			KeySourceKey:   strings.TrimSpace(usedSource.Key),
-			KeySourcePath:  strings.TrimSpace(usedSource.Path),
-			KeyHint:        keyHint,
-			KeyFingerprint: affinityFingerprint(affinityValue),
-			UsingGroup:     usingGroup,
-			ModelName:      modelName,
-			RequestPath:    path,
-		})
+			if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, affinityValue) {
+				continue
+			}
 
-		cache := getChannelAffinityCache()
-		channelID, found, err := cache.Get(cacheKeySuffix)
-		if err != nil {
-			common.SysError(fmt.Sprintf("channel affinity cache get failed: key=%s, err=%v", cacheKeyFull, err))
+			usedSourceType := scopedChannelAffinitySourceType(src)
+			if usedSourceType == "" {
+				usedSourceType = strings.TrimSpace(src.Type)
+			}
+			ttlSeconds := rule.TTLSeconds
+			if ttlSeconds <= 0 {
+				ttlSeconds = setting.DefaultTTLSeconds
+			}
+			cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
+			keyHint := buildChannelAffinityKeyHint(affinityValue)
+			if isScopedChannelAffinitySource(usedSourceType) {
+				var ok bool
+				cacheKeySuffix, ok = buildScopedChannelAffinityCacheKeySuffix(rule, usedSourceType, common.GetContextKeyInt(c, constant.ContextKeyTokenId), modelName, usingGroup, affinityValue)
+				if !ok {
+					continue
+				}
+				keyHint = ""
+			}
+			cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
+			meta := channelAffinityMeta{
+				CacheKey:       cacheKeyFull,
+				TTLSeconds:     ttlSeconds,
+				RuleName:       rule.Name,
+				SkipRetry:      rule.SkipRetryOnFailure,
+				ParamTemplate:  cloneStringAnyMap(rule.ParamOverrideTemplate),
+				KeySourceType:  usedSourceType,
+				KeySourceKey:   strings.TrimSpace(src.Key),
+				KeySourcePath:  strings.TrimSpace(src.Path),
+				KeyHint:        keyHint,
+				KeyFingerprint: affinityFingerprint(affinityValue),
+				UsingGroup:     usingGroup,
+				ModelName:      modelName,
+				RequestPath:    path,
+			}
+			if !candidateFound {
+				candidateFound = true
+				setChannelAffinityContext(c, meta)
+			}
+
+			channelID, found, err := getChannelAffinityCache().Get(cacheKeySuffix)
+			if err != nil {
+				common.SysError(fmt.Sprintf("channel affinity cache get failed: key=%s, err=%v", cacheKeyFull, err))
+				continue
+			}
+			if found {
+				setChannelAffinityContext(c, meta)
+				return channelID, true
+			}
+		}
+		if !candidateFound && ruleHasChannelAffinitySource(rule, "response_chain") {
+			c.Set(ginKeyChannelAffinityLogInfo, map[string]interface{}{
+				"reason":       rule.Name,
+				"rule_name":    rule.Name,
+				"using_group":  usingGroup,
+				"model":        modelName,
+				"request_path": path,
+				"key_source":   "none",
+				"missing_key":  true,
+			})
+		}
+		if candidateFound {
 			return 0, false
 		}
-		if found {
-			return channelID, true
-		}
-		return 0, false
 	}
 	return 0, false
 }
@@ -916,8 +916,17 @@ func RecordProvisionalResponseChainAffinity(c *gin.Context, channelID int, respo
 		ttlSeconds = provisionalResponseChainTTLSeconds
 	}
 	cacheKey := channelAffinityCacheNamespace + ":" + cacheKeySuffix
-	if err := getChannelAffinityCache().SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
+	cache := getChannelAffinityCache()
+	if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
 		common.SysError(fmt.Sprintf("provisional channel affinity response chain set failed: key=%s, err=%v", cacheKey, err))
+	}
+	if primaryKey, primaryTTLSeconds, ok := getChannelAffinityContext(c); ok && primaryKey != cacheKey {
+		if primaryTTLSeconds <= 0 || primaryTTLSeconds > provisionalResponseChainTTLSeconds {
+			primaryTTLSeconds = provisionalResponseChainTTLSeconds
+		}
+		if err := cache.SetWithTTL(primaryKey, channelID, time.Duration(primaryTTLSeconds)*time.Second); err != nil {
+			common.SysError(fmt.Sprintf("provisional channel affinity primary set failed: key=%s, err=%v", primaryKey, err))
+		}
 	}
 }
 

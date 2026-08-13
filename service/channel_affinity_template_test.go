@@ -637,7 +637,7 @@ func TestResponsesChainAffinityContinuesSuccessfulChannel(t *testing.T) {
 	t.Cleanup(func() { ClearCurrentChannelAffinityCache(next) })
 }
 
-func TestProvisionalResponseChainAffinityContinuesInterruptedChannelOnly(t *testing.T) {
+func TestProvisionalResponseChainAffinityContinuesInterruptedChannelAndPrimaryIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	responseID := fmt.Sprintf("resp-provisional-%d", time.Now().UnixNano())
 	tokenID := 8202
@@ -655,8 +655,72 @@ func TestProvisionalResponseChainAffinityContinuesInterruptedChannelOnly(t *test
 
 	primary := newChannelAffinityRequestContext(t, `{"model":"gpt-5","prompt_cache_key":"primary-key","input":"next"}`, tokenID)
 	channelID, found = GetPreferredChannelByAffinity(primary, "gpt-5", "gptpro")
+	require.True(t, found)
+	assert.Equal(t, 9202, channelID)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(primary) })
+}
+
+func TestResponsesAffinityCascadePrefersResponseChainOverPromptCacheKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	suffix := time.Now().UnixNano()
+	responseID := fmt.Sprintf("resp-cascade-%d", suffix)
+	promptCacheKey := fmt.Sprintf("prompt-cascade-%d", suffix)
+	tokenID := 8250
+	recordResponseChainAffinityForTest(t, responseID, tokenID, "gpt-5", "gptpro", 9250)
+
+	body := fmt.Sprintf(`{"model":"gpt-5","prompt_cache_key":"%s","previous_response_id":"%s","input":"next"}`, promptCacheKey, responseID)
+	next := newChannelAffinityRequestContext(t, body, tokenID)
+	channelID, found := GetPreferredChannelByAffinity(next, "gpt-5", "gptpro")
+	require.True(t, found)
+	assert.Equal(t, 9250, channelID)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(next) })
+}
+
+func TestResponsesAffinityCascadePrioritizesConversationOverPromptCacheKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	suffix := time.Now().UnixNano()
+	conversationID := fmt.Sprintf("conversation-hit-%d", suffix)
+	promptCacheKey := fmt.Sprintf("prompt-hit-%d", suffix)
+	tokenID := 8251
+
+	conversationSeed := newChannelAffinityRequestContext(t, fmt.Sprintf(`{"model":"gpt-5","conversation":{"id":"%s"},"input":"first"}`, conversationID), tokenID)
+	_, found := GetPreferredChannelByAffinity(conversationSeed, "gpt-5", "gptpro")
 	require.False(t, found)
-	assert.Zero(t, channelID)
+	MarkChannelAffinityRequestSucceeded(conversationSeed)
+	RecordChannelAffinity(conversationSeed, 9251)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(conversationSeed) })
+
+	promptSeed := newChannelAffinityRequestContext(t, fmt.Sprintf(`{"model":"gpt-5","prompt_cache_key":"%s","input":"first"}`, promptCacheKey), tokenID)
+	_, found = GetPreferredChannelByAffinity(promptSeed, "gpt-5", "gptpro")
+	require.False(t, found)
+	MarkChannelAffinityRequestSucceeded(promptSeed)
+	RecordChannelAffinity(promptSeed, 9252)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(promptSeed) })
+
+	body := fmt.Sprintf(`{"model":"gpt-5","conversation":{"id":"%s"},"prompt_cache_key":"%s","input":"next"}`, conversationID, promptCacheKey)
+	next := newChannelAffinityRequestContext(t, body, tokenID)
+	channelID, found := GetPreferredChannelByAffinity(next, "gpt-5", "gptpro")
+	require.True(t, found)
+	assert.Equal(t, 9251, channelID)
+}
+
+func TestProvisionalResponseChainAffinityAlsoRecordsPrimaryIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	suffix := time.Now().UnixNano()
+	responseID := fmt.Sprintf("resp-provisional-primary-%d", suffix)
+	promptCacheKey := fmt.Sprintf("prompt-provisional-primary-%d", suffix)
+	tokenID := 8252
+	first := newChannelAffinityRequestContext(t, fmt.Sprintf(`{"model":"gpt-5","prompt_cache_key":"%s","input":"first"}`, promptCacheKey), tokenID)
+	_, found := GetPreferredChannelByAffinity(first, "gpt-5", "gptpro")
+	require.False(t, found)
+
+	RecordProvisionalResponseChainAffinity(first, 9252, responseID)
+
+	primary := newChannelAffinityRequestContext(t, fmt.Sprintf(`{"model":"gpt-5","prompt_cache_key":"%s","input":"next"}`, promptCacheKey), tokenID)
+	channelID, found := GetPreferredChannelByAffinity(primary, "gpt-5", "gptpro")
+	require.True(t, found)
+	assert.Equal(t, 9252, channelID)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(primary) })
 }
 
 func TestResponsesChainAffinityScopesAndSeparatesSharedTokenChains(t *testing.T) {
