@@ -81,17 +81,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		applySystemPromptIfNeeded(c, info, request)
 		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, request)
 		if newApiErr != nil {
-			if info.GetStreamRecoverySnapshot().Accepted {
-				if usage == nil {
-					usage = &dto.Usage{}
-				}
-				info.MarkStreamDrainIncomplete(relaycommon.StreamDrainResultUpstreamError)
-				if billingErr := service.SettleAcceptedTextBilling(c, info, usage); billingErr != nil {
-					logger.LogError(c, "failed to settle accepted converted stream billing: "+billingErr.Error())
-				}
-				return types.NewError(newApiErr, newApiErr.GetErrorCode(), types.ErrOptionWithSkipRetry())
-			}
-			return newApiErr
+			return settleAcceptedStreamError(c, info, usage, newApiErr)
 		}
 
 		var containAudioTokens = usage.CompletionTokenDetails.AudioTokens > 0 || usage.PromptTokensDetails.AudioTokens > 0
@@ -219,21 +209,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	usage, newApiErr := adaptor.DoResponse(c, httpResp, info)
 	if newApiErr != nil {
-		if info.GetStreamRecoverySnapshot().Accepted {
-			textUsage, ok := usage.(*dto.Usage)
-			if !ok || textUsage == nil {
-				textUsage = &dto.Usage{}
-			}
-			info.MarkStreamDrainIncomplete(relaycommon.StreamDrainResultUpstreamError)
-			if billingErr := service.SettleAcceptedTextBilling(c, info, textUsage); billingErr != nil {
-				logger.LogError(c, "failed to settle accepted stream billing: "+billingErr.Error())
-			}
-			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
-			return types.NewError(newApiErr, newApiErr.GetErrorCode(), types.ErrOptionWithSkipRetry())
-		}
 		// reset status code 重置状态码
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
-		return newApiErr
+		return settleAcceptedStreamError(c, info, usage, newApiErr)
 	}
 
 	var containAudioTokens = usage.(*dto.Usage).CompletionTokenDetails.AudioTokens > 0 || usage.(*dto.Usage).PromptTokensDetails.AudioTokens > 0
@@ -245,4 +223,19 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
 	}
 	return nil
+}
+
+func settleAcceptedStreamError(c *gin.Context, info *relaycommon.RelayInfo, usage any, relayErr *types.NewAPIError) *types.NewAPIError {
+	if relayErr == nil || info == nil || !info.GetStreamRecoverySnapshot().Accepted {
+		return relayErr
+	}
+	textUsage, ok := usage.(*dto.Usage)
+	if !ok || textUsage == nil {
+		textUsage = &dto.Usage{}
+	}
+	info.MarkStreamDrainIncomplete(relaycommon.StreamDrainResultUpstreamError)
+	if billingErr := service.SettleAcceptedTextBilling(c, info, textUsage); billingErr != nil {
+		logger.LogError(c, "failed to settle accepted stream billing: "+billingErr.Error())
+	}
+	return types.NewError(relayErr, relayErr.GetErrorCode(), types.ErrOptionWithSkipRetry())
 }

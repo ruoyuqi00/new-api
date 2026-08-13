@@ -149,7 +149,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if newAPIError != nil {
 		// reset status code 重置状态码
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
-		return newAPIError
+		return settleAcceptedStreamError(c, info, usage, newAPIError)
 	}
 
 	usageDto := usage.(*dto.Usage)

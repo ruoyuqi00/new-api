@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,7 +39,7 @@ func configureStreamRecoveryBillingTest(t *testing.T) {
 	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Log{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Log{}))
 	model.DB = db
 	model.LOG_DB = db
 
@@ -580,5 +581,140 @@ func TestChatCompletionsViaResponsesFinishesNon200AfterParsingError(t *testing.T
 		require.Contains(t, newAPIError.Error(), "converted structured failure")
 	case <-time.After(2 * time.Second):
 		t.Fatal("converted request did not finish parsing the error body")
+	}
+}
+
+type streamRecoveryBillingRecorder struct {
+	preConsumed int
+	settled     []int
+}
+
+func (b *streamRecoveryBillingRecorder) Settle(quota int) error {
+	b.settled = append(b.settled, quota)
+	return nil
+}
+
+func (b *streamRecoveryBillingRecorder) Refund(*gin.Context) {}
+func (b *streamRecoveryBillingRecorder) NeedsRefund() bool   { return len(b.settled) == 0 }
+func (b *streamRecoveryBillingRecorder) GetPreConsumedQuota() int {
+	return b.preConsumed
+}
+func (b *streamRecoveryBillingRecorder) Reserve(int) error { return nil }
+
+func TestAcceptedStreamErrorSettlementIsEstimatedAndSingleShot(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	configureStreamRecoveryBillingTest(t)
+	seed := &model.User{Id: 801, Username: "stream-user"}
+	require.NoError(t, model.DB.Create(seed).Error)
+	require.NoError(t, model.DB.Create(&model.Channel{Id: 802, Name: "stream-channel"}).Error)
+
+	billing := &streamRecoveryBillingRecorder{preConsumed: 1250}
+	info := &relaycommon.RelayInfo{
+		UserId: 801, TokenId: 803, OriginModelName: "gpt-test", UsingGroup: "default",
+		StartTime: time.Now(), IsStream: true, Billing: billing, FinalPreConsumedQuota: 1250,
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 802, UpstreamModelName: "gpt-test"},
+	}
+	info.SetEstimatePromptTokens(400)
+	info.EnableStreamRecovery()
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	relayErr := types.NewError(errors.New("malformed accepted stream"), types.ErrorCodeBadResponse)
+
+	result := settleAcceptedStreamError(c, info, nil, relayErr)
+
+	require.True(t, types.IsSkipRetryError(result))
+	require.Equal(t, []int{1250}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", info.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 400, logs[0].PromptTokens)
+	require.Zero(t, logs[0].CompletionTokens)
+	require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
+}
+
+func TestResponsesAndClaudeAcceptedMalformedStreamsSettleEstimatedUsage(t *testing.T) {
+	originalStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = originalStreamingTimeout })
+	tests := []struct {
+		name    string
+		path    string
+		channel int
+		request dto.Request
+		invoke  func(*gin.Context, *relaycommon.RelayInfo) *types.NewAPIError
+		wantErr bool
+	}{
+		{
+			name: "responses", path: "/v1/responses", channel: constant.ChannelTypeOpenAI,
+			request: &dto.OpenAIResponsesRequest{Model: "gpt-test", Stream: common.GetPointer(true)},
+			invoke:  ResponsesHelper,
+		},
+		{
+			name: "claude", path: "/v1/messages", channel: constant.ChannelTypeAnthropic,
+			request: &dto.ClaudeRequest{Model: "claude-test", Stream: common.GetPointer(true), MaxTokens: common.GetPointer(uint(128))},
+			invoke:  ClaudeHelper,
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			originalEnabled := constant.StreamUsageDrainEnabled
+			constant.StreamUsageDrainEnabled = true
+			t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+			configureStreamRecoveryBillingTest(t)
+			service.InitHttpClient()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("data: {malformed\n\n"))
+			}))
+			t.Cleanup(server.Close)
+
+			userID := 811
+			channelID := 812
+			require.NoError(t, model.DB.Create(&model.User{Id: userID, Username: "handler-user"}).Error)
+			require.NoError(t, model.DB.Create(&model.Channel{Id: channelID, Name: "handler-channel"}).Error)
+			billing := &streamRecoveryBillingRecorder{preConsumed: 1250}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(`{"model":"gpt-test","stream":true}`))
+			common.SetContextKey(c, constant.ContextKeyChannelType, test.channel)
+			common.SetContextKey(c, constant.ContextKeyChannelId, channelID)
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
+			common.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
+			common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-test")
+			info := &relaycommon.RelayInfo{
+				Request: test.request, UserId: userID, TokenId: 813, OriginModelName: "gpt-test", UsingGroup: "default",
+				StartTime: time.Now(), IsStream: true, DisablePing: true, Billing: billing, FinalPreConsumedQuota: 1250,
+				RelayMode: relayconstant.RelayModeChatCompletions, RelayFormat: types.RelayFormatOpenAI, RequestURLPath: test.path,
+				PriceData: types.PriceData{ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 1250, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+			}
+			if test.name == "responses" {
+				info.RelayMode = relayconstant.RelayModeResponses
+			}
+			info.SetEstimatePromptTokens(400)
+
+			relayErr := test.invoke(c, info)
+
+			if test.wantErr {
+				require.NotNil(t, relayErr)
+				require.True(t, types.IsSkipRetryError(relayErr))
+			} else {
+				require.Nil(t, relayErr)
+			}
+			require.Equal(t, []int{1250}, billing.settled)
+			var logs []model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ?", userID).Find(&logs).Error)
+			require.Len(t, logs, 1)
+			require.Equal(t, 400, logs[0].PromptTokens)
+			require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
+		})
 	}
 }
