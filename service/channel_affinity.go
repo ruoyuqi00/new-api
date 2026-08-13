@@ -580,6 +580,10 @@ func GetChannelAffinityPromptCacheKey(c *gin.Context) (string, bool) {
 	if c == nil || c.Request == nil || c.Request.URL == nil || c.Request.URL.Path != "/v1/responses" {
 		return "", false
 	}
+	meta, ok := getChannelAffinityMeta(c)
+	if !ok || meta.PromptCacheKey == "" {
+		return "", false
+	}
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
 		return "", false
@@ -590,10 +594,6 @@ func GetChannelAffinityPromptCacheKey(c *gin.Context) (string, bool) {
 	}
 	existing := gjson.GetBytes(body, "prompt_cache_key")
 	if existing.Exists() && strings.TrimSpace(existing.String()) != "" {
-		return "", false
-	}
-	meta, ok := getChannelAffinityMeta(c)
-	if !ok || meta.PromptCacheKey == "" {
 		return "", false
 	}
 	return meta.PromptCacheKey, true
