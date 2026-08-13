@@ -182,19 +182,20 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
 
 	var (
-		stopChan    = make(chan bool, 3)
-		detachReady = make(chan struct{})
-		pingErrors  = make(chan error, 1)
-		drainReader = &streamDrainReader{reader: resp.Body, info: info}
-		scanner     = NewStreamScanner(drainReader)
-		ticker      = time.NewTicker(streamingTimeout)
-		pingTicker  *time.Ticker
-		writeMutex  sync.Mutex
-		pendingData atomic.Int64 // transient priority hint, not stream state
-		drainLimit  atomic.Bool
-		wg          sync.WaitGroup
-		cleanupOnce sync.Once
-		stopOnce    sync.Once
+		stopChan       = make(chan bool, 3)
+		detachReady    = make(chan struct{})
+		pingErrors     = make(chan error, 1)
+		drainReader    = &streamDrainReader{reader: resp.Body, info: info}
+		scanner        = NewStreamScanner(drainReader)
+		ticker         = time.NewTicker(streamingTimeout)
+		pingTicker     *time.Ticker
+		writeMutex     sync.Mutex
+		pendingData    atomic.Int64 // transient priority hint, not stream state
+		drainLimit     atomic.Bool
+		scannerReadErr error
+		wg             sync.WaitGroup
+		cleanupOnce    sync.Once
+		stopOnce       sync.Once
 	)
 
 	stop := func() {
@@ -416,18 +417,11 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		}
 
 		if err := scanner.Err(); err != nil {
-			snapshot := info.GetStreamRecoverySnapshot()
-			terminalCompleted := snapshot.Enabled &&
-				snapshot.UsageState == relaycommon.StreamUsageStateExact &&
-				snapshot.DrainResult == relaycommon.StreamDrainResultCompleted
-			if terminalCompleted {
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
-			} else if err != io.EOF && !errors.Is(err, errStreamDrainLimit) {
+			if err != io.EOF && !errors.Is(err, errStreamDrainLimit) {
 				logger.LogError(c, "scanner error: "+err.Error())
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+				scannerReadErr = err
 			}
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
 	})
 
 	clientDone := c.Request.Context().Done()
@@ -476,12 +470,9 @@ waitForStream:
 	}
 
 	cleanup()
-	if c.Request.Context().Err() == nil {
-		snapshot := info.GetStreamRecoverySnapshot()
-		if snapshot.Enabled && snapshot.UsageState == relaycommon.StreamUsageStateExact && snapshot.DrainResult == relaycommon.StreamDrainResultCompleted {
-			info.StreamStatus.ConfirmTerminalCompletion()
-		}
-	}
+	snapshot := info.GetStreamRecoverySnapshot()
+	terminalCompleted := snapshot.Enabled && snapshot.UsageState == relaycommon.StreamUsageStateExact && snapshot.DrainResult == relaycommon.StreamDrainResultCompleted
+	info.StreamStatus.FinalizeAfterWorkers(c.Request.Context().Err(), scannerReadErr, terminalCompleted)
 	if drainLimit.Load() {
 		snapshot := info.GetStreamRecoverySnapshot()
 		if snapshot.UsageState != relaycommon.StreamUsageStateExact || snapshot.DrainResult != relaycommon.StreamDrainResultCompleted {

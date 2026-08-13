@@ -429,6 +429,38 @@ func TestStreamScannerHandlerLateExactTerminalOverridesQueuedScannerError(t *tes
 	assert.NoError(t, info.StreamStatus.EndError)
 }
 
+func TestStreamScannerHandlerClientCancellationWinsExactTerminalCleanup(t *testing.T) {
+	configureStreamScannerRecoveryTest(t)
+
+	requestContext, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c, _, info := setupStreamTest(t, nil)
+	c.Request = c.Request.WithContext(requestContext)
+	info.DisablePing = true
+	info.ChannelMeta.ChannelId = 34
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	errReturned := make(chan struct{})
+	body := &eagerTerminalErrorBody{
+		data:        []byte("data: terminal\n"),
+		err:         errors.New("http2: response body closed"),
+		errReturned: errReturned,
+	}
+	StreamScannerHandler(c, &http.Response{Body: body}, info, func(data string, _ *StreamResult) {
+		if data == "terminal" {
+			<-errReturned
+			info.MarkStreamTerminalUsage()
+			cancel()
+		}
+	})
+
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	assert.ErrorIs(t, info.StreamStatus.EndError, context.Canceled)
+}
+
 func TestStreamScannerHandlerPreTerminalReadErrorRemainsScannerError(t *testing.T) {
 	c, _, info := setupStreamTest(t, nil)
 	reader, writer := io.Pipe()

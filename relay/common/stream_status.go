@@ -52,14 +52,31 @@ func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
 	})
 }
 
-// ConfirmTerminalCompletion is called after stream workers stop. A scanner
-// error queued behind an exact terminal usage event is transport cleanup, not
-// a failed stream.
-func (s *StreamStatus) ConfirmTerminalCompletion() {
-	if s == nil || s.EndReason != StreamEndReasonScannerErr {
+// FinalizeAfterWorkers resolves scanner cleanup only after all stream workers
+// stop, so downstream cancellation and handler failures remain authoritative.
+func (s *StreamStatus) FinalizeAfterWorkers(clientErr error, scannerErr error, terminalCompleted bool) {
+	if s == nil {
 		return
 	}
-	s.EndReason = StreamEndReasonDone
+	if clientErr != nil {
+		s.EndReason = StreamEndReasonClientGone
+		s.EndError = clientErr
+		return
+	}
+	if s.EndReason != StreamEndReasonNone {
+		return
+	}
+	if scannerErr != nil {
+		if terminalCompleted {
+			s.EndReason = StreamEndReasonDone
+			s.EndError = nil
+			return
+		}
+		s.EndReason = StreamEndReasonScannerErr
+		s.EndError = scannerErr
+		return
+	}
+	s.EndReason = StreamEndReasonEOF
 	s.EndError = nil
 }
 
