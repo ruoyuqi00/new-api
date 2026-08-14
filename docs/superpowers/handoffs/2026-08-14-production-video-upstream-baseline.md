@@ -4,6 +4,8 @@
 >
 > Recorded: 2026-08-14 (Asia/Shanghai)
 >
+> Last production recheck: 2026-08-14 after release `61527e8f9`
+>
 > Scope: integrating additional video-generation upstreams without changing the
 > production brand, existing billing rules, GPT text relay, cache-affinity work,
 > database contents, or production routing before explicit approval.
@@ -37,32 +39,38 @@ changed while recording them.
 
 | Item | Current baseline |
 | --- | --- |
-| Production source commit | `290db8f250618f1c8f690f0dfb3cbeecc58aacb2` |
+| Production application commit | `61527e8f9193d6cfdcb016127c059dec94b1a34c` |
 | Production source branch | `codex/scanner-cache-key-safety-20260813` |
-| Running image | `yuapi:production-20260814-290db8f25` |
-| Image ID | `sha256:d91bd9d8d95160aa6a72fa92b163958a0337d105d469adf12047ead86d4111f2` |
-| Image creation time | `2026-08-13T17:06:14.457304917Z` |
-| Running container | `newapi-production-20260814-290db8f25` |
-| Private binding | `127.0.0.1:13009 -> 3000/tcp` |
+| Handoff source | latest pushed commit on `ruoyuqi00/new-api:codex/scanner-cache-key-safety-20260813` that contains this document |
+| Running image | `yuapi:production-20260814-61527e8f9` |
+| Image ID | `sha256:5bd5c508828ef6f5a4740a1c45bc6e2779df7fafc72383adc6b360b50c2cba5a` |
+| Image creation time | `2026-08-14T11:59:52.988691275Z` |
+| Running container | `newapi-production-20260814-61527e8f9` |
+| Private binding | `127.0.0.1:13012 -> 3000/tcp` |
 | Runtime state | healthy, restart count `0` |
-| Caddy target count | exactly two references to `newapi-production-20260814-290db8f25:3000` |
+| Running YuAPI app count | exactly one |
+| Caddy target count | exactly two references to `newapi-production-20260814-61527e8f9:3000` |
+| Release alias network | `yuapi-release-61527e8f9`, attached only to Caddy and the running app |
 | Caddy rollback copy | `/opt/edge/Caddyfile.pre-20260813T173802Z-b66e99504` |
-| Retained rollback image | `yuapi:production-20260812-b66e99504` |
-| Retained rollback container | `newapi-production-20260812-b66e99504` |
-| Rollback private binding | `127.0.0.1:13005 -> 3000/tcp` |
-| Rollback runtime state | healthy, restart count `0` |
+| Primary retained rollback image | `yuapi:production-20260814-290db8f25` |
+| Primary retained rollback container | `newapi-rollback-20260814-auth-origin-290db8f25` |
+| Primary rollback runtime state | stopped and preserved |
+| Additional retained rollback | `newapi-production-20260812-b66e99504`, stopped and preserved |
 
-The older candidate containers ending in `5f1a89e32`, `8ec9b5ffd`, and
-`2ff69650d` are stopped diagnostic artifacts, not valid production baselines.
-Do not select them as source or deployment candidates.
+The release candidate is retained as
+`newapi-rollback-candidate-20260814-61527e8f9` and is stopped. The older
+containers ending in `5f1a89e32`, `8ec9b5ffd`, and `2ff69650d` are also stopped
+diagnostic artifacts. None of these is the source baseline for a new branch.
 
 The much older `production-20260804-309717aea` image remains important incident
 history: it proved that an image tag and Git commit can describe different
 effective frontend build inputs. It is not the current production baseline.
 
-The commit that adds only this handoff document may be used as the parent of a
-new video-integration branch. Its application code is identical to
-`290db8f250618f1c8f690f0dfb3cbeecc58aacb2`.
+Start a new video-integration branch from the latest pushed commit on the
+handoff source branch that contains this revision. Its application code must be
+identical to the running image source commit
+`61527e8f9193d6cfdcb016127c059dec94b1a34c`; later handoff commits may change
+documentation only.
 
 ## 3. Brand and UI baseline
 
@@ -70,9 +78,9 @@ The user approved the current production-aligned local UI before the latest
 switch. The public production homepage currently references these assets:
 
 - `/static/css/6189.315a58962e.css`
-- `/static/css/index.f6021f0c1d.css`
-- `/static/js/6189.a8e25ef015.js`
-- `/static/js/index.9c6f815e5e.js`
+- `/static/css/index.5cc3c08fc2.css`
+- `/static/js/6189.b849ad6f8b.js`
+- `/static/js/index.025c81961a.js`
 - `/static/js/lib-react.a6dd11adaa.js`
 - `/static/js/vendor-tanstack.7425bb6434.js`
 - `/static/js/vendor-ui-primitives.f8cdb75d06.js`
@@ -108,6 +116,8 @@ The video integration task must not make unrelated changes to:
   token accounting;
 - GPT text relay, Responses pass-through, scanner status, prompt-cache key
   derivation, channel affinity, cooldown, retry, or disconnect settlement;
+- GPT text missing-terminal-usage estimation, zero-token settlement, tiered
+  billing snapshots, or the one-hour/page-30 usage-log defaults;
 - login, OAuth, passkeys, session limits, Turnstile, or authentication policy;
 - existing image providers and image prices unless the user explicitly expands
   the task;
@@ -301,6 +311,12 @@ and operator logs must identify the model, billing unit, duration where
 applicable, task status, and quota; they must not imply that zero tokens means a
 free video task.
 
+The production GPT text path now estimates prompt and observed completion usage
+when an accepted `/v1/responses` or `/v1/chat/completions` stream has no usable
+terminal usage. That rule is deliberately scoped to GPT text. Do not import it
+into image, video, audio, Claude Messages, or asynchronous task billing. Media
+task charging remains the accepted-task state machine described below.
+
 Required invariants:
 
 - Existing model base prices and group ratios remain unchanged.
@@ -420,21 +436,57 @@ Rollback means restoring Caddy to the retained healthy application container.
 It does not mean restoring an old database snapshot, deleting new transaction
 data, resetting balances, or replacing MySQL/Redis.
 
-## 11. Separate known GPT cache issue
+### 10.1 Current Caddy alias constraint
 
-The current GPT cache/account-pool investigation is not part of video-provider
-integration and must not be mixed into that branch.
+During release `61527e8f9`, Caddy's graceful reload correctly retained existing
+client connections, but those old connection generations also retained their
+old upstream hostnames. Stopping the old container before those generations
+were redirected produced temporary 502 responses even though the new app was
+healthy.
 
-Current evidence shows that YuAPI can preserve explicit `prompt_cache_key` and
-improve channel affinity, but it cannot pin an account inside an upstream-owned
-account pool that does not expose account identity. The remaining design work is
-to coordinate stable session/model affinity with the upstream pool while using
-capacity-aware deterministic failover. It must not expose upstream account IDs
-or keys, and it must not route every session to one account.
+The release network `yuapi-release-61527e8f9` therefore maps the former
+production hostname, the former candidate hostname, and the stable
+`yuapi-production-live` alias to the running app. This lets old Caddy
+generations dial the new app while the retired containers remain stopped.
 
-The `hyojoo` traffic analysis is a GPT text validation workload. Do not use it
-as acceptance evidence for video integration and do not modify its cache path
-from a video branch.
+Do not disconnect Caddy or the running app from this network, remove those
+aliases, or reuse the alias names from a video branch. A later production
+release must keep every currently referenced upstream reachable until existing
+Caddy generations have drained or their names have been safely remapped.
+
+For rollback, start `newapi-rollback-20260814-auth-origin-290db8f25`, wait for a
+healthy state, validate Caddy-to-container connectivity, then reload the two
+intended YuAPI upstream references to that retained container. Never stop the
+current app before public checks pass on the rollback target.
+
+## 11. Separate deployed GPT cache and text-settlement work
+
+The GPT cache/account-pool and missing-usage work is deployed and is not part of
+video-provider integration. Do not mix additional GPT changes into a video
+branch.
+
+Current production preserves explicit `prompt_cache_key`, derives a protected
+stable key only when needed, and scopes channel affinity by user token, group,
+model, and conversation identity. It still cannot pin an account inside an
+upstream-owned account pool that does not expose account identity. Any future
+pool work must coordinate stable session/model affinity with capacity-aware
+deterministic failover without exposing upstream account IDs or keys and
+without routing every session to one account.
+
+The previously selected validation user is no longer active. The first
+post-release comparison instead used the most active user/model pair, with the
+user identifier intentionally omitted and model `gpt-5.6-sol`, over equal
+windows of about 24 minutes. Requests increased from 2,874 to 4,181 while
+cached tokens divided by prompt tokens increased from 76.79% to 77.58%; both
+windows used four channels, post-release `scanner_error` was zero, and
+`client_gone` was one. These are observation facts, not a permanent SLA or
+video acceptance evidence.
+
+The post-release aggregate also showed no positive-quota GPT text log with both
+prompt and completion tokens equal to zero. Missing terminal usage is now
+marked as estimated and unconfirmed. A video branch must not change these text
+settlement rules or use text token fields to decide whether a video task is
+free.
 
 ## 12. Next-window start instruction
 
@@ -442,7 +494,10 @@ The next task should begin with this instruction:
 
 > Read `docs/superpowers/handoffs/2026-08-14-production-video-upstream-baseline.md`
 > completely and treat it as the operational baseline. Start a new `codex/`
-> branch from the commit containing that document. Do not touch production,
+> branch from the latest pushed commit on
+> `codex/scanner-cache-key-safety-20260813` that contains this revision. Verify
+> that application code still matches production commit
+> `61527e8f9193d6cfdcb016127c059dec94b1a34c`. Do not touch production,
 > Caddy, the database, billing, GPT relay/cache logic, or brand UI. First perform
 > a read-only audit of each proposed video provider's current models, protocol,
 > price unit, credentials boundary, concurrency, async status/result contract,
