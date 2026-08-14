@@ -760,7 +760,7 @@ func TestApplyPreConsumedQuotaFloor(t *testing.T) {
 	}
 }
 
-func TestAmbiguousTextBillingSettlesFrozenReservation(t *testing.T) {
+func TestAmbiguousGPTTextBillingSettlesEstimatedUsage(t *testing.T) {
 	truncate(t)
 	seedUser(t, 101, 0)
 	seedChannel(t, 201)
@@ -782,7 +782,7 @@ func TestAmbiguousTextBillingSettlesFrozenReservation(t *testing.T) {
 			wantPrompt: 3200,
 		},
 		{
-			name: "selected tier estimate",
+			name: "tiered estimate",
 			info: &relaycommon.RelayInfo{
 				UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
 				StartTime:   time.Now(),
@@ -790,11 +790,15 @@ func TestAmbiguousTextBillingSettlesFrozenReservation(t *testing.T) {
 				PriceData:   types.PriceData{QuotaToPreConsume: 1250},
 				TieredBillingSnapshot: &billingexpr.BillingSnapshot{
 					BillingMode:              "tiered_expr",
+					ExprString:               `tier("estimated", p)`,
+					ExprHash:                 billingexpr.ExprHashString(`tier("estimated", p)`),
+					GroupRatio:               1,
+					QuotaPerUnit:             1_000_000,
 					EstimatedQuotaAfterGroup: 875,
 					EstimatedTier:            "selected-at-reservation",
 				},
 			},
-			want:       875,
+			want:       3200,
 			wantPrompt: 3200,
 		},
 	}
@@ -826,9 +830,10 @@ func TestAmbiguousTextBillingSettlesFrozenReservation(t *testing.T) {
 			require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
 			if tt.info.TieredBillingSnapshot != nil {
 				require.Contains(t, logs[0].Other, `"billing_mode":"tiered_expr"`)
-				require.Contains(t, logs[0].Other, `"estimated_tier":"selected-at-reservation"`)
-				require.Contains(t, logs[0].Other, `"settled_from_reservation":true`)
+				require.Contains(t, logs[0].Other, `"estimated_tier":"estimated"`)
+				require.Contains(t, logs[0].Other, `"settled_from_reservation":false`)
 			}
+			require.Contains(t, logs[0].Other, `"settled_from_estimate":true`)
 
 			var user model.User
 			require.NoError(t, model.DB.First(&user, tt.info.UserId).Error)
@@ -865,7 +870,7 @@ func TestAmbiguousTextBillingDoesNotRecordConsumptionWhenSettlementFails(t *test
 	err := SettleAmbiguousTextBilling(ctx, relayInfo)
 
 	require.Error(t, err)
-	require.Equal(t, []int{1250}, billing.settled)
+	require.Equal(t, []int{0}, billing.settled)
 	var logs []model.Log
 	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
 	require.Empty(t, logs)
@@ -905,7 +910,7 @@ func TestAcceptedStreamBillingDoesNotRecordConsumptionWhenSettlementFails(t *tes
 	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{})
 
 	require.Error(t, err)
-	require.Equal(t, []int{1250}, billing.settled)
+	require.Equal(t, []int{400}, billing.settled)
 	var logs []model.Log
 	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
 	require.Empty(t, logs)
@@ -917,7 +922,186 @@ func TestAcceptedStreamBillingDoesNotRecordConsumptionWhenSettlementFails(t *tes
 	require.Zero(t, channel.UsedQuota)
 }
 
-func TestUnconfirmedTerminalUsageDoesNotRunTieredSettlement(t *testing.T) {
+func TestGPTTextEstimatedSettlementUsesObservedTokensInsteadOfReservation(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+
+	tests := []struct {
+		name  string
+		path  string
+		usage *dto.Usage
+		want  int
+	}{
+		{
+			name: "observed prompt and completion estimate",
+			path: "/v1/responses",
+			usage: &dto.Usage{
+				PromptTokens:     400,
+				CompletionTokens: 20,
+				UsageSource:      "estimated",
+			},
+			want: 440,
+		},
+		{
+			name:  "zero token estimate",
+			path:  "/v1/responses",
+			usage: &dto.Usage{UsageSource: "estimated"},
+			want:  0,
+		},
+		{
+			name: "chat completions uses the same estimate rule",
+			path: "/v1/chat/completions",
+			usage: &dto.Usage{
+				PromptTokens:     400,
+				CompletionTokens: 20,
+				UsageSource:      "estimated",
+			},
+			want: 440,
+		},
+		{
+			name: "unconfirmed cache details are not treated as authoritative",
+			path: "/v1/responses",
+			usage: &dto.Usage{
+				PromptTokens:     400,
+				CompletionTokens: 20,
+				UsageSource:      "estimated",
+				PromptTokensDetails: dto.InputTokenDetails{
+					CachedTokens: 111,
+				},
+				InputTokensDetails: &dto.InputTokenDetails{CachedTokens: 111},
+			},
+			want: 440,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			billing := &recordingTaskBillingSettler{preConsumed: 1250}
+			relayInfo := &relaycommon.RelayInfo{
+				UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+				RequestURLPath: tt.path,
+				StartTime:      time.Now(),
+				Billing:        billing,
+				ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
+				PriceData: types.PriceData{
+					ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+				},
+			}
+			relayInfo.EnableStreamRecovery()
+			relayInfo.MarkStreamAccepted()
+			t.Cleanup(relayInfo.FinishStreamRecovery)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, tt.path, nil)
+
+			err := SettleAcceptedTextBilling(ctx, relayInfo, tt.usage)
+
+			require.NoError(t, err)
+			require.Equal(t, []int{tt.want}, billing.settled)
+			var logs []model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+			require.Len(t, logs, 1)
+			require.Equal(t, tt.want, logs[0].Quota)
+			require.Contains(t, logs[0].Other, `"cache_tokens":0`)
+			require.NotContains(t, logs[0].Other, `"settled_from_reservation":true`)
+
+			require.NoError(t, model.DB.Exec("UPDATE users SET used_quota = 0, request_count = 0 WHERE id = ?", relayInfo.UserId).Error)
+			require.NoError(t, model.DB.Exec("UPDATE channels SET used_quota = 0 WHERE id = ?", relayInfo.ChannelId).Error)
+			require.NoError(t, model.LOG_DB.Exec("DELETE FROM logs").Error)
+		})
+	}
+}
+
+func TestNonGPTEstimatedSettlementKeepsExistingReservationRule(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "image-test",
+		RequestURLPath: "/v1/images/edits",
+		StartTime:      time.Now(),
+		Billing:        billing,
+		ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", nil)
+
+	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 400,
+		UsageSource:  "estimated",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int{1250}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 1250, logs[0].Quota)
+	require.Contains(t, logs[0].Other, `"settled_from_reservation":true`)
+	require.NotContains(t, logs[0].Other, `"settled_from_estimate":true`)
+}
+
+func TestGPTTextEstimatedSettlementRecountsPromptWhenInitialEstimateIsMissing(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	InitTokenEncoders()
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+		RequestURLPath: "/v1/responses",
+		RelayFormat:    types.RelayFormatOpenAIResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Model: "gpt-test",
+			Input: []byte(`"fallback prompt counting"`),
+		},
+		StartTime:   time.Now(),
+		Billing:     billing,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Set(string(constant.ContextKeyOriginalModel), "gpt-test")
+
+	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{UsageSource: "estimated"})
+
+	require.NoError(t, err)
+	require.Len(t, billing.settled, 1)
+	require.Positive(t, billing.settled[0])
+	require.Less(t, billing.settled[0], 1250)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Positive(t, logs[0].PromptTokens)
+	require.Equal(t, billing.settled[0], logs[0].Quota)
+}
+
+func TestGPTTextEstimatedSettlementUsesFrozenTieredExpression(t *testing.T) {
 	billing := &recordingTaskBillingSettler{preConsumed: 500}
 	relayInfo := &relaycommon.RelayInfo{
 		UserId:                        1,
@@ -936,6 +1120,7 @@ func TestUnconfirmedTerminalUsageDoesNotRunTieredSettlement(t *testing.T) {
 		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
 			BillingMode:              "tiered_expr",
 			ExprString:               `tier("local_estimate", p * 1000 + c * 1000)`,
+			ExprHash:                 billingexpr.ExprHashString(`tier("local_estimate", p * 1000 + c * 1000)`),
 			GroupRatio:               1,
 			EstimatedQuotaAfterGroup: 500,
 			QuotaPerUnit:             500_000,
@@ -948,7 +1133,7 @@ func TestUnconfirmedTerminalUsageDoesNotRunTieredSettlement(t *testing.T) {
 
 	PostTextConsumeQuota(ctx, relayInfo, &dto.Usage{PromptTokens: 10_000, CompletionTokens: 10_000}, nil)
 
-	require.Equal(t, []int{20_000}, billing.settled)
+	require.Equal(t, []int{10_000_000}, billing.settled)
 }
 
 func TestIncompleteResponsesUsageAlwaysUsesPreConsumedQuotaFloor(t *testing.T) {

@@ -114,6 +114,43 @@ func TestTryTieredSettleFallsBackToFrozenPreConsumeOnExprError(t *testing.T) {
 	}
 }
 
+func TestTryTieredEstimatedSettleUsesObservedTokensWithoutReservationFallback(t *testing.T) {
+	validInfo := &relaycommon.RelayInfo{
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:              "tiered_expr",
+			ExprString:               `tier("estimated", p + c * 10)`,
+			ExprHash:                 billingexpr.ExprHashString(`tier("estimated", p + c * 10)`),
+			GroupRatio:               1,
+			EstimatedQuotaAfterGroup: 1250,
+			QuotaPerUnit:             1_000_000,
+		},
+	}
+
+	ok, quota, result, err := TryTieredEstimatedSettle(validInfo, billingexpr.TokenParams{P: 400, C: 20})
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 600, quota)
+	require.Equal(t, "estimated", result.MatchedTier)
+
+	invalidInfo := &relaycommon.RelayInfo{
+		FinalPreConsumedQuota: 1250,
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:              "tiered_expr",
+			ExprString:               "invalid +-+ expr",
+			ExprHash:                 billingexpr.ExprHashString("invalid +-+ expr"),
+			GroupRatio:               1,
+			EstimatedQuotaAfterGroup: 1250,
+			QuotaPerUnit:             1_000_000,
+		},
+	}
+
+	ok, quota, result, err = TryTieredEstimatedSettle(invalidInfo, billingexpr.TokenParams{P: 400})
+	require.Error(t, err)
+	require.True(t, ok)
+	require.Zero(t, quota)
+	require.Nil(t, result)
+}
+
 // ---------------------------------------------------------------------------
 // Pre-consume vs Post-consume consistency
 // ---------------------------------------------------------------------------

@@ -440,6 +440,20 @@ func normalizeTextSettlementUsage(relayInfo *relaycommon.RelayInfo, usage *dto.U
 	return usage
 }
 
+func isGPTTextSettlementRequest(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	path := ""
+	if relayInfo != nil {
+		path = relayInfo.RequestURLPath
+	}
+	if path == "" && ctx != nil && ctx.Request != nil && ctx.Request.URL != nil {
+		path = ctx.Request.URL.Path
+	}
+	if queryIndex := strings.IndexByte(path, '?'); queryIndex >= 0 {
+		path = path[:queryIndex]
+	}
+	return path == "/v1/responses" || path == "/v1/chat/completions"
+}
+
 func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
 	if !isAuthoritativeTextUsage(relayInfo, usage) {
 		return false
@@ -469,7 +483,32 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) error {
 	originUsage := usage
 	authoritativeUsage := isAuthoritativeTextUsage(relayInfo, originUsage)
+	estimatedGPTTextUsage := !authoritativeUsage && isGPTTextSettlementRequest(ctx, relayInfo)
+	if estimatedGPTTextUsage && relayInfo.GetEstimatePromptTokens() <= 0 &&
+		(originUsage == nil || originUsage.PromptTokens <= 0) && relayInfo.Request != nil {
+		if requestMeta := relayInfo.Request.GetTokenCountMeta(); requestMeta != nil {
+			billingMeta := *requestMeta
+			billingMeta.Files = nil
+			promptTokens, err := EstimateRequestTokenForBilling(ctx, &billingMeta, relayInfo)
+			if err != nil {
+				logger.LogWarn(ctx, "unable to estimate prompt tokens for incomplete GPT text response")
+			} else if promptTokens > 0 {
+				relayInfo.SetEstimatePromptTokens(promptTokens)
+			}
+		}
+	}
 	usage = normalizeTextSettlementUsage(relayInfo, usage, authoritativeUsage)
+	if estimatedGPTTextUsage {
+		usage.PromptCacheHitTokens = 0
+		usage.PromptTokensDetails = dto.InputTokenDetails{}
+		usage.CompletionTokenDetails = dto.OutputTokenDetails{}
+		usage.InputTokens = 0
+		usage.OutputTokens = 0
+		usage.InputTokensDetails = nil
+		usage.ClaudeCacheCreation5mTokens = 0
+		usage.ClaudeCacheCreation1hTokens = 0
+		usage.Cost = nil
+	}
 	if !authoritativeUsage {
 		recovery := relayInfo.GetStreamRecoverySnapshot()
 		if relayInfo.HasAmbiguousUpstreamSubmission() || recovery.Accepted {
@@ -488,24 +527,43 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	var tieredResult *billingexpr.TieredResult
 	tieredBillingApplied := false
-	if authoritativeUsage {
+	if authoritativeUsage || estimatedGPTTextUsage {
 		var tieredUsedVars map[string]bool
 		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
 			tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
 		}
-		tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, BuildTieredTokenParams(usage, summary.IsClaudeUsageSemantic, tieredUsedVars))
+		params := BuildTieredTokenParams(usage, summary.IsClaudeUsageSemantic, tieredUsedVars)
+		var tieredOk bool
+		var tieredQuota int
+		var tieredRes *billingexpr.TieredResult
+		if authoritativeUsage {
+			tieredOk, tieredQuota, tieredRes = TryTieredSettle(relayInfo, params)
+		} else {
+			var err error
+			tieredOk, tieredQuota, tieredRes, err = TryTieredEstimatedSettle(relayInfo, params)
+			if err != nil {
+				logger.LogError(ctx, "unable to evaluate tiered pricing for estimated GPT text usage")
+				tieredQuota = 0
+				extraContent = append(extraContent, "tiered estimate unavailable; no estimated charge applied")
+			}
+		}
 		if tieredOk {
 			tieredBillingApplied = true
 			tieredResult = tieredRes
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
+			if estimatedGPTTextUsage && summary.TotalTokens == 0 {
+				summary.Quota = 0
+			}
 		}
 	}
 
 	settledFromReservation := false
-	if quota, preserved := applyPreConsumedQuotaFloor(relayInfo, summary.Quota); preserved {
-		summary.Quota = quota
-		settledFromReservation = true
-		logger.LogWarn(ctx, "accepted upstream stream ended incomplete; preserving pre-consumed quota")
+	if !estimatedGPTTextUsage {
+		if quota, preserved := applyPreConsumedQuotaFloor(relayInfo, summary.Quota); preserved {
+			summary.Quota = quota
+			settledFromReservation = true
+			logger.LogWarn(ctx, "accepted upstream stream ended incomplete; preserving pre-consumed quota")
+		}
 	}
 
 	if summary.WebSearchCallCount > 0 {
@@ -576,6 +634,9 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if !authoritativeUsage {
 		other["usage_unconfirmed"] = true
 		other["usage_source"] = "estimated"
+		if estimatedGPTTextUsage {
+			other["settled_from_estimate"] = true
+		}
 		if settledFromReservation {
 			other["settled_from_reservation"] = true
 		}
@@ -648,7 +709,11 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if tieredBillingApplied || !authoritativeUsage && relayInfo.TieredBillingSnapshot != nil {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 		if !authoritativeUsage {
-			other["estimated_tier"] = relayInfo.TieredBillingSnapshot.EstimatedTier
+			estimatedTier := relayInfo.TieredBillingSnapshot.EstimatedTier
+			if tieredResult != nil && tieredResult.MatchedTier != "" {
+				estimatedTier = tieredResult.MatchedTier
+			}
+			other["estimated_tier"] = estimatedTier
 			other["settled_from_reservation"] = settledFromReservation
 		}
 	}

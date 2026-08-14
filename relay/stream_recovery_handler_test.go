@@ -631,7 +631,7 @@ func TestAcceptedStreamErrorSettlementIsEstimatedAndSingleShot(t *testing.T) {
 	result := settleAcceptedStreamError(c, info, nil, relayErr)
 
 	require.True(t, types.IsSkipRetryError(result))
-	require.Equal(t, []int{1250}, billing.settled)
+	require.Equal(t, []int{400}, billing.settled)
 	var logs []model.Log
 	require.NoError(t, model.LOG_DB.Where("user_id = ?", info.UserId).Find(&logs).Error)
 	require.Len(t, logs, 1)
@@ -651,17 +651,20 @@ func TestResponsesAndClaudeAcceptedMalformedStreamsSettleEstimatedUsage(t *testi
 		request dto.Request
 		invoke  func(*gin.Context, *relaycommon.RelayInfo) *types.NewAPIError
 		wantErr bool
+		want    int
 	}{
 		{
 			name: "responses", path: "/v1/responses", channel: constant.ChannelTypeOpenAI,
 			request: &dto.OpenAIResponsesRequest{Model: "gpt-test", Stream: common.GetPointer(true)},
 			invoke:  ResponsesHelper,
+			want:    400,
 		},
 		{
 			name: "claude", path: "/v1/messages", channel: constant.ChannelTypeAnthropic,
 			request: &dto.ClaudeRequest{Model: "claude-test", Stream: common.GetPointer(true), MaxTokens: common.GetPointer(uint(128))},
 			invoke:  ClaudeHelper,
 			wantErr: true,
+			want:    1250,
 		},
 	}
 	for _, test := range tests {
@@ -709,7 +712,7 @@ func TestResponsesAndClaudeAcceptedMalformedStreamsSettleEstimatedUsage(t *testi
 			} else {
 				require.Nil(t, relayErr)
 			}
-			require.Equal(t, []int{1250}, billing.settled)
+			require.Equal(t, []int{test.want}, billing.settled)
 			var logs []model.Log
 			require.NoError(t, model.LOG_DB.Where("user_id = ?", userID).Find(&logs).Error)
 			require.Len(t, logs, 1)
