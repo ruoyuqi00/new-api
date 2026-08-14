@@ -91,4 +91,3 @@ git commit -m "perf: bound default usage log queries"
 - [ ] Confirm the brand UI is unchanged.
 - [ ] Confirm the first common-log request sends `page_size=30` and rolling-hour timestamps.
 - [ ] Compare local API latency with the current production aggregate measurements.
-
