@@ -40,7 +40,7 @@ services:
 #      - RELAY_IDLE_CONN_TIMEOUT=90  # Relay HTTP 客户端空闲连接超时时间，单位秒，默认跟随 Go 标准库，设置为0表示不限制 (Relay HTTP client idle keep-alive timeout in seconds, defaults to Go standard library; set 0 to disable)
 #      - SESSION_SECRET=${SESSION_SECRET}  # Production secret store: same value generated from >=32 cryptographically random bytes on every app node; never commit it
 #      - SESSION_COOKIE_SECURE=true
-#      - SESSION_COOKIE_TRUSTED_URL=https://yuaiapi.com,https://global.yuaiapi.com
+#      - SESSION_COOKIE_TRUSTED_URL=https://yuaiapi.com,https://global.yuaiapi.com,https://api.yuaiapi.com
 #      - TRUSTED_PROXIES=127.0.0.0/8,::1/128,172.16.0.0/12
 #      - USER_SESSION_ACTIVE_LIMIT=50
 #      - USER_SESSION_ISSUANCE_LIMIT=100

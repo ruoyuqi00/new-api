@@ -8,7 +8,7 @@ Configure every application node with the following non-secret values:
 
 ```env
 SESSION_COOKIE_SECURE=true
-SESSION_COOKIE_TRUSTED_URL=https://yuaiapi.com,https://global.yuaiapi.com
+SESSION_COOKIE_TRUSTED_URL=https://yuaiapi.com,https://global.yuaiapi.com,https://api.yuaiapi.com
 TRUSTED_PROXIES=127.0.0.0/8,::1/128,172.16.0.0/12
 ```
 
