@@ -33,6 +33,11 @@ Their origin, credential boundary, channel type, priority, and weight must be
 copied from the approved video upstream configuration without recording secrets
 in Git.
 
+Every staged replacement ability must also have `enabled=0`. A disabled channel
+with enabled ability rows can still leak its models into the public pricing
+surface even though relay routing rejects them. Before approval, verify both
+channel status and ability status and confirm the public catalog is unchanged.
+
 ```text
 cangyuan-video-refresh-20260815-omni=omni-fast,omni-fast-no-water,omni-v2v,omni-v2v-no-water
 cangyuan-video-refresh-20260815-grok=grok-video,grok-video-1.5
@@ -188,6 +193,13 @@ Run only after explicit approval and a fresh no-drift check:
 7. Refresh the relevant settings/channel caches and read back every changed
    value. Confirm group ratios and all no-touch settings are unchanged.
 
+If either Grok model or `sd8-seedance-2.0` still lacks a successful real probe,
+the default cutover must keep the Grok channel disabled and keep all six ability
+rows for those three models at `enabled=0`. The other four replacement channels
+may be enabled with the 20 proven ability rows. Enabling all 13 models despite
+the observed upstream capacity failures requires a separate explicit risk
+acceptance; setting their prices is not activation approval.
+
 Keep both old and candidate application containers and aliases running for
 connection draining and the full observation window.
 
@@ -196,8 +208,10 @@ connection draining and the full observation window.
 Verify public health and asset delivery, authentication, console, pricing,
 Studio, Canvas, and developer documentation. Confirm:
 
-- exactly 13 enabled target video models and seven probe models hidden from
-  normal users;
+- exactly ten proven target video models enabled, three capacity-blocked target
+  models staged but hidden, and seven unpriced probe models hidden from normal
+  users; or all 13 target models only after the additional approval described
+  above;
 - exact base and group prices from authenticated pricing/catalog responses;
 - one cheapest target creation, one accepted ID, same-ID polling, one content
   download, one charge, and refresh recovery;

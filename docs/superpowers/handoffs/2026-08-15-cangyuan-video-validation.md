@@ -229,16 +229,61 @@ release evidence gaps. A cooldown retry produced the same result, so those
 three models require one successful bounded probe after the provider restores
 capacity; no further immediate retry is authorized.
 
+## Production candidate evidence
+
+The fully pushed commit `923edbb9b8110dc6f75bff146ea6c0dd62cedba9` was built
+server-side into a uniquely tagged image. The image revision label matched the
+source commit. A final candidate was started on a unique localhost-only port and
+release-network alias with task polling, batch quota updates, automatic channel
+updates, and model-update tasks disabled. It remained healthy with restart count
+zero while the existing production application remained healthy with restart
+count zero.
+
+Production preparation changed no public Caddy route and performed no Caddy
+reload. The active Caddyfile retained exactly two references to the existing
+application and zero references to the candidate. Caddy reached the candidate
+over the isolated network, and both the active and staged full configurations
+validated successfully.
+
+Five replacement channels and 26 two-group ability rows were staged. All five
+channels have disabled status and all 26 abilities have `enabled=0`. A first
+staging transaction used enabled ability rows and was corrected immediately
+after readback showed that disabled channels alone do not prevent pricing
+exposure. After the correction and cache refresh, both existing and candidate
+pricing surfaces returned to the exact pre-stage inventory. No replacement
+channel was routable.
+
+A protected server-local rollback artifact records the four legacy channel
+rows, their abilities, all 24 affected price values or absence markers, the
+complete relevant option rows, the existing task-price patch, and the active
+Caddyfile. Directories are mode `0700`, files are mode `0600`, and checksums
+verify. The cutover database transaction, the staged Caddyfile, and the complete
+database rollback were each exercised against production structure without
+commit; all dry runs ended in `ROLLBACK` and post-run readback matched the
+preparation baseline.
+
+Anonymous Playwright validation through a private SSH tunnel covered home,
+sign-in, pricing, and developer docs on desktop and mobile. All pages rendered
+without horizontal overflow or page errors. The only failed same-origin calls
+were the expected anonymous auth-refresh responses. The candidate served the
+new video documentation and new static asset fingerprints without changing the
+production assets.
+
+Authenticated candidate image and GPT smoke requests were not run because no
+synthetic production credential was available and active users' keys or balances
+must not be borrowed for release testing.
+
 ## Remaining gates
 
-1. After a fresh no-drift audit, retry only `grok-video`, `grok-video-1.5`, and
-   `sd8-seedance-2.0`. Do not repeat any of the ten completed paid probes.
-2. Require a completed MP4 and reconciled charge for each retry. A new explicit
-   capacity rejection may be retried only after operator review; an ambiguous
-   create result must never be retried.
-3. Push the fully verified branch and re-audit production read-only.
-4. Capture scoped server-local rollback artifacts, then build and privately
-   verify a blue-green candidate without changing public routing or stopping the
-   current application.
-5. Present the exact candidate and rollback facts and wait for explicit traffic
-   switch approval before any Caddy reload or replacement-channel activation.
+1. Choose whether to wait for successful real probes for `grok-video`,
+   `grok-video-1.5`, and `sd8-seedance-2.0`, switch only the ten proven models,
+   or explicitly accept exposing all 13 while those three upstream capacity
+   failures persist. Do not repeat any of the ten completed paid probes.
+2. Provide a dedicated synthetic production credential if authenticated image
+   and GPT candidate smoke tests are required before switching. Never borrow an
+   active user's key or balance.
+3. Re-run the no-drift, health, pricing-surface, Caddy-reference, candidate, and
+   rollback-artifact checks immediately before the approved switch.
+4. Obtain explicit traffic-switch and video-activation approval before any
+   Caddy reload or activation transaction. The current application must remain
+   running throughout switch, observation, and rollback readiness.
