@@ -197,7 +197,8 @@ func TestBuildOpenAICompatibleAsyncPayloadOmni(t *testing.T) {
 		}, map[string]any{"duration": 10, "resolution": "720p", "unknown_upstream_parameter": "do-not-forward"})
 		payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
 
-		assert.Equal(t, "https://cdn.example.com/main.png", payload["image_url"])
+		assert.Equal(t, []string{"https://cdn.example.com/main.png"}, payload["reference_image_urls"])
+		assert.NotContains(t, payload, "image_url")
 		assert.NotContains(t, payload, "image_urls")
 		assert.NotContains(t, payload, "duration")
 		assert.NotContains(t, payload, "seconds")
@@ -225,9 +226,9 @@ func TestBuildOpenAICompatibleAsyncPayloadOmni(t *testing.T) {
 		}, map[string]any{"reference_mode": "media"})
 		payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
 
-		assert.Equal(t, "https://cdn.example.com/source.mp4", payload["video_url"])
+		assert.Equal(t, []string{"https://cdn.example.com/source.mp4"}, payload["reference_videos"])
 		assert.NotContains(t, payload, "video")
-		assert.NotContains(t, payload, "reference_videos")
+		assert.NotContains(t, payload, "video_url")
 	})
 
 	t.Run("frame presence excludes video without image authorization", func(t *testing.T) {
@@ -245,42 +246,77 @@ func TestBuildOpenAICompatibleAsyncPayloadOmni(t *testing.T) {
 	})
 }
 
-func TestBuildOpenAICompatibleAsyncPayloadGrok(t *testing.T) {
+func TestBuildOpenAICompatibleAsyncPayloadCangyuan(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
-	task := newCanonicalOpenAICompatiblePayloadTask(t, "grok-video", []YucoreMediaReferenceInput{
-		{Role: "image", URL: "https://cdn.example.com/first.png"},
-	}, map[string]any{"duration": 10, "resolution": "720p"})
-	payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
-
-	assert.Equal(t, []string{"https://cdn.example.com/first.png"}, payload["image_urls"])
-	assert.Equal(t, "10", payload["seconds"])
-	assert.Equal(t, "720p", payload["size"])
-	assert.NotContains(t, payload, "image")
-	assert.NotContains(t, payload, "image_url")
-	assert.NotContains(t, payload, "duration")
-	assert.NotContains(t, payload, "resolution")
-
-	unknownFamily := catalog[task.ModelId]
-	unknownFamily.Family = "custom"
-	unknownPayload := buildOpenAICompatibleAsyncPayload(task, unknownFamily)
-	assert.Equal(t, "https://cdn.example.com/first.png", unknownPayload["image"])
-	assert.NotContains(t, unknownPayload, "image_urls")
-
-	unknownFamily.AllowedParameters = nil
-	task.Inputs = `[{"role":"image","url":"https://cdn.example.com/main.png"},{"role":"video","url":"https://cdn.example.com/motion.mp4"},{"role":"audio","url":"https://cdn.example.com/music.mp3"}]`
-	task.Metadata = `{"duration":10,"resolution":"720p","generate_audio":false,"seed":0}`
-	emptyAllowlistPayload := buildOpenAICompatibleAsyncPayload(task, unknownFamily)
-	for _, forbidden := range []string{
-		"negative_prompt", "resolution", "size", "aspect_ratio", "ratio", "response_format",
-		"image", "image_url", "image_urls", "images", "video_url", "reference_videos",
-		"reference_audios", "audio", "generate_audio", "seed", "duration", "seconds",
-	} {
-		assert.NotContains(t, emptyAllowlistPayload, forbidden)
+	tests := []struct {
+		model      string
+		references []YucoreMediaReferenceInput
+		metadata   map[string]any
+		want       map[string]any
+		absent     []string
+	}{
+		{
+			model:      "grok-video",
+			references: []YucoreMediaReferenceInput{{Role: "image", URL: "https://cdn.example.com/ref.png"}},
+			metadata:   map[string]any{"duration": 4, "resolution": "480p", "unknown_upstream_parameter": "do-not-forward"},
+			want:       map[string]any{"duration": 4, "resolution": "480p", "reference_image_urls": []string{"https://cdn.example.com/ref.png"}},
+			absent:     []string{"seconds", "size", "image", "image_url", "image_urls"},
+		},
+		{
+			model:      "happyhouse-1.0",
+			references: []YucoreMediaReferenceInput{{Role: "image", URL: "https://cdn.example.com/ref.png"}, {Role: "video", URL: "https://cdn.example.com/ref.mp4"}},
+			metadata:   map[string]any{"duration": 3, "resolution": "720p", "generate_audio": false},
+			want:       map[string]any{"duration": 3, "resolution": "720p", "generate_audio": false, "reference_image_urls": []string{"https://cdn.example.com/ref.png"}, "reference_videos": []string{"https://cdn.example.com/ref.mp4"}},
+			absent:     []string{"seconds", "size", "audio", "image_urls", "video_url"},
+		},
+		{
+			model:      "minimax-h3-2k",
+			references: []YucoreMediaReferenceInput{{Role: "image", URL: "https://cdn.example.com/ref.png"}, {Role: "audio", URL: "https://cdn.example.com/ref.mp3"}},
+			metadata:   map[string]any{"duration": 5, "resolution": "2k", "generate_audio": false},
+			want:       map[string]any{"duration": 5, "resolution": "2k", "generate_audio": false, "reference_image_urls": []string{"https://cdn.example.com/ref.png"}, "reference_audios": []string{"https://cdn.example.com/ref.mp3"}},
+			absent:     []string{"seconds", "size", "image", "image_url", "image_urls", "audio"},
+		},
+		{
+			model:      "sd4-seedance-2.0",
+			references: []YucoreMediaReferenceInput{{Role: "image", URL: "https://cdn.example.com/ref.png"}},
+			metadata:   map[string]any{"duration": 4, "resolution": "480p", "generate_audio": false},
+			want:       map[string]any{"duration": 4, "resolution": "480p", "generate_audio": false, "reference_image_urls": []string{"https://cdn.example.com/ref.png"}},
+			absent:     []string{"seconds", "size", "audio", "image", "image_url", "image_urls"},
+		},
+		{
+			model:      "sd7-seedance-2.0-720p",
+			references: []YucoreMediaReferenceInput{{Role: "image", URL: "https://cdn.example.com/ref.png"}},
+			metadata:   map[string]any{"duration": 4, "resolution": "720p", "generate_audio": false},
+			want:       map[string]any{"duration": 4, "generate_audio": false, "reference_image_urls": []string{"https://cdn.example.com/ref.png"}},
+			absent:     []string{"seconds", "resolution", "size", "audio", "image", "image_url", "image_urls"},
+		},
+		{
+			model:      "sd8-seedance-2.0",
+			references: []YucoreMediaReferenceInput{{Role: "image", URL: "https://cdn.example.com/ref.png"}},
+			metadata:   map[string]any{"duration": 5, "resolution": "720p", "generate_audio": false},
+			want:       map[string]any{"duration": 5, "reference_image_urls": []string{"https://cdn.example.com/ref.png"}},
+			absent:     []string{"seconds", "resolution", "size", "generate_audio", "audio", "image", "image_url", "image_urls"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.model, func(t *testing.T) {
+			task := newCanonicalOpenAICompatiblePayloadTask(t, test.model, test.references, test.metadata)
+			payload := buildOpenAICompatibleAsyncPayload(task, catalog[test.model])
+			assert.Equal(t, test.model, payload["model"])
+			assert.Equal(t, "keep the subject consistent", payload["prompt"])
+			assert.Equal(t, "16:9", payload["aspect_ratio"])
+			for field, value := range test.want {
+				assert.Equal(t, value, payload[field], field)
+			}
+			for _, field := range append(test.absent, "negative_prompt", "seed", "unknown_upstream_parameter") {
+				assert.NotContains(t, payload, field)
+			}
+		})
 	}
 }
 
-func TestBuildOpenAICompatibleAsyncPayloadHappyhouse(t *testing.T) {
+func TestBuildOpenAICompatibleAsyncPayloadHappyhouseMultipleImages(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
 	task := newCanonicalOpenAICompatiblePayloadTask(t, "happyhouse-1.0", []YucoreMediaReferenceInput{
@@ -291,47 +327,47 @@ func TestBuildOpenAICompatibleAsyncPayloadHappyhouse(t *testing.T) {
 	})
 	payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
 
-	assert.Equal(t, "10", payload["seconds"])
-	assert.Equal(t, "1080p", payload["size"])
-	assert.Equal(t, []string{"https://cdn.example.com/main.png", "https://cdn.example.com/style.png"}, payload["image_urls"])
-	assert.Equal(t, "watermark", payload["negative_prompt"])
-	assert.NotContains(t, payload, "duration")
-	assert.NotContains(t, payload, "resolution")
+	assert.Equal(t, 10, payload["duration"])
+	assert.Equal(t, "1080p", payload["resolution"])
+	assert.Equal(t, []string{"https://cdn.example.com/main.png", "https://cdn.example.com/style.png"}, payload["reference_image_urls"])
+	assert.Equal(t, false, payload["generate_audio"])
+	assert.NotContains(t, payload, "seconds")
+	assert.NotContains(t, payload, "size")
+	assert.NotContains(t, payload, "negative_prompt")
 	assert.NotContains(t, payload, "audio")
-	assert.NotContains(t, payload, "generate_audio")
 	assert.NotContains(t, payload, "seed")
 }
 
-func TestBuildOpenAICompatibleAsyncPayloadKling(t *testing.T) {
+func TestBuildOpenAICompatibleAsyncPayloadMinimaxFrames(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
-	task := newCanonicalOpenAICompatiblePayloadTask(t, "kling-3.0-omni", []YucoreMediaReferenceInput{
-		{Role: "image", URL: "https://cdn.example.com/main.png"},
-		{Role: "video", URL: "https://cdn.example.com/motion.mp4"},
-		{Role: "audio", URL: "https://cdn.example.com/music.mp3"},
+	task := newCanonicalOpenAICompatiblePayloadTask(t, "minimax-h3-2k", []YucoreMediaReferenceInput{
+		{Role: "first_frame", URL: "https://cdn.example.com/first.png"},
+		{Role: "last_frame", URL: "https://cdn.example.com/last.png"},
 	}, map[string]any{
-		"duration": 5, "resolution": "1080p", "generate_audio": false, "seed": int64(0),
+		"duration": 5, "resolution": "2k", "generate_audio": false, "reference_mode": "frames",
 	})
 	payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
 
-	assert.Equal(t, "5", payload["seconds"])
-	assert.Equal(t, "1080p", payload["size"])
-	assert.Equal(t, []string{"https://cdn.example.com/main.png"}, payload["image_urls"])
-	assert.Equal(t, []string{"https://cdn.example.com/motion.mp4"}, payload["reference_videos"])
-	assert.Equal(t, []string{"https://cdn.example.com/music.mp3"}, payload["reference_audios"])
-	assert.Equal(t, false, payload["audio"])
-	assert.Equal(t, "watermark", payload["negative_prompt"])
-	assert.NotContains(t, payload, "video")
-	assert.NotContains(t, payload, "generate_audio")
+	assert.Equal(t, 5, payload["duration"])
+	assert.Equal(t, "2k", payload["resolution"])
+	assert.Equal(t, "https://cdn.example.com/first.png", payload["first_image_url"])
+	assert.Equal(t, "https://cdn.example.com/last.png", payload["last_image_url"])
+	assert.Equal(t, false, payload["generate_audio"])
+	assert.NotContains(t, payload, "seconds")
+	assert.NotContains(t, payload, "size")
+	assert.NotContains(t, payload, "image")
+	assert.NotContains(t, payload, "reference_image_urls")
+	assert.NotContains(t, payload, "negative_prompt")
 	assert.NotContains(t, payload, "seed")
 }
 
-func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
+func TestBuildOpenAICompatibleAsyncPayloadSD4(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
 
 	t.Run("multimodal canonical references", func(t *testing.T) {
-		task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", []YucoreMediaReferenceInput{
+		task := newCanonicalOpenAICompatiblePayloadTask(t, "sd4-seedance-2.0", []YucoreMediaReferenceInput{
 			{Role: "image", URL: "https://cdn.example.com/main.png"},
 			{Role: "image", URL: "https://cdn.example.com/style.png"},
 			{Role: "video", URL: "https://cdn.example.com/motion.mp4"},
@@ -342,36 +378,37 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 		})
 		payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
 
-		assert.Equal(t, "https://cdn.example.com/main.png", payload["image_url"])
-		assert.Equal(t, []string{"https://cdn.example.com/style.png"}, payload["reference_image_urls"])
+		assert.Equal(t, []string{"https://cdn.example.com/main.png", "https://cdn.example.com/style.png"}, payload["reference_image_urls"])
 		assert.Equal(t, []string{"https://cdn.example.com/motion.mp4"}, payload["reference_videos"])
 		assert.Equal(t, []string{"https://cdn.example.com/music.mp3"}, payload["reference_audios"])
-		assert.Equal(t, false, payload["audio"])
-		assert.Equal(t, int64(0), payload["seed"])
-		assert.Equal(t, "watermark", payload["negative_prompt"])
-		assert.Equal(t, "6", payload["seconds"])
-		assert.Equal(t, "720p", payload["size"])
+		assert.Equal(t, false, payload["generate_audio"])
+		assert.Equal(t, 6, payload["duration"])
+		assert.Equal(t, "720p", payload["resolution"])
+		assert.NotContains(t, payload, "image_url")
 		assert.NotContains(t, payload, "image_urls")
 		assert.NotContains(t, payload, "images")
 		assert.NotContains(t, payload, "video")
-		assert.NotContains(t, payload, "generate_audio")
+		assert.NotContains(t, payload, "audio")
+		assert.NotContains(t, payload, "seed")
+		assert.NotContains(t, payload, "negative_prompt")
+		assert.NotContains(t, payload, "seconds")
+		assert.NotContains(t, payload, "size")
 		assert.NotContains(t, payload, "unknown_upstream_parameter")
 	})
 
-	t.Run("canonical seed values preserve exact int64", func(t *testing.T) {
+	t.Run("undocumented seed values are not forwarded", func(t *testing.T) {
 		for _, seed := range []int64{0, 9007199254740993, math.MaxInt64, -1} {
 			t.Run(yucoreMediaStringValue(seed), func(t *testing.T) {
-				task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", nil, map[string]any{"seed": seed})
+				task := newCanonicalOpenAICompatiblePayloadTask(t, "sd4-seedance-2.0", nil, map[string]any{"seed": seed})
 				payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
 
-				assert.IsType(t, int64(0), payload["seed"])
-				assert.Equal(t, seed, payload["seed"])
+				assert.NotContains(t, payload, "seed")
 			})
 		}
 	})
 
 	t.Run("first and last frames exclude media aliases", func(t *testing.T) {
-		task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", []YucoreMediaReferenceInput{
+		task := newCanonicalOpenAICompatiblePayloadTask(t, "sd4-seedance-2.0", []YucoreMediaReferenceInput{
 			{Role: "first_frame", URL: "https://cdn.example.com/first.png"},
 			{Role: "last_frame", URL: "https://cdn.example.com/last.png"},
 		}, map[string]any{"duration": 4, "resolution": "480p", "reference_mode": "frames"})
@@ -385,13 +422,13 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 	})
 
 	t.Run("frame presence excludes media without image authorization", func(t *testing.T) {
-		task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", []YucoreMediaReferenceInput{
+		task := newCanonicalOpenAICompatiblePayloadTask(t, "sd4-seedance-2.0", []YucoreMediaReferenceInput{
 			{Role: "first_frame", URL: "https://cdn.example.com/first.png"},
 			{Role: "video", URL: "https://cdn.example.com/motion.mp4"},
 			{Role: "audio", URL: "https://cdn.example.com/music.mp3"},
 		}, map[string]any{"reference_mode": "frames"})
 		capability := catalog[task.ModelId]
-		capability.AllowedParameters = []string{"video", "audio"}
+		capability.AllowedParameters = []string{"reference_videos", "reference_audios"}
 		payload := buildOpenAICompatibleAsyncPayload(task, capability)
 
 		for _, forbidden := range []string{"first_image_url", "last_image_url", "video_url", "reference_videos", "reference_audios"} {
@@ -409,7 +446,7 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 			{name: "malformed inputs", inputs: "{", metadata: `{"refAssets":["https://cdn.example.com/metadata.png"]}`},
 		} {
 			t.Run(test.name, func(t *testing.T) {
-				task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", nil, nil)
+				task := newCanonicalOpenAICompatiblePayloadTask(t, "sd4-seedance-2.0", nil, nil)
 				task.Inputs = test.inputs
 				task.Metadata = test.metadata
 				payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
@@ -436,7 +473,7 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 			},
 		} {
 			t.Run(test.name, func(t *testing.T) {
-				task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", nil, nil)
+				task := newCanonicalOpenAICompatiblePayloadTask(t, "sd4-seedance-2.0", nil, nil)
 				task.Inputs = test.inputs
 				payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
 
@@ -448,7 +485,7 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 	})
 
 	t.Run("semantic gates suppress every derived alias", func(t *testing.T) {
-		task := newCanonicalOpenAICompatiblePayloadTask(t, "seedance-2.0", []YucoreMediaReferenceInput{
+		task := newCanonicalOpenAICompatiblePayloadTask(t, "sd4-seedance-2.0", []YucoreMediaReferenceInput{
 			{Role: "image", URL: "https://cdn.example.com/main.png"},
 			{Role: "video", URL: "https://cdn.example.com/motion.mp4"},
 			{Role: "audio", URL: "https://cdn.example.com/music.mp3"},
@@ -463,22 +500,21 @@ func TestBuildOpenAICompatibleAsyncPayloadSeedance(t *testing.T) {
 	})
 }
 
-func TestBuildOpenAICompatibleAsyncPayloadVeo(t *testing.T) {
+func TestBuildOpenAICompatibleAsyncPayloadSD8OmitsUnsupportedFields(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
-	task := newCanonicalOpenAICompatiblePayloadTask(t, "veo-3.1", []YucoreMediaReferenceInput{
+	task := newCanonicalOpenAICompatiblePayloadTask(t, "sd8-seedance-2.0", []YucoreMediaReferenceInput{
 		{Role: "image", URL: "https://cdn.example.com/first.png"},
 		{Role: "image", URL: "https://cdn.example.com/last.png"},
 	}, map[string]any{
-		"duration": 8, "resolution": "1080p", "generate_audio": false, "seed": int64(0),
+		"duration": 5, "resolution": "1080p", "generate_audio": false, "seed": int64(0),
 		"unknown_upstream_parameter": "do-not-forward",
 	})
 	payload := buildOpenAICompatibleAsyncPayload(task, catalog[task.ModelId])
 
-	assert.Equal(t, "8", payload["seconds"])
-	assert.Equal(t, "1080p", payload["size"])
-	assert.Equal(t, []string{"https://cdn.example.com/first.png", "https://cdn.example.com/last.png"}, payload["image_urls"])
-	for _, forbidden := range []string{"duration", "resolution", "audio", "generate_audio", "seed", "negative_prompt", "unknown_upstream_parameter"} {
+	assert.Equal(t, 5, payload["duration"])
+	assert.Equal(t, []string{"https://cdn.example.com/first.png", "https://cdn.example.com/last.png"}, payload["reference_image_urls"])
+	for _, forbidden := range []string{"seconds", "resolution", "size", "image", "image_url", "image_urls", "audio", "generate_audio", "seed", "negative_prompt", "unknown_upstream_parameter"} {
 		assert.NotContains(t, payload, forbidden)
 	}
 }
@@ -1114,11 +1150,11 @@ func TestYucoreMediaConfiguredModelIDs(t *testing.T) {
 	})
 
 	configured := YucoreMediaConfiguredModelIDs()
-	require.Len(t, configured, 40)
+	require.Len(t, configured, 23)
 	assert.Contains(t, configured, "grok-imagine-image")
 	assert.Contains(t, configured, "gpt-image-2-adobe")
 	assert.Contains(t, configured, "gpt-image-2-2k")
-	assert.Contains(t, configured, "veo-3.1")
+	assert.Contains(t, configured, "grok-video")
 	assert.NotContains(t, configured, "seedance-2.0-mini-8s")
 	assert.NotContains(t, configured, "veo-clean")
 

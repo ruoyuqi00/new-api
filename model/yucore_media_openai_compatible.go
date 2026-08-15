@@ -226,7 +226,6 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 		"model":  yucoreMediaCapabilityModel(task, capability),
 		"prompt": task.Prompt,
 	}
-	family := strings.ToLower(strings.TrimSpace(capability.Family))
 	allowsParameter := func(parameter string) bool {
 		for _, allowed := range capability.AllowedParameters {
 			if strings.EqualFold(strings.TrimSpace(allowed), parameter) {
@@ -289,81 +288,33 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 		}
 	}
 
-	imageAllowed := allowsParameter("image") || allowsParameter("image_url") || allowsParameter("image_urls") || allowsParameter("images") || allowsParameter("reference_image_urls")
-	videoAllowed := allowsParameter("video") || allowsParameter("video_url") || allowsParameter("reference_videos")
-	audioAllowed := allowsParameter("audio") || allowsParameter("reference_audios")
 	hasFrameReferences := len(firstFrames) > 0 || len(lastFrames) > 0
-	switch family {
-	case "omni":
-		if hasFrameReferences {
-			if imageAllowed {
-				if len(firstFrames) > 0 {
-					payload["first_image_url"] = firstFrames[0]
-				}
-				if len(lastFrames) > 0 {
-					payload["last_image_url"] = lastFrames[0]
-				}
-			}
-			break
-		} else if len(videos) > 0 && videoAllowed {
-			payload["video_url"] = videos[0]
-		} else if len(images) == 1 && imageAllowed {
+	if hasFrameReferences {
+		if len(firstFrames) > 0 && allowsParameter("first_image_url") {
+			payload["first_image_url"] = firstFrames[0]
+		}
+		if len(lastFrames) > 0 && allowsParameter("last_image_url") {
+			payload["last_image_url"] = lastFrames[0]
+		}
+	} else {
+		switch {
+		case len(images) > 0 && allowsParameter("reference_image_urls"):
+			payload["reference_image_urls"] = images
+		case len(images) > 0 && allowsParameter("image_urls"):
+			payload["image_urls"] = images
+		case len(images) == 1 && allowsParameter("image_url"):
 			payload["image_url"] = images[0]
-		} else if len(images) > 1 && imageAllowed {
-			payload["image_urls"] = images
-		}
-	case "grok", "happyhouse", "veo":
-		if len(images) > 0 && imageAllowed {
-			payload["image_urls"] = images
-		}
-	case "kling":
-		if len(images) > 0 && imageAllowed {
-			payload["image_urls"] = images
-		}
-		if len(videos) > 0 && videoAllowed {
-			payload["reference_videos"] = videos
-		}
-		if len(audios) > 0 && audioAllowed {
-			payload["reference_audios"] = audios
-		}
-	case "seedance":
-		if hasFrameReferences {
-			if imageAllowed {
-				if len(firstFrames) > 0 {
-					payload["first_image_url"] = firstFrames[0]
-				}
-				if len(lastFrames) > 0 {
-					payload["last_image_url"] = lastFrames[0]
-				}
-			}
-			break
-		}
-		if len(images) > 0 && imageAllowed {
-			payload["image_url"] = images[0]
-			if len(images) > 1 {
-				payload["reference_image_urls"] = images[1:]
-			}
-		}
-		if len(videos) > 0 && videoAllowed {
-			payload["reference_videos"] = videos
-		}
-		if len(audios) > 0 && audioAllowed {
-			payload["reference_audios"] = audios
-		}
-	default:
-		if len(images) > 0 && len(capability.AllowedParameters) > 0 && allowsParameter("image_urls") {
-			payload["image_urls"] = images
-		} else if len(images) == 1 && len(capability.AllowedParameters) > 0 && allowsParameter("image_url") {
-			payload["image_url"] = images[0]
-		} else if len(images) == 1 && allowsParameter("image") {
+		case len(images) == 1 && allowsParameter("image"):
 			payload["image"] = images[0]
-		} else if len(images) > 1 && allowsParameter("images") {
+		case len(images) > 1 && allowsParameter("images"):
 			payload["images"] = images
 		}
-		if len(videos) > 0 && allowsParameter("video_url") {
-			payload["video_url"] = videos[0]
-		} else if len(videos) > 0 && allowsParameter("reference_videos") {
+		if len(videos) > 0 && allowsParameter("reference_videos") {
 			payload["reference_videos"] = videos
+		} else if len(videos) > 0 && allowsParameter("video_url") {
+			payload["video_url"] = videos[0]
+		} else if len(videos) > 0 && allowsParameter("video") {
+			payload["video"] = videos[0]
 		}
 		if len(audios) > 0 && allowsParameter("reference_audios") {
 			payload["reference_audios"] = audios
