@@ -27,12 +27,16 @@ const (
 )
 
 type YucoreMediaReferenceLimits struct {
-	Images             int `json:"images,omitempty"`
-	Videos             int `json:"videos,omitempty"`
-	Audios             int `json:"audios,omitempty"`
-	Total              int `json:"total,omitempty"`
-	MaxVideoDurationMS int `json:"max_video_duration_ms,omitempty"`
-	MaxAudioDurationMS int `json:"max_audio_duration_ms,omitempty"`
+	Images                  int `json:"images,omitempty"`
+	Videos                  int `json:"videos,omitempty"`
+	Audios                  int `json:"audios,omitempty"`
+	Total                   int `json:"total,omitempty"`
+	MinVideoDurationMS      int `json:"min_video_duration_ms,omitempty"`
+	MaxVideoDurationMS      int `json:"max_video_duration_ms,omitempty"`
+	MaxTotalVideoDurationMS int `json:"max_total_video_duration_ms,omitempty"`
+	MaxAudioDurationMS      int `json:"max_audio_duration_ms,omitempty"`
+	MaxTotalAudioDurationMS int `json:"max_total_audio_duration_ms,omitempty"`
+	MaxImagesWithVideo      int `json:"max_images_with_video,omitempty"`
 }
 
 type YucoreMediaReferenceInput struct {
@@ -43,36 +47,39 @@ type YucoreMediaReferenceInput struct {
 }
 
 type YucoreMediaModelCapability struct {
-	Model                  string                     `json:"model,omitempty"`
-	UpstreamModel          string                     `json:"upstream_model,omitempty"`
-	Kind                   string                     `json:"kind,omitempty"`
-	Family                 string                     `json:"family,omitempty"`
-	Availability           string                     `json:"availability,omitempty"`
-	PricingUnit            string                     `json:"pricing_unit,omitempty"`
-	UpstreamCost           float64                    `json:"upstream_cost,omitempty"`
-	Transport              string                     `json:"transport,omitempty"`
-	CreatePath             string                     `json:"create_path,omitempty"`
-	EditPath               string                     `json:"edit_path,omitempty"`
-	StatusPath             string                     `json:"status_path,omitempty"`
-	ContentPath            string                     `json:"content_path,omitempty"`
-	CancelPath             string                     `json:"cancel_path,omitempty"`
-	DurationPolicy         string                     `json:"duration_policy,omitempty"`
-	FixedDurationSeconds   int                        `json:"fixed_duration_seconds,omitempty"`
-	Durations              []int                      `json:"durations,omitempty"`
-	Resolutions            []string                   `json:"resolutions,omitempty"`
-	AspectRatios           []string                   `json:"aspect_ratios,omitempty"`
-	ReferenceModes         []string                   `json:"reference_modes,omitempty"`
-	ReferenceLimits        YucoreMediaReferenceLimits `json:"reference_limits,omitempty"`
-	SupportsAudio          bool                       `json:"supports_audio,omitempty"`
-	SupportsSeed           bool                       `json:"supports_seed,omitempty"`
-	PollIntervalSeconds    int                        `json:"poll_interval_seconds,omitempty"`
-	MaxPollDurationSeconds int                        `json:"max_poll_duration_seconds,omitempty"`
-	MaxReferenceImages     int                        `json:"max_reference_images,omitempty"`
-	AllowedParameters      []string                   `json:"allowed_parameters,omitempty"`
-	TerminalSuccessStates  []string                   `json:"terminal_success_states,omitempty"`
-	TerminalFailureStates  []string                   `json:"terminal_failure_states,omitempty"`
-	ResponseFormat         string                     `json:"response_format,omitempty"`
-	Notes                  []string                   `json:"notes,omitempty"`
+	Model                            string                     `json:"model,omitempty"`
+	UpstreamModel                    string                     `json:"upstream_model,omitempty"`
+	Kind                             string                     `json:"kind,omitempty"`
+	Family                           string                     `json:"family,omitempty"`
+	Availability                     string                     `json:"availability,omitempty"`
+	PricingUnit                      string                     `json:"pricing_unit,omitempty"`
+	UpstreamCost                     float64                    `json:"upstream_cost,omitempty"`
+	Transport                        string                     `json:"transport,omitempty"`
+	CreatePath                       string                     `json:"create_path,omitempty"`
+	EditPath                         string                     `json:"edit_path,omitempty"`
+	StatusPath                       string                     `json:"status_path,omitempty"`
+	ContentPath                      string                     `json:"content_path,omitempty"`
+	CancelPath                       string                     `json:"cancel_path,omitempty"`
+	DurationPolicy                   string                     `json:"duration_policy,omitempty"`
+	FixedDurationSeconds             int                        `json:"fixed_duration_seconds,omitempty"`
+	Durations                        []int                      `json:"durations,omitempty"`
+	Resolutions                      []string                   `json:"resolutions,omitempty"`
+	AspectRatios                     []string                   `json:"aspect_ratios,omitempty"`
+	ReferenceModes                   []string                   `json:"reference_modes,omitempty"`
+	ReferenceLimits                  YucoreMediaReferenceLimits `json:"reference_limits,omitempty"`
+	RequiredReferenceKinds           []string                   `json:"required_reference_kinds,omitempty"`
+	DisallowGeneratedAudioWithFrames bool                       `json:"disallow_generated_audio_with_frames,omitempty"`
+	RequirePrimaryImageForMedia      bool                       `json:"require_primary_image_for_media,omitempty"`
+	SupportsAudio                    bool                       `json:"supports_audio,omitempty"`
+	SupportsSeed                     bool                       `json:"supports_seed,omitempty"`
+	PollIntervalSeconds              int                        `json:"poll_interval_seconds,omitempty"`
+	MaxPollDurationSeconds           int                        `json:"max_poll_duration_seconds,omitempty"`
+	MaxReferenceImages               int                        `json:"max_reference_images,omitempty"`
+	AllowedParameters                []string                   `json:"allowed_parameters,omitempty"`
+	TerminalSuccessStates            []string                   `json:"terminal_success_states,omitempty"`
+	TerminalFailureStates            []string                   `json:"terminal_failure_states,omitempty"`
+	ResponseFormat                   string                     `json:"response_format,omitempty"`
+	Notes                            []string                   `json:"notes,omitempty"`
 }
 
 //go:embed yucore_media_cangyuan_catalog.json
@@ -88,6 +95,7 @@ func cloneYucoreMediaModelCapabilities(source map[string]YucoreMediaModelCapabil
 		capability.Resolutions = append([]string(nil), capability.Resolutions...)
 		capability.AspectRatios = append([]string(nil), capability.AspectRatios...)
 		capability.ReferenceModes = append([]string(nil), capability.ReferenceModes...)
+		capability.RequiredReferenceKinds = append([]string(nil), capability.RequiredReferenceKinds...)
 		capability.AllowedParameters = append([]string(nil), capability.AllowedParameters...)
 		capability.TerminalSuccessStates = append([]string(nil), capability.TerminalSuccessStates...)
 		capability.TerminalFailureStates = append([]string(nil), capability.TerminalFailureStates...)
@@ -460,6 +468,11 @@ func validateYucoreMediaCapabilities(capabilities map[string]YucoreMediaModelCap
 		}); err != nil {
 			return err
 		}
+		if err := validateYucoreMediaStringList(modelID, "required reference kind", capability.RequiredReferenceKinds, map[string]struct{}{
+			"image": {}, "video": {}, "audio": {},
+		}); err != nil {
+			return err
+		}
 		if err := validateYucoreMediaStringList(modelID, "allowed parameter", capability.AllowedParameters, nil); err != nil {
 			return err
 		}
@@ -504,9 +517,27 @@ func validateYucoreMediaCapabilities(capabilities map[string]YucoreMediaModelCap
 		if limits.Total < 0 || limits.Total > 32 {
 			return fmt.Errorf("YuCore media model %s has an invalid reference total limit", modelID)
 		}
-		if limits.MaxVideoDurationMS < 0 || limits.MaxVideoDurationMS > 86400000 ||
-			limits.MaxAudioDurationMS < 0 || limits.MaxAudioDurationMS > 86400000 {
-			return fmt.Errorf("YuCore media model %s has an invalid reference duration limit", modelID)
+		if limits.MinVideoDurationMS < 0 || limits.MinVideoDurationMS > 86400000 {
+			return fmt.Errorf("YuCore media model %s has an invalid minimum reference video duration", modelID)
+		}
+		if limits.MaxVideoDurationMS < 0 || limits.MaxVideoDurationMS > 86400000 {
+			return fmt.Errorf("YuCore media model %s has an invalid reference duration limit for video", modelID)
+		}
+		if limits.MaxVideoDurationMS > 0 && limits.MinVideoDurationMS > limits.MaxVideoDurationMS {
+			return fmt.Errorf("YuCore media model %s has an invalid reference video duration range", modelID)
+		}
+		if limits.MaxTotalVideoDurationMS < 0 || limits.MaxTotalVideoDurationMS > 86400000 {
+			return fmt.Errorf("YuCore media model %s has an invalid total reference video duration", modelID)
+		}
+		if limits.MaxAudioDurationMS < 0 || limits.MaxAudioDurationMS > 86400000 {
+			return fmt.Errorf("YuCore media model %s has an invalid reference duration limit for audio", modelID)
+		}
+		if limits.MaxTotalAudioDurationMS < 0 || limits.MaxTotalAudioDurationMS > 86400000 {
+			return fmt.Errorf("YuCore media model %s has an invalid total reference audio duration", modelID)
+		}
+		if limits.MaxImagesWithVideo < 0 || limits.MaxImagesWithVideo > 32 ||
+			(limits.Images > 0 && limits.MaxImagesWithVideo > limits.Images) {
+			return fmt.Errorf("YuCore media model %s has an invalid images with video limit", modelID)
 		}
 		if capability.MaxReferenceImages > 0 && limits.Images > 0 && capability.MaxReferenceImages != limits.Images {
 			return fmt.Errorf("YuCore media model %s has conflicting reference image limits", modelID)

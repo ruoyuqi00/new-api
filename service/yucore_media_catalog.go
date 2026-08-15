@@ -37,36 +37,43 @@ type YucoreMediaCatalogPricing struct {
 }
 
 type YucoreMediaCatalogInputLimits struct {
-	MaxPromptChars              int `json:"max_prompt_chars,omitempty"`
-	MaxReferenceImages          int `json:"max_reference_images,omitempty"`
-	MaxReferenceVideos          int `json:"max_reference_videos,omitempty"`
-	MaxReferenceAudios          int `json:"max_reference_audios,omitempty"`
-	MaxReferences               int `json:"max_references,omitempty"`
-	MaxReferenceVideoDurationMS int `json:"max_reference_video_duration_ms,omitempty"`
-	MaxReferenceAudioDurationMS int `json:"max_reference_audio_duration_ms,omitempty"`
-	MaxFileSizeMB               int `json:"max_file_size_mb,omitempty"`
+	MaxPromptChars                   int `json:"max_prompt_chars,omitempty"`
+	MaxReferenceImages               int `json:"max_reference_images,omitempty"`
+	MaxReferenceVideos               int `json:"max_reference_videos,omitempty"`
+	MaxReferenceAudios               int `json:"max_reference_audios,omitempty"`
+	MaxReferences                    int `json:"max_references,omitempty"`
+	MinReferenceVideoDurationMS      int `json:"min_reference_video_duration_ms,omitempty"`
+	MaxReferenceVideoDurationMS      int `json:"max_reference_video_duration_ms,omitempty"`
+	MaxTotalReferenceVideoDurationMS int `json:"max_total_reference_video_duration_ms,omitempty"`
+	MaxReferenceAudioDurationMS      int `json:"max_reference_audio_duration_ms,omitempty"`
+	MaxTotalReferenceAudioDurationMS int `json:"max_total_reference_audio_duration_ms,omitempty"`
+	MaxImagesWithVideo               int `json:"max_images_with_video,omitempty"`
+	MaxFileSizeMB                    int `json:"max_file_size_mb,omitempty"`
 }
 
 type YucoreMediaCatalogModel struct {
-	Id             string                        `json:"id"`
-	Name           string                        `json:"name"`
-	Description    string                        `json:"description,omitempty"`
-	Kind           string                        `json:"kind"`
-	Modes          []string                      `json:"modes"`
-	Sizes          []string                      `json:"sizes,omitempty"`
-	AspectRatios   []string                      `json:"aspect_ratios,omitempty"`
-	Qualities      []string                      `json:"qualities,omitempty"`
-	Formats        []string                      `json:"formats,omitempty"`
-	Counts         []int                         `json:"counts,omitempty"`
-	Durations      []int                         `json:"durations,omitempty"`
-	Resolutions    []string                      `json:"resolutions,omitempty"`
-	ReferenceModes []string                      `json:"reference_modes,omitempty"`
-	SupportsAudio  bool                          `json:"supports_audio"`
-	SupportsSeed   bool                          `json:"supports_seed"`
-	InputLimits    YucoreMediaCatalogInputLimits `json:"input_limits"`
-	Pricing        YucoreMediaCatalogPricing     `json:"pricing"`
-	Async          bool                          `json:"async"`
-	capability     *model.YucoreMediaModelCapability
+	Id                               string                        `json:"id"`
+	Name                             string                        `json:"name"`
+	Description                      string                        `json:"description,omitempty"`
+	Kind                             string                        `json:"kind"`
+	Modes                            []string                      `json:"modes"`
+	Sizes                            []string                      `json:"sizes,omitempty"`
+	AspectRatios                     []string                      `json:"aspect_ratios,omitempty"`
+	Qualities                        []string                      `json:"qualities,omitempty"`
+	Formats                          []string                      `json:"formats,omitempty"`
+	Counts                           []int                         `json:"counts,omitempty"`
+	Durations                        []int                         `json:"durations,omitempty"`
+	Resolutions                      []string                      `json:"resolutions,omitempty"`
+	ReferenceModes                   []string                      `json:"reference_modes,omitempty"`
+	RequiredReferenceKinds           []string                      `json:"required_reference_kinds,omitempty"`
+	DisallowGeneratedAudioWithFrames bool                          `json:"disallow_generated_audio_with_frames,omitempty"`
+	RequirePrimaryImageForMedia      bool                          `json:"require_primary_image_for_media,omitempty"`
+	SupportsAudio                    bool                          `json:"supports_audio"`
+	SupportsSeed                     bool                          `json:"supports_seed"`
+	InputLimits                      YucoreMediaCatalogInputLimits `json:"input_limits"`
+	Pricing                          YucoreMediaCatalogPricing     `json:"pricing"`
+	Async                            bool                          `json:"async"`
+	capability                       *model.YucoreMediaModelCapability
 }
 
 func cloneYucoreMediaCapability(capability model.YucoreMediaModelCapability) model.YucoreMediaModelCapability {
@@ -74,6 +81,7 @@ func cloneYucoreMediaCapability(capability model.YucoreMediaModelCapability) mod
 	capability.Resolutions = append([]string(nil), capability.Resolutions...)
 	capability.AspectRatios = append([]string(nil), capability.AspectRatios...)
 	capability.ReferenceModes = append([]string(nil), capability.ReferenceModes...)
+	capability.RequiredReferenceKinds = append([]string(nil), capability.RequiredReferenceKinds...)
 	capability.AllowedParameters = append([]string(nil), capability.AllowedParameters...)
 	capability.TerminalSuccessStates = append([]string(nil), capability.TerminalSuccessStates...)
 	capability.TerminalFailureStates = append([]string(nil), capability.TerminalFailureStates...)
@@ -159,6 +167,9 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 		item.Resolutions = append([]string(nil), capability.Resolutions...)
 		item.AspectRatios = append([]string(nil), capability.AspectRatios...)
 		item.ReferenceModes = append([]string(nil), capability.ReferenceModes...)
+		item.RequiredReferenceKinds = append([]string(nil), capability.RequiredReferenceKinds...)
+		item.DisallowGeneratedAudioWithFrames = capability.DisallowGeneratedAudioWithFrames
+		item.RequirePrimaryImageForMedia = capability.RequirePrimaryImageForMedia
 		item.SupportsAudio = capability.SupportsAudio
 		item.SupportsSeed = capability.SupportsSeed
 		item.InputLimits.MaxReferenceImages = capability.ReferenceLimits.Images
@@ -166,7 +177,11 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 		item.InputLimits.MaxReferenceAudios = capability.ReferenceLimits.Audios
 		item.InputLimits.MaxReferences = capability.ReferenceLimits.Total
 		item.InputLimits.MaxReferenceVideoDurationMS = capability.ReferenceLimits.MaxVideoDurationMS
+		item.InputLimits.MinReferenceVideoDurationMS = capability.ReferenceLimits.MinVideoDurationMS
+		item.InputLimits.MaxTotalReferenceVideoDurationMS = capability.ReferenceLimits.MaxTotalVideoDurationMS
 		item.InputLimits.MaxReferenceAudioDurationMS = capability.ReferenceLimits.MaxAudioDurationMS
+		item.InputLimits.MaxTotalReferenceAudioDurationMS = capability.ReferenceLimits.MaxTotalAudioDurationMS
+		item.InputLimits.MaxImagesWithVideo = capability.ReferenceLimits.MaxImagesWithVideo
 	}
 	if kind == YucoreMediaKindVideo {
 		item.Modes = []string{"text-to-video"}

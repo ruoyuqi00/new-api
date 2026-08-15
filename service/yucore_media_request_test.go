@@ -145,6 +145,7 @@ func TestNormalizeYucoreMediaRequestValidatesReferenceModeCombinations(t *testin
 
 func TestNormalizeYucoreMediaRequestRequiresPrimaryImageForMixedFamilyReferences(t *testing.T) {
 	selected := yucoreMediaRequestTestModel("kling-3.0-omni")
+	selected.RequirePrimaryImageForMedia = true
 	selected.Durations = []int{5, 10}
 	selected.Resolutions = []string{"720p", "1080p"}
 	selected.InputLimits = YucoreMediaCatalogInputLimits{
@@ -206,6 +207,59 @@ func TestNormalizeYucoreMediaRequestValidatesReferenceLimitsAndDurations(t *test
 		{Role: "audio", URL: "https://cdn.example/audio.mp3", DurationMS: intPointer(30001)},
 	}})
 	require.ErrorContains(t, err, "audio duration")
+}
+
+func TestNormalizeYucoreMediaRequestEnforcesObservedReferenceConstraints(t *testing.T) {
+	selected := yucoreMediaRequestTestModel("conditional-video")
+	selected.InputLimits.MinReferenceVideoDurationMS = 3000
+	selected.InputLimits.MaxReferenceVideoDurationMS = 10000
+	selected.InputLimits.MaxTotalReferenceVideoDurationMS = 10000
+	selected.InputLimits.MaxReferenceAudioDurationMS = 15000
+	selected.InputLimits.MaxTotalReferenceAudioDurationMS = 15000
+	selected.InputLimits.MaxImagesWithVideo = 1
+	selected.RequiredReferenceKinds = []string{"video"}
+
+	_, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{})
+	require.ErrorContains(t, err, "requires a video reference")
+
+	_, err = NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{References: []model.YucoreMediaReferenceInput{
+		{Role: "image", URL: "https://cdn.example/a.png"},
+		{Role: "image", URL: "https://cdn.example/b.png"},
+		{Role: "video", URL: "https://cdn.example/a.mp4", DurationMS: intPointer(5000)},
+	}})
+	require.ErrorContains(t, err, "at most 1 reference image")
+
+	_, err = NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{References: []model.YucoreMediaReferenceInput{
+		{Role: "video", URL: "https://cdn.example/a.mp4", DurationMS: intPointer(2000)},
+	}})
+	require.ErrorContains(t, err, "at least 3000 ms")
+
+	_, err = NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{References: []model.YucoreMediaReferenceInput{
+		{Role: "video", URL: "https://cdn.example/a.mp4", DurationMS: intPointer(6000)},
+		{Role: "video", URL: "https://cdn.example/b.mp4", DurationMS: intPointer(5000)},
+	}})
+	require.ErrorContains(t, err, "total reference video duration exceeds 10000 ms")
+
+	_, err = NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{References: []model.YucoreMediaReferenceInput{
+		{Role: "video", URL: "https://cdn.example/a.mp4", DurationMS: intPointer(5000)},
+		{Role: "audio", URL: "https://cdn.example/a.mp3", DurationMS: intPointer(8000)},
+		{Role: "audio", URL: "https://cdn.example/b.mp3", DurationMS: intPointer(8000)},
+	}})
+	require.ErrorContains(t, err, "total reference audio duration exceeds 15000 ms")
+}
+
+func TestNormalizeYucoreMediaRequestRejectsGeneratedAudioWithFrames(t *testing.T) {
+	selected := yucoreMediaRequestTestModel("frame-video")
+	selected.DisallowGeneratedAudioWithFrames = true
+	generateAudio := true
+	_, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{
+		GenerateAudio: &generateAudio,
+		References: []model.YucoreMediaReferenceInput{
+			{Role: "first_frame", URL: "https://cdn.example/first.png"},
+			{Role: "last_frame", URL: "https://cdn.example/last.png"},
+		},
+	})
+	require.ErrorContains(t, err, "generated audio with frame references")
 }
 
 func TestNormalizeYucoreMediaRequestRejectsInvalidReferences(t *testing.T) {

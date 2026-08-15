@@ -136,7 +136,7 @@ func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 	db := setupYucoreMediaCatalogTest(t)
 	createYucoreMediaCatalogUser(t, db, 9104)
 	common.OptionMapRWMutex.Lock()
-	common.OptionMap["yucore_media.model_capabilities"] = `{"SD6-seedance-2.0-1080p":{"reference_limits":{"max_video_duration_ms":15000,"max_audio_duration_ms":6000}}}`
+	common.OptionMap["yucore_media.model_capabilities"] = `{"SD6-seedance-2.0-1080p":{"reference_limits":{"min_video_duration_ms":4000,"max_video_duration_ms":15000,"max_total_video_duration_ms":15000,"max_audio_duration_ms":6000,"max_total_audio_duration_ms":12000,"max_images_with_video":5},"required_reference_kinds":["image"],"disallow_generated_audio_with_frames":true,"require_primary_image_for_media":true}}`
 	common.OptionMapRWMutex.Unlock()
 
 	require.NoError(t, db.Create(&model.Channel{
@@ -163,7 +163,14 @@ func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 	assert.Equal(t, 1, item.InputLimits.MaxReferenceAudios)
 	assert.Equal(t, 12, item.InputLimits.MaxReferences)
 	assert.Equal(t, 15000, item.InputLimits.MaxReferenceVideoDurationMS)
+	assert.Equal(t, 4000, item.InputLimits.MinReferenceVideoDurationMS)
+	assert.Equal(t, 15000, item.InputLimits.MaxTotalReferenceVideoDurationMS)
 	assert.Equal(t, 6000, item.InputLimits.MaxReferenceAudioDurationMS)
+	assert.Equal(t, 12000, item.InputLimits.MaxTotalReferenceAudioDurationMS)
+	assert.Equal(t, 5, item.InputLimits.MaxImagesWithVideo)
+	assert.Equal(t, []string{"image"}, item.RequiredReferenceKinds)
+	assert.True(t, item.DisallowGeneratedAudioWithFrames)
+	assert.True(t, item.RequirePrimaryImageForMedia)
 	assert.Equal(t, "per_second", item.Pricing.Unit)
 }
 

@@ -171,6 +171,8 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 	imageCount := 0
 	videoCount := 0
 	audioCount := 0
+	totalVideoDurationMS := 0
+	totalAudioDurationMS := 0
 	firstFrameCount := 0
 	lastFrameCount := 0
 	for index := range normalized.References {
@@ -193,13 +195,22 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 			imageCount++
 		case "video":
 			videoCount++
+			if limit := selected.InputLimits.MinReferenceVideoDurationMS; limit > 0 && reference.DurationMS != nil && *reference.DurationMS < limit {
+				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s reference video duration must be at least %d ms", selected.Id, limit)
+			}
 			if limit := selected.InputLimits.MaxReferenceVideoDurationMS; limit > 0 && reference.DurationMS != nil && *reference.DurationMS > limit {
 				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s reference video duration exceeds %d ms", selected.Id, limit)
+			}
+			if reference.DurationMS != nil {
+				totalVideoDurationMS += *reference.DurationMS
 			}
 		case "audio":
 			audioCount++
 			if limit := selected.InputLimits.MaxReferenceAudioDurationMS; limit > 0 && reference.DurationMS != nil && *reference.DurationMS > limit {
 				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s reference audio duration exceeds %d ms", selected.Id, limit)
+			}
+			if reference.DurationMS != nil {
+				totalAudioDurationMS += *reference.DurationMS
 			}
 		case "first_frame":
 			firstFrameCount++
@@ -244,8 +255,21 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 			return YucoreMediaRequestOptions{}, fmt.Errorf("model %s does not support reference mode %s", selected.Id, normalized.ReferenceMode)
 		}
 	}
+	if normalized.ReferenceMode == "frames" && normalized.GenerateAudio != nil && *normalized.GenerateAudio &&
+		(selected.DisallowGeneratedAudioWithFrames || capability.DisallowGeneratedAudioWithFrames) {
+		return YucoreMediaRequestOptions{}, fmt.Errorf("model %s does not support generated audio with frame references", selected.Id)
+	}
 
 	limits := selected.InputLimits
+	if limit := limits.MaxTotalReferenceVideoDurationMS; limit > 0 && totalVideoDurationMS > limit {
+		return YucoreMediaRequestOptions{}, fmt.Errorf("model %s total reference video duration exceeds %d ms", selected.Id, limit)
+	}
+	if limit := limits.MaxTotalReferenceAudioDurationMS; limit > 0 && totalAudioDurationMS > limit {
+		return YucoreMediaRequestOptions{}, fmt.Errorf("model %s total reference audio duration exceeds %d ms", selected.Id, limit)
+	}
+	if limit := limits.MaxImagesWithVideo; videoCount > 0 && limit > 0 && imageCount > limit {
+		return YucoreMediaRequestOptions{}, fmt.Errorf("model %s supports at most %d reference image(s) with video", selected.Id, limit)
+	}
 	if imageCount > limits.MaxReferenceImages {
 		return YucoreMediaRequestOptions{}, fmt.Errorf("model %s supports at most %d reference image(s)", selected.Id, limits.MaxReferenceImages)
 	}
@@ -259,10 +283,27 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 		return YucoreMediaRequestOptions{}, fmt.Errorf("model %s supports at most %d total references", selected.Id, limits.MaxReferences)
 	}
 
-	hasPrimaryImageParameter := yucoreMediaCapabilityAllowsAny(capability, "image", "images", "image_url", "image_urls")
-	hasVideoReferenceParameter := videoCount > 0 && yucoreMediaCapabilityAllowsAny(capability, "video", "reference_videos")
-	hasAudioReferenceParameter := audioCount > 0 && yucoreMediaCapabilityAllowsAny(capability, "audio", "reference_audios")
-	if imageCount == 0 && hasPrimaryImageParameter && (hasVideoReferenceParameter || hasAudioReferenceParameter) {
+	requiredReferenceKinds := selected.RequiredReferenceKinds
+	if len(requiredReferenceKinds) == 0 {
+		requiredReferenceKinds = capability.RequiredReferenceKinds
+	}
+	for _, requiredKind := range requiredReferenceKinds {
+		switch requiredKind {
+		case "image":
+			if imageCount == 0 {
+				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s requires an image reference", selected.Id)
+			}
+		case "video":
+			if videoCount == 0 {
+				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s requires a video reference", selected.Id)
+			}
+		case "audio":
+			if audioCount == 0 {
+				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s requires an audio reference", selected.Id)
+			}
+		}
+	}
+	if imageCount == 0 && (selected.RequirePrimaryImageForMedia || capability.RequirePrimaryImageForMedia) && (videoCount > 0 || audioCount > 0) {
 		return YucoreMediaRequestOptions{}, fmt.Errorf("model %s requires a primary image with video or audio references", selected.Id)
 	}
 

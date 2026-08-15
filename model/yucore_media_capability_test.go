@@ -267,6 +267,7 @@ func TestCangyuanMediaCatalogReturnsIndependentCopies(t *testing.T) {
 	require.NotEmpty(t, firstCapability.ReferenceModes)
 	firstCapability.Durations[0] = 999
 	firstCapability.ReferenceModes[0] = "mutated"
+	firstCapability.RequiredReferenceKinds = []string{"video"}
 	firstCapability.ReferenceLimits.Images = 999
 	first["seedance-2.0"] = firstCapability
 	probeCapability := first["veo-clean"]
@@ -279,6 +280,7 @@ func TestCangyuanMediaCatalogReturnsIndependentCopies(t *testing.T) {
 	assert.Contains(t, second, "veo-3.1")
 	assert.NotEqual(t, 999, second["seedance-2.0"].Durations[0])
 	assert.NotEqual(t, "mutated", second["seedance-2.0"].ReferenceModes[0])
+	assert.Empty(t, second["seedance-2.0"].RequiredReferenceKinds)
 	assert.NotEqual(t, 999, second["seedance-2.0"].ReferenceLimits.Images)
 	assert.NotEqual(t, "mutated", second["veo-clean"].Notes[0])
 
@@ -483,4 +485,24 @@ func TestParseYucoreMediaModelCapabilitiesNormalizesLegacyReferenceLimit(t *test
 	require.Contains(t, capabilities, "video")
 	assert.Equal(t, 5, capabilities["video"].ReferenceLimits.Images)
 	assert.Equal(t, 5, capabilities["video"].MaxReferenceImages)
+}
+
+func TestValidateYucoreMediaCapabilitiesRejectsConditionalReferenceConstraints(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr string
+	}{
+		{name: "negative minimum video duration", raw: `{"video":{"reference_limits":{"min_video_duration_ms":-1}}}`, wantErr: "minimum reference video duration"},
+		{name: "video minimum exceeds maximum", raw: `{"video":{"reference_limits":{"min_video_duration_ms":10001,"max_video_duration_ms":10000}}}`, wantErr: "reference video duration range"},
+		{name: "negative total audio duration", raw: `{"video":{"reference_limits":{"max_total_audio_duration_ms":-1}}}`, wantErr: "total reference audio duration"},
+		{name: "conditional images exceed normal maximum", raw: `{"video":{"reference_limits":{"images":5,"max_images_with_video":6}}}`, wantErr: "images with video"},
+		{name: "invalid required reference kind", raw: `{"video":{"required_reference_kinds":["document"]}}`, wantErr: "required reference kind"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateYucoreMediaModelCapabilities(test.raw)
+			require.ErrorContains(t, err, test.wantErr)
+		})
+	}
 }
