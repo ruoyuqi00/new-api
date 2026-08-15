@@ -5567,9 +5567,7 @@ export function YucoreStudioWorkspace({
                               id='studio-generate-audio-description'
                               className='mt-1 text-xs leading-5 text-white/45'
                             >
-                              {t(
-                                'Include model-generated audio in the video.'
-                              )}
+                              {t('Include model-generated audio in the video.')}
                             </p>
                           </div>
                           <Switch

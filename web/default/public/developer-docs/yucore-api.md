@@ -153,22 +153,22 @@ GPT Image 2 支持蒙版；GPT Image 2 与 Nano Banana 最多可接收 9 张参�
 
 表内价格是“多模态创作”分组倍率计算后的最终价格。`下游多模态` 分组倍率为 `1.0`，其价格等于定价 API 为该分组返回的基础价格；所有分组的实时金额仍以模型广场和定价 API 为准。
 
-| API 模型 ID                   | 用途                         | 最终价格/条 |
-| ----------------------------- | ---------------------------- | ----------: |
-| `grok-video`                  | Grok 视频生成                |      0.9936 |
-| `grok-video-1.5`              | Grok 1.5 视频生成            |      2.0016 |
-| `happyhouse-1.0`              | Happyhouse 图像/视频参考生成  |        6.48 |
-| `happyhouse-1.1`              | Happyhouse 多图参考生成       |       4.176 |
-| `minimax-h3-2k`               | Minimax H3 2K 视频生成        |        5.04 |
-| `omni-fast`                   | Omni 图生视频                |     0.95388 |
-| `omni-fast-no-water`          | Omni 图生视频，无水印        |      1.1664 |
-| `omni-v2v`                    | Omni 视频生视频              |     1.27536 |
-| `omni-v2v-no-water`           | Omni 视频生视频，无水印      |      1.4904 |
-| `sd4-seedance-2.0`            | Seedance SD4 多模态生成       |       5.616 |
-| `sd4-seedance-2.0-fast`       | Seedance SD4 多模态快速生成   |       4.176 |
-| `sd7-seedance-2.0-1080p`      | Seedance SD7 固定 1080p       |       7.056 |
-| `sd7-seedance-2.0-720p`       | Seedance SD7 固定 720p        |       5.616 |
-| `sd8-seedance-2.0`            | Seedance SD8 多模态生成       |       4.176 |
+| API 模型 ID              | 用途                         | 最终价格/条 |
+| ------------------------ | ---------------------------- | ----------: |
+| `grok-video`             | Grok 视频生成                |      0.9936 |
+| `grok-video-1.5`         | Grok 1.5 视频生成            |      2.0016 |
+| `happyhouse-1.0`         | Happyhouse 图像/视频参考生成 |        6.48 |
+| `happyhouse-1.1`         | Happyhouse 多图参考生成      |       4.176 |
+| `minimax-h3-2k`          | Minimax H3 2K 视频生成       |        5.04 |
+| `omni-fast`              | Omni 图生视频                |     0.95388 |
+| `omni-fast-no-water`     | Omni 图生视频，无水印        |      1.1664 |
+| `omni-v2v`               | Omni 视频生视频              |     1.27536 |
+| `omni-v2v-no-water`      | Omni 视频生视频，无水印      |      1.4904 |
+| `sd4-seedance-2.0`       | Seedance SD4 多模态生成      |       5.616 |
+| `sd4-seedance-2.0-fast`  | Seedance SD4 多模态快速生成  |       4.176 |
+| `sd7-seedance-2.0-1080p` | Seedance SD7 固定 1080p      |       7.056 |
+| `sd7-seedance-2.0-720p`  | Seedance SD7 固定 720p       |       5.616 |
+| `sd8-seedance-2.0`       | Seedance SD8 多模态生成      |       4.176 |
 
 ## 7. 视频任务协议
 
@@ -332,7 +332,9 @@ SD7 的分辨率固定在模型 ID 中：720p 使用 `sd7-seedance-2.0-720p`，1
   "prompt": "参考环境与动作节奏，生成稳定的写实电影镜头",
   "duration": 5,
   "aspect_ratio": "16:9",
-  "reference_image_urls": ["https://assets.example.com/video/masked-reference.png"],
+  "reference_image_urls": [
+    "https://assets.example.com/video/masked-reference.png"
+  ],
   "reference_videos": ["https://assets.example.com/video/motion.mp4"]
 }
 ```
@@ -356,17 +358,17 @@ curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content" \
 
 ## 8. 视频参数范围
 
-| 模型族                  | 时长                  | 分辨率              | 原生音频 | 参考素材限制                                      |
-| ----------------------- | --------------------- | ------------------- | -------- | ------------------------------------------------- |
-| `grok-video*`           | 4/6/8/10/12/15 秒     | 480p、720p          | 不支持   | 标准版 1 图，1.5 版 7 图                          |
-| `happyhouse-1.0`        | 3-15 秒               | 720p、1080p         | 支持     | 9 图；含 1 视频时最多 5 图，总数最多 9            |
-| `happyhouse-1.1`        | 3-15 秒               | 720p、1080p         | 支持     | 最多 9 图                                         |
-| `minimax-h3-2k`         | 5-15 秒               | 固定 2K             | 支持     | 5 图、3 音频，总数最多 8；也支持首尾帧            |
-| `omni-fast*`            | 固定约 10 秒          | 固定 720p           | 不支持   | 最多 5 图，或首尾帧                               |
-| `omni-v2v*`             | 固定约 10 秒          | 固定 720p           | 不支持   | 必须且只能提供 1 条视频                           |
-| `sd4-seedance-2.0*`     | 4-15 秒               | 480p、720p          | 支持     | 4 图、3 视频、1 音频，总数最多 8；或首尾帧        |
-| `sd7-seedance-2.0-*`    | 4-15 秒               | 由模型 ID 固定      | 支持     | 5 图、3 视频、3 音频，总数最多 11                 |
-| `sd8-seedance-2.0`      | 5/10/15 秒            | 模型固定            | 不支持   | 9 图、3 视频、3 音频，总数最多 15                 |
+| 模型族               | 时长              | 分辨率         | 原生音频 | 参考素材限制                               |
+| -------------------- | ----------------- | -------------- | -------- | ------------------------------------------ |
+| `grok-video*`        | 4/6/8/10/12/15 秒 | 480p、720p     | 不支持   | 标准版 1 图，1.5 版 7 图                   |
+| `happyhouse-1.0`     | 3-15 秒           | 720p、1080p    | 支持     | 9 图；含 1 视频时最多 5 图，总数最多 9     |
+| `happyhouse-1.1`     | 3-15 秒           | 720p、1080p    | 支持     | 最多 9 图                                  |
+| `minimax-h3-2k`      | 5-15 秒           | 固定 2K        | 支持     | 5 图、3 音频，总数最多 8；也支持首尾帧     |
+| `omni-fast*`         | 固定约 10 秒      | 固定 720p      | 不支持   | 最多 5 图，或首尾帧                        |
+| `omni-v2v*`          | 固定约 10 秒      | 固定 720p      | 不支持   | 必须且只能提供 1 条视频                    |
+| `sd4-seedance-2.0*`  | 4-15 秒           | 480p、720p     | 支持     | 4 图、3 视频、1 音频，总数最多 8；或首尾帧 |
+| `sd7-seedance-2.0-*` | 4-15 秒           | 由模型 ID 固定 | 支持     | 5 图、3 视频、3 音频，总数最多 11          |
+| `sd8-seedance-2.0`   | 5/10/15 秒        | 模型固定       | 不支持   | 9 图、3 视频、3 音频，总数最多 15          |
 
 支持的宽高比：
 
