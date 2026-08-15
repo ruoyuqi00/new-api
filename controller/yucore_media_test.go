@@ -47,6 +47,36 @@ func yucoreMediaControllerTestModel(id string) service.YucoreMediaCatalogModel {
 	}
 }
 
+func configureYucoreMediaControllerCanonicalTestModel(t *testing.T) string {
+	t.Helper()
+	const modelID = "controller-canonical-video"
+	const optionKey = "yucore_media.model_capabilities"
+
+	common.OptionMapRWMutex.Lock()
+	optionMapWasNil := common.OptionMap == nil
+	if optionMapWasNil {
+		common.OptionMap = make(map[string]string)
+	}
+	original, hadOriginal := common.OptionMap[optionKey]
+	common.OptionMap[optionKey] = `{"controller-canonical-video":{"kind":"video","allowed_parameters":["negative_prompt"]}}`
+	common.OptionMapRWMutex.Unlock()
+
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		if hadOriginal {
+			common.OptionMap[optionKey] = original
+		} else {
+			delete(common.OptionMap, optionKey)
+		}
+		if optionMapWasNil {
+			common.OptionMap = nil
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	return modelID
+}
+
 func controllerIntPointer(value int) *int       { return &value }
 func controllerInt64Pointer(value int64) *int64 { return &value }
 func controllerBoolPointer(value bool) *bool    { return &value }
@@ -149,9 +179,10 @@ func TestYucoreMediaCanonicalLegacyInputs(t *testing.T) {
 }
 
 func TestYucoreMediaCanonicalTopLevelFieldsOverrideLegacyMetadata(t *testing.T) {
+	modelID := configureYucoreMediaControllerCanonicalTestModel(t)
 	task, err := buildYucoreMediaTaskFromRequest(yucoreMediaTaskRequest{
 		Kind:           "video",
-		ModelId:        "seedance-2.0",
+		ModelId:        modelID,
 		Prompt:         "test prompt",
 		Duration:       controllerIntPointer(5),
 		Resolution:     controllerStringPointer("720P"),
@@ -170,7 +201,7 @@ func TestYucoreMediaCanonicalTopLevelFieldsOverrideLegacyMetadata(t *testing.T) 
 		}),
 	}, 42)
 	require.NoError(t, err)
-	require.NoError(t, normalizeYucoreMediaTaskWithSelection(task, yucoreMediaControllerTestModel("seedance-2.0")))
+	require.NoError(t, normalizeYucoreMediaTaskWithSelection(task, yucoreMediaControllerTestModel(modelID)))
 
 	var metadata map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal([]byte(task.Metadata), &metadata))
@@ -186,9 +217,10 @@ func TestYucoreMediaCanonicalTopLevelFieldsOverrideLegacyMetadata(t *testing.T) 
 }
 
 func TestYucoreMediaCanonicalReadsLegacyMetadataWhenTopLevelIsAbsent(t *testing.T) {
+	modelID := configureYucoreMediaControllerCanonicalTestModel(t)
 	task, err := buildYucoreMediaTaskFromRequest(yucoreMediaTaskRequest{
 		Kind:    "video",
-		ModelId: "seedance-2.0",
+		ModelId: modelID,
 		Prompt:  "test prompt",
 		Metadata: mustYucoreMediaJSON(t, map[string]any{
 			"duration_seconds": 8,
@@ -200,7 +232,7 @@ func TestYucoreMediaCanonicalReadsLegacyMetadataWhenTopLevelIsAbsent(t *testing.
 		}),
 	}, 42)
 	require.NoError(t, err)
-	require.NoError(t, normalizeYucoreMediaTaskWithSelection(task, yucoreMediaControllerTestModel("seedance-2.0")))
+	require.NoError(t, normalizeYucoreMediaTaskWithSelection(task, yucoreMediaControllerTestModel(modelID)))
 
 	var metadata map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal([]byte(task.Metadata), &metadata))

@@ -136,7 +136,7 @@ func TestTaskCatalogPricingProducesExactFrozenQuota(t *testing.T) {
 	perCall, clamp := common.QuotaFromFloatChecked(0.5 * common.QuotaPerUnit * groupRatio)
 	require.Nil(t, clamp)
 	perCallInfo := &relaycommon.RelayInfo{PriceData: types.PriceData{Quota: perCall, OtherRatios: map[string]float64{"seconds": 99}}}
-	resolveTaskPerCallBilling(perCallInfo, "veo-3.1-fast")
+	resolveTaskPerCallBilling(perCallInfo, "grok-video")
 	perCallQuota := perCallInfo.PriceData.Quota
 	if !perCallInfo.TaskPerCallBilling {
 		perCallQuota = applyTaskOtherRatiosQuota(perCallQuota, perCallInfo.PriceData.OtherRatios)
