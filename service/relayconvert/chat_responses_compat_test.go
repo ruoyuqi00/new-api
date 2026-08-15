@@ -1,6 +1,7 @@
 package relayconvert
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -9,6 +10,21 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestChatToResponsesPreservesPromptCacheFields(t *testing.T) {
+	req := &dto.GeneralOpenAIRequest{
+		Model:                "gpt-test",
+		PromptCacheKey:       "stable-cache-key",
+		PromptCacheRetention: json.RawMessage(`"24h"`),
+		Messages:             []dto.Message{{Role: "user", Content: "hello"}},
+	}
+
+	got, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `"stable-cache-key"`, string(got.PromptCacheKey))
+	assert.JSONEq(t, `"24h"`, string(got.PromptCacheRetention))
+}
 
 func TestChatCompletionsRequestToResponsesRequestInstructionsAndTools(t *testing.T) {
 	req := &dto.GeneralOpenAIRequest{

@@ -57,6 +57,7 @@ import { useTranslation } from 'react-i18next';
 import {
   CHANNEL_AFFINITY_RULE_TEMPLATES,
   cloneChannelAffinityTemplate,
+  mergeChannelAffinityRuleForSave,
 } from '../../../constants/channel-affinity-template.constants';
 import ParamOverrideEditorModal from '../../../components/table/channels/modals/ParamOverrideEditorModal';
 
@@ -209,25 +210,27 @@ const buildChannelAffinityRulePayload = ({
   keySources,
   userAgentInclude,
   paramOverrideTemplate,
-}) => ({
-  id: isEdit ? editingRuleId : rulesLength,
-  name: (values?.name || '').trim(),
-  model_regex: modelRegex,
-  path_regex: pathRegex,
-  key_sources: keySources,
-  value_regex: (values?.value_regex || '').trim(),
-  ttl_seconds: Number(values?.ttl_seconds || 0),
-  include_using_group: !!values?.include_using_group,
-  include_model_name: !!values?.include_model_name,
-  include_rule_name: !!values?.include_rule_name,
-  skip_retry_on_failure: !!values?.skip_retry_on_failure,
-  ...(userAgentInclude.length > 0
-    ? { user_agent_include: userAgentInclude }
-    : {}),
-  ...(paramOverrideTemplate
-    ? { param_override_template: paramOverrideTemplate }
-    : {}),
-});
+  baseRule,
+}) =>
+  mergeChannelAffinityRuleForSave(baseRule, {
+    id: isEdit ? editingRuleId : rulesLength,
+    name: (values?.name || '').trim(),
+    model_regex: modelRegex,
+    path_regex: pathRegex,
+    key_sources: keySources,
+    value_regex: (values?.value_regex || '').trim(),
+    ttl_seconds: Number(values?.ttl_seconds || 0),
+    include_using_group: !!values?.include_using_group,
+    include_model_name: !!values?.include_model_name,
+    include_rule_name: !!values?.include_rule_name,
+    skip_retry_on_failure: !!values?.skip_retry_on_failure,
+    ...(userAgentInclude.length > 0
+      ? { user_agent_include: userAgentInclude }
+      : {}),
+    ...(paramOverrideTemplate
+      ? { param_override_template: paramOverrideTemplate }
+      : {}),
+  });
 
 export default function SettingsChannelAffinity(props) {
   const { t } = useTranslation();
@@ -766,6 +769,7 @@ export default function SettingsChannelAffinity(props) {
         keySources: keySourcesValidation.value,
         userAgentInclude,
         paramOverrideTemplate: paramTemplateValidation.value,
+        baseRule: editingRule,
       });
 
       if (!rulePayload.name) return showError(t('名称不能为空'));
