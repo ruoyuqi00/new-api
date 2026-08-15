@@ -403,6 +403,8 @@ func TestNormalizeYucoreMediaRequestDoesNotMutateCaller(t *testing.T) {
 	generateAudio := false
 	seed := int64(0)
 	negativePrompt := " avoid blur "
+	selected := yucoreMediaRequestTestModel("request-copy-test")
+	selected.capability = &model.YucoreMediaModelCapability{AllowedParameters: []string{"negative_prompt"}}
 	references := []model.YucoreMediaReferenceInput{{Role: " IMAGE ", URL: " https://cdn.example/ref.png ", MimeType: " image/png ", DurationMS: &referenceDuration}}
 	options := YucoreMediaRequestOptions{
 		Duration:       &duration,
@@ -414,7 +416,7 @@ func TestNormalizeYucoreMediaRequestDoesNotMutateCaller(t *testing.T) {
 		References:     references,
 	}
 
-	normalized, err := NormalizeYucoreMediaRequest(yucoreMediaRequestTestModel("seedance-2.0"), options)
+	normalized, err := NormalizeYucoreMediaRequest(selected, options)
 	require.NoError(t, err)
 	assert.Equal(t, " IMAGE ", references[0].Role)
 	assert.Equal(t, " https://cdn.example/ref.png ", references[0].URL)

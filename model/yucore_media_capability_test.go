@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -9,138 +10,122 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCangyuanMediaCatalogInventory(t *testing.T) {
+func TestCangyuanCatalogMatchesAuditedVideoInventory(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
-	require.Len(t, catalog, 40)
 
-	enabled := 0
-	probes := 0
-	images := 0
-	videos := 0
-	for modelID, capability := range catalog {
-		assert.Equal(t, modelID, capability.Model)
-		switch capability.Availability {
-		case YucoreMediaAvailabilityEnabled:
-			enabled++
-		case YucoreMediaAvailabilityProbe:
-			probes++
-		default:
-			t.Errorf("model %s has unexpected availability %q", modelID, capability.Availability)
+	enabled := []string{
+		"grok-video", "grok-video-1.5", "happyhouse-1.0", "happyhouse-1.1",
+		"minimax-h3-2k", "omni-fast", "omni-fast-no-water", "omni-v2v",
+		"omni-v2v-no-water", "sd4-seedance-2.0", "sd4-seedance-2.0-fast",
+		"sd7-seedance-2.0-1080p", "sd7-seedance-2.0-720p", "sd8-seedance-2.0",
+	}
+	probes := []string{
+		"sd8-seedance-2.0-fast", "seedance-2.0-mini",
+		"seedance-2.0-mini-8s", "veo-clean",
+	}
+	actualEnabled := make([]string, 0, len(enabled))
+	actualProbes := make([]string, 0, len(probes))
+	for id, capability := range catalog {
+		assert.Equal(t, id, capability.Model)
+		if capability.Kind != "video" {
+			continue
 		}
-		switch capability.Kind {
-		case "image":
-			images++
-		case "video":
-			videos++
-		default:
-			t.Errorf("model %s has unexpected kind %q", modelID, capability.Kind)
+		if capability.Availability == YucoreMediaAvailabilityProbe {
+			actualProbes = append(actualProbes, id)
+		} else {
+			actualEnabled = append(actualEnabled, id)
 		}
 	}
-	assert.Equal(t, 38, enabled)
-	assert.Equal(t, 2, probes)
-	assert.Equal(t, 7, images)
-	assert.Equal(t, 33, videos)
-
-	assert.Equal(t, YucoreMediaAvailabilityProbe, catalog["seedance-2.0-mini-8s"].Availability)
-	assert.Equal(t, YucoreMediaAvailabilityProbe, catalog["veo-clean"].Availability)
-	for _, modelID := range []string{"sora-2", "sora-2-pro", "veo-3-1", "veo-3-1-fast", "veo-3-1-ref"} {
-		assert.NotContains(t, catalog, modelID)
-	}
-	assert.Contains(t, catalog, "veo-3.1")
-	assert.Contains(t, catalog, "veo-3.1-fast")
-	assert.Zero(t, catalog["seedance-2.0-mini-8s"].UpstreamCost)
-	assert.Zero(t, catalog["veo-clean"].UpstreamCost)
-
-	expectedCosts := map[string]float64{
-		"gpt-image-2-2k": 0.065, "nano-banana-pro-1k": 0.08, "nano-banana-pro-2k": 0.10,
-		"nano-banana-pro-4k": 0.149, "nano-banana2-1k": 0.059, "nano-banana2-2k": 0.095, "nano-banana2-4k": 0.135,
-		"gemini-omni-flash": 0.75, "grok-video": 0.69, "grok-video-1.5": 1.39, "happyhouse-1.0": 4.5,
-		"happyhouse-1.1": 2.9, "kling-3.0": 1.3, "kling-3.0-omni": 1.3, "minimax-h3-2k": 2.5,
-		"omni-fast": 0.6624, "omni-fast-no-water": 0.81, "omni-v2v": 0.8856, "omni-v2v-no-water": 1.035,
-		"sd5-seedance-2.0": 3.35, "sd5-seedance-2.0-fast": 2.1, "sd6-seedance-2.0-1080p": 0.89,
-		"sd6-seedance-2.0-720p": 4.6, "seedance-2.0": 3.9, "seedance-2.0-1080p": 2.25,
-		"seedance-2.0-480p": 0.45, "seedance-2.0-4k": 4.5, "seedance-2.0-720p": 0.975,
-		"seedance-2.0-fast": 2.9, "seedance-2.0-fast-480p": 0.25, "seedance-2.0-fast-720p": 0.75,
-		"seedance-2.0-mini": 2.4, "seedance-2.0-mini-480p": 0.3, "seedance-2.0-mini-720p": 0.525,
-		"seedance-2.5-480p": 0.25, "seedance-2.5-720p": 0.35, "veo-3.1": 0.99, "veo-3.1-fast": 0.5,
-	}
-	require.Len(t, expectedCosts, 38)
-	for modelID, expectedCost := range expectedCosts {
-		capability := catalog[modelID]
-		assert.Equal(t, YucoreMediaAvailabilityEnabled, capability.Availability, modelID)
-		assert.InDelta(t, expectedCost, capability.UpstreamCost, 0.0000001, modelID)
+	sort.Strings(enabled)
+	sort.Strings(probes)
+	sort.Strings(actualEnabled)
+	sort.Strings(actualProbes)
+	assert.Equal(t, enabled, actualEnabled)
+	assert.Equal(t, probes, actualProbes)
+	for _, stale := range []string{"gemini-omni-flash", "sora-2", "veo-3.1", "sd5-seedance-2.0", "seedance-2.0", "kling-3.0"} {
+		assert.NotContains(t, catalog, stale)
 	}
 }
 
-func TestCangyuanMediaCatalogAuditedFamilyContracts(t *testing.T) {
+func TestCangyuanCatalogMatchesAuditedCostsAndCapabilities(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
 
-	omni := catalog["omni-fast"]
-	assert.Equal(t, yucoreMediaDurationPolicyFixed, omni.DurationPolicy)
-	assert.Equal(t, 10, omni.FixedDurationSeconds)
-	assert.Equal(t, []int{10}, omni.Durations)
-	assert.Equal(t, []string{"720p"}, omni.Resolutions)
-	assert.NotContains(t, omni.AllowedParameters, "seconds")
-	assert.NotContains(t, omni.AllowedParameters, "size")
-	assert.Equal(t, YucoreMediaReferenceLimits{Images: 5, Total: 5}, omni.ReferenceLimits)
-	assert.Equal(t, []string{"media", "frames"}, omni.ReferenceModes)
-	geminiOmni := catalog["gemini-omni-flash"]
-	assert.Equal(t, []int{3, 4, 5, 6, 7, 8, 9, 10}, geminiOmni.Durations)
-	assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Total: 4}, geminiOmni.ReferenceLimits)
-
-	seedance := catalog["seedance-2.0"]
-	assert.Equal(t, []int{4, 5, 6, 8, 10, 12, 15}, seedance.Durations)
-	assert.Equal(t, []string{"480p", "720p"}, seedance.Resolutions)
-	assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8}, seedance.ReferenceLimits)
-	assert.Equal(t, []string{"media", "frames"}, seedance.ReferenceModes)
-	seedanceFast := catalog["seedance-2.0-fast"]
-	assert.Equal(t, 4, seedanceFast.ReferenceLimits.Images)
-	assert.Equal(t, 3, seedanceFast.ReferenceLimits.Videos)
-	assert.Equal(t, 1, seedanceFast.ReferenceLimits.Audios)
-	sd5 := catalog["sd5-seedance-2.0"]
-	assert.Equal(t, YucoreMediaReferenceLimits{Images: 9, Videos: 3, Audios: 3, Total: 12}, sd5.ReferenceLimits)
-	assert.Equal(t, []string{"480p", "720p"}, sd5.Resolutions)
-	sd6 := catalog["sd6-seedance-2.0-1080p"]
-	assert.Equal(t, YucoreMediaReferenceLimits{Images: 9, Videos: 3, Audios: 1, Total: 12}, sd6.ReferenceLimits)
-	assert.Equal(t, []string{"1080p"}, sd6.Resolutions)
-	seedance25 := catalog["seedance-2.5-480p"]
-	assert.Equal(t, 26, len(seedance25.Durations))
-	assert.Equal(t, 4, seedance25.Durations[0])
-	assert.Equal(t, 29, seedance25.Durations[len(seedance25.Durations)-1])
-	assert.Equal(t, YucoreMediaReferenceLimits{Images: 30, Videos: 10, Audios: 10}, seedance25.ReferenceLimits)
-	for _, modelID := range []string{"seedance-2.0-mini", "seedance-2.0-mini-480p", "seedance-2.0-mini-720p"} {
-		mini := catalog[modelID]
-		assert.True(t, mini.SupportsAudio, modelID)
-		assert.Contains(t, mini.AllowedParameters, "video", modelID)
-		assert.Contains(t, mini.AllowedParameters, "audio", modelID)
-		assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8}, mini.ReferenceLimits, modelID)
+	type expectedCapability struct {
+		cost               float64
+		policy             string
+		fixedDuration      int
+		durations          []int
+		resolutions        []string
+		aspectRatios       []string
+		referenceModes     []string
+		limits             YucoreMediaReferenceLimits
+		supportsAudio      bool
+		requiredKinds      []string
+		disallowFrameAudio bool
+		allowed            []string
 	}
+	range3To15 := []int{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	range4To15 := []int{4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	range5To15 := []int{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	grokRatios := []string{"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"}
+	seedanceRatios := []string{"16:9", "9:16", "1:1", "21:9", "3:4", "4:3"}
+	expected := map[string]expectedCapability{
+		"grok-video":             {cost: 0.69, policy: yucoreMediaDurationPolicyDuration, durations: []int{4, 6, 8, 10, 12, 15}, resolutions: []string{"480p", "720p"}, aspectRatios: grokRatios, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 1, Total: 1}, allowed: []string{"duration", "resolution", "aspect_ratio", "reference_image_urls"}},
+		"grok-video-1.5":         {cost: 1.39, policy: yucoreMediaDurationPolicyDuration, durations: []int{4, 6, 8, 10, 12, 15}, resolutions: []string{"480p", "720p"}, aspectRatios: grokRatios, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 7, Total: 7}, allowed: []string{"duration", "resolution", "aspect_ratio", "reference_image_urls"}},
+		"happyhouse-1.0":         {cost: 4.5, policy: yucoreMediaDurationPolicyDuration, durations: range3To15, resolutions: []string{"720p", "1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "3:4", "4:3"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Videos: 1, Total: 9, MinVideoDurationMS: 3000, MaxVideoDurationMS: 10000, MaxTotalVideoDurationMS: 10000, MaxImagesWithVideo: 5}, supportsAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos"}},
+		"happyhouse-1.1":         {cost: 2.9, policy: yucoreMediaDurationPolicyDuration, durations: range3To15, resolutions: []string{"720p", "1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "3:4", "4:3"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Total: 9}, supportsAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls"}},
+		"minimax-h3-2k":          {cost: 3.5, policy: yucoreMediaDurationPolicyDuration, durations: range5To15, resolutions: []string{"2k"}, aspectRatios: seedanceRatios, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Audios: 3, Total: 8, MaxAudioDurationMS: 15000, MaxTotalAudioDurationMS: 15000}, supportsAudio: true, disallowFrameAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_audios", "first_image_url", "last_image_url"}},
+		"omni-fast":              {cost: 0.6624, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Total: 5}, allowed: []string{"aspect_ratio", "reference_image_urls", "first_image_url", "last_image_url"}},
+		"omni-fast-no-water":     {cost: 0.81, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Total: 5}, allowed: []string{"aspect_ratio", "reference_image_urls", "first_image_url", "last_image_url"}},
+		"omni-v2v":               {cost: 0.8856, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Videos: 1, Total: 1}, requiredKinds: []string{"video"}, allowed: []string{"aspect_ratio", "reference_videos"}},
+		"omni-v2v-no-water":      {cost: 1.035, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Videos: 1, Total: 1}, requiredKinds: []string{"video"}, allowed: []string{"aspect_ratio", "reference_videos"}},
+		"sd4-seedance-2.0":       {cost: 3.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"480p", "720p"}, aspectRatios: seedanceRatios, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8, MinVideoDurationMS: 4000, MaxVideoDurationMS: 10000, MaxTotalVideoDurationMS: 15000, MaxAudioDurationMS: 15000, MaxTotalAudioDurationMS: 15000}, supportsAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios", "first_image_url", "last_image_url"}},
+		"sd4-seedance-2.0-fast":  {cost: 2.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"480p", "720p"}, aspectRatios: seedanceRatios, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8, MinVideoDurationMS: 4000, MaxVideoDurationMS: 10000, MaxTotalVideoDurationMS: 15000, MaxAudioDurationMS: 15000, MaxTotalAudioDurationMS: 15000}, supportsAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios", "first_image_url", "last_image_url"}},
+		"sd7-seedance-2.0-1080p": {cost: 4.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 5, Videos: 3, Audios: 3, Total: 11}, supportsAudio: true, allowed: []string{"duration", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios"}},
+		"sd7-seedance-2.0-720p":  {cost: 3.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 5, Videos: 3, Audios: 3, Total: 11}, supportsAudio: true, allowed: []string{"duration", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios"}},
+		"sd8-seedance-2.0":       {cost: 2.9, policy: yucoreMediaDurationPolicyDuration, durations: []int{5, 10, 15}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Videos: 3, Audios: 3, Total: 15}, allowed: []string{"duration", "aspect_ratio", "reference_image_urls", "reference_videos", "reference_audios"}},
+	}
+	totalCost := 0.0
+	for modelID, want := range expected {
+		capability := catalog[modelID]
+		assert.Equal(t, YucoreMediaAvailabilityEnabled, capability.Availability, modelID)
+		assert.Equal(t, YucoreMediaPricingPerCall, capability.PricingUnit, modelID)
+		assert.InDelta(t, want.cost, capability.UpstreamCost, 0.0000001, modelID)
+		assert.Equal(t, want.policy, capability.DurationPolicy, modelID)
+		assert.Equal(t, want.fixedDuration, capability.FixedDurationSeconds, modelID)
+		assert.Equal(t, want.durations, capability.Durations, modelID)
+		assert.Equal(t, want.resolutions, capability.Resolutions, modelID)
+		assert.Equal(t, want.aspectRatios, capability.AspectRatios, modelID)
+		assert.Equal(t, want.referenceModes, capability.ReferenceModes, modelID)
+		assert.Equal(t, want.limits, capability.ReferenceLimits, modelID)
+		assert.Equal(t, want.supportsAudio, capability.SupportsAudio, modelID)
+		assert.False(t, capability.SupportsSeed, modelID)
+		assert.Equal(t, want.requiredKinds, capability.RequiredReferenceKinds, modelID)
+		assert.Equal(t, want.disallowFrameAudio, capability.DisallowGeneratedAudioWithFrames, modelID)
+		assert.Equal(t, want.allowed, capability.AllowedParameters, modelID)
+		assert.Equal(t, "/v1/videos", capability.CreatePath, modelID)
+		assert.Equal(t, "/v1/videos/{task_id}", capability.StatusPath, modelID)
+		assert.Equal(t, "/v1/videos/{task_id}/content", capability.ContentPath, modelID)
+		assert.Equal(t, 5, capability.PollIntervalSeconds, modelID)
+		assert.Equal(t, 7200, capability.MaxPollDurationSeconds, modelID)
+		totalCost += capability.UpstreamCost
+	}
+	assert.InDelta(t, 34.873, totalCost, 0.0000001)
 
-	veo := catalog["veo-3.1"]
-	assert.Equal(t, []int{4, 6, 8}, veo.Durations)
-	assert.False(t, veo.SupportsSeed)
-	assert.NotContains(t, veo.AllowedParameters, "seed")
-	assert.NotContains(t, veo.AllowedParameters, "negative_prompt")
-
-	probe := catalog["veo-clean"]
-	assert.Equal(t, YucoreMediaAvailabilityProbe, probe.Availability)
-	assert.Empty(t, probe.Transport)
-	assert.Empty(t, probe.CreatePath)
-	assert.Empty(t, probe.StatusPath)
-	assert.Empty(t, probe.Durations)
-	assert.Empty(t, probe.Resolutions)
-	assert.False(t, probe.SupportsAudio)
-	assert.Empty(t, probe.TerminalSuccessStates)
-	assert.Empty(t, probe.TerminalFailureStates)
-	assert.Empty(t, probe.ResponseFormat)
-	miniProbe := catalog["seedance-2.0-mini-8s"]
-	assert.Equal(t, YucoreMediaAvailabilityProbe, miniProbe.Availability)
-	assert.Empty(t, miniProbe.Transport)
-	assert.Empty(t, miniProbe.Durations)
-	assert.Empty(t, miniProbe.ReferenceModes)
-	assert.Empty(t, miniProbe.TerminalSuccessStates)
+	for _, modelID := range []string{"sd8-seedance-2.0-fast", "seedance-2.0-mini", "seedance-2.0-mini-8s", "veo-clean"} {
+		probe := catalog[modelID]
+		assert.Equal(t, YucoreMediaAvailabilityProbe, probe.Availability, modelID)
+		assert.Zero(t, probe.UpstreamCost, modelID)
+		assert.Empty(t, probe.PricingUnit, modelID)
+		assert.Empty(t, probe.Transport, modelID)
+		assert.Empty(t, probe.CreatePath, modelID)
+		assert.Empty(t, probe.StatusPath, modelID)
+		assert.Empty(t, probe.ContentPath, modelID)
+		assert.Empty(t, probe.AllowedParameters, modelID)
+	}
+	assert.Contains(t, catalog["sd8-seedance-2.0"].Notes, "Reference images containing people must mask the eyes.")
 }
 
 func TestCangyuanMediaCatalogOperatorOverridesPreserveExplicitZeroValues(t *testing.T) {
@@ -148,7 +133,7 @@ func TestCangyuanMediaCatalogOperatorOverridesPreserveExplicitZeroValues(t *test
 	originalOptions := common.OptionMap
 	common.OptionMap = map[string]string{
 		"yucore_media.model_capabilities": `{
-			"seedance-2.0": {
+			"sd4-seedance-2.0": {
 				"supports_audio": false,
 				"poll_interval_seconds": 0,
 				"durations": [],
@@ -163,7 +148,7 @@ func TestCangyuanMediaCatalogOperatorOverridesPreserveExplicitZeroValues(t *test
 		common.OptionMapRWMutex.Unlock()
 	})
 
-	capability := getYucoreMediaAdapterConfig().ModelCapabilities["seedance-2.0"]
+	capability := getYucoreMediaAdapterConfig().ModelCapabilities["sd4-seedance-2.0"]
 	assert.False(t, capability.SupportsAudio)
 	assert.Zero(t, capability.PollIntervalSeconds)
 	assert.Empty(t, capability.Durations)
@@ -173,23 +158,23 @@ func TestCangyuanMediaCatalogOperatorOverridesPreserveExplicitZeroValues(t *test
 
 	embedded, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
-	arrayMerged, err := mergeYucoreMediaModelCapabilities(embedded, `[{"model":"seedance-2.0","supports_audio":false,"durations":[]}]`)
+	arrayMerged, err := mergeYucoreMediaModelCapabilities(embedded, `[{"model":"sd4-seedance-2.0","supports_audio":false,"durations":[]}]`)
 	require.NoError(t, err)
-	assert.False(t, arrayMerged["seedance-2.0"].SupportsAudio)
-	assert.Empty(t, arrayMerged["seedance-2.0"].Durations)
-	assert.Equal(t, "video", arrayMerged["seedance-2.0"].Kind)
-	legacyMerged, err := mergeYucoreMediaModelCapabilities(embedded, `{"seedance-2.0":{"max_reference_images":2}}`)
+	assert.False(t, arrayMerged["sd4-seedance-2.0"].SupportsAudio)
+	assert.Empty(t, arrayMerged["sd4-seedance-2.0"].Durations)
+	assert.Equal(t, "video", arrayMerged["sd4-seedance-2.0"].Kind)
+	legacyMerged, err := mergeYucoreMediaModelCapabilities(embedded, `{"sd4-seedance-2.0":{"max_reference_images":2}}`)
 	require.NoError(t, err)
-	assert.Equal(t, 2, legacyMerged["seedance-2.0"].ReferenceLimits.Images)
-	assert.Equal(t, 3, legacyMerged["seedance-2.0"].ReferenceLimits.Videos)
+	assert.Equal(t, 2, legacyMerged["sd4-seedance-2.0"].ReferenceLimits.Images)
+	assert.Equal(t, 3, legacyMerged["sd4-seedance-2.0"].ReferenceLimits.Videos)
 }
 
 func TestCangyuanMediaCatalogMergesEnvironmentBeforeOptions(t *testing.T) {
-	t.Setenv("YUCORE_MEDIA_MODEL_CAPABILITIES", `{"seedance-2.0":{"supports_audio":false}}`)
+	t.Setenv("YUCORE_MEDIA_MODEL_CAPABILITIES", `{"sd4-seedance-2.0":{"supports_audio":false}}`)
 	common.OptionMapRWMutex.Lock()
 	originalOptions := common.OptionMap
 	common.OptionMap = map[string]string{
-		"yucore_media.model_capabilities": `{"seedance-2.0":{"durations":[]}}`,
+		"yucore_media.model_capabilities": `{"sd4-seedance-2.0":{"durations":[]}}`,
 	}
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
@@ -198,7 +183,7 @@ func TestCangyuanMediaCatalogMergesEnvironmentBeforeOptions(t *testing.T) {
 		common.OptionMapRWMutex.Unlock()
 	})
 
-	capability := getYucoreMediaAdapterConfig().ModelCapabilities["seedance-2.0"]
+	capability := getYucoreMediaAdapterConfig().ModelCapabilities["sd4-seedance-2.0"]
 	assert.False(t, capability.SupportsAudio)
 	assert.Empty(t, capability.Durations)
 	assert.Equal(t, "video", capability.Kind)
@@ -209,7 +194,7 @@ func TestYucoreMediaConfiguredModelIDsKeepsEmbeddedCatalogForPartialOverride(t *
 	originalOptions := common.OptionMap
 	common.OptionMap = map[string]string{
 		"yucore_media.adapter":            YucoreMediaAdapterYuAPIChannel,
-		"yucore_media.model_capabilities": `{"seedance-2.0":{"poll_interval_seconds":0},"operator-video":{"kind":"video"},"veo-clean":{"availability":" PROBE "}}`,
+		"yucore_media.model_capabilities": `{"sd4-seedance-2.0":{"poll_interval_seconds":0},"operator-video":{"kind":"video"},"veo-clean":{"availability":" PROBE "}}`,
 	}
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
@@ -219,9 +204,9 @@ func TestYucoreMediaConfiguredModelIDsKeepsEmbeddedCatalogForPartialOverride(t *
 	})
 
 	configured := YucoreMediaConfiguredModelIDs()
-	assert.Contains(t, configured, "seedance-2.0")
+	assert.Contains(t, configured, "sd4-seedance-2.0")
 	assert.Contains(t, configured, "gpt-image-2-2k")
-	assert.Contains(t, configured, "veo-3.1")
+	assert.Contains(t, configured, "grok-video")
 	assert.Contains(t, configured, "operator-video")
 	assert.NotContains(t, configured, "seedance-2.0-mini-8s")
 	assert.NotContains(t, configured, "veo-clean")
@@ -262,36 +247,36 @@ func TestYucoreMediaModelPricingUnitPrefersConfiguredCapability(t *testing.T) {
 func TestCangyuanMediaCatalogReturnsIndependentCopies(t *testing.T) {
 	first, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
-	firstCapability := first["seedance-2.0"]
+	firstCapability := first["sd4-seedance-2.0"]
 	require.NotEmpty(t, firstCapability.Durations)
 	require.NotEmpty(t, firstCapability.ReferenceModes)
 	firstCapability.Durations[0] = 999
 	firstCapability.ReferenceModes[0] = "mutated"
 	firstCapability.RequiredReferenceKinds = []string{"video"}
 	firstCapability.ReferenceLimits.Images = 999
-	first["seedance-2.0"] = firstCapability
+	first["sd4-seedance-2.0"] = firstCapability
 	probeCapability := first["veo-clean"]
 	probeCapability.Notes[0] = "mutated"
 	first["veo-clean"] = probeCapability
-	delete(first, "veo-3.1")
+	delete(first, "grok-video")
 
 	second, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
-	assert.Contains(t, second, "veo-3.1")
-	assert.NotEqual(t, 999, second["seedance-2.0"].Durations[0])
-	assert.NotEqual(t, "mutated", second["seedance-2.0"].ReferenceModes[0])
-	assert.Empty(t, second["seedance-2.0"].RequiredReferenceKinds)
-	assert.NotEqual(t, 999, second["seedance-2.0"].ReferenceLimits.Images)
+	assert.Contains(t, second, "grok-video")
+	assert.NotEqual(t, 999, second["sd4-seedance-2.0"].Durations[0])
+	assert.NotEqual(t, "mutated", second["sd4-seedance-2.0"].ReferenceModes[0])
+	assert.Empty(t, second["sd4-seedance-2.0"].RequiredReferenceKinds)
+	assert.NotEqual(t, 999, second["sd4-seedance-2.0"].ReferenceLimits.Images)
 	assert.NotEqual(t, "mutated", second["veo-clean"].Notes[0])
 
 	_, settings := GetYucoreMediaCatalogSettings()
-	settingsCapability := settings["seedance-2.0"]
+	settingsCapability := settings["sd4-seedance-2.0"]
 	settingsCapability.Resolutions[0] = "mutated"
 	settingsCapability.TerminalFailureStates[0] = "mutated"
-	settings["seedance-2.0"] = settingsCapability
+	settings["sd4-seedance-2.0"] = settingsCapability
 	_, freshSettings := GetYucoreMediaCatalogSettings()
-	assert.NotEqual(t, "mutated", freshSettings["seedance-2.0"].Resolutions[0])
-	assert.NotEqual(t, "mutated", freshSettings["seedance-2.0"].TerminalFailureStates[0])
+	assert.NotEqual(t, "mutated", freshSettings["sd4-seedance-2.0"].Resolutions[0])
+	assert.NotEqual(t, "mutated", freshSettings["sd4-seedance-2.0"].TerminalFailureStates[0])
 }
 
 func TestValidateYucoreMediaModelCapabilitiesRichSchema(t *testing.T) {
@@ -443,7 +428,7 @@ func TestYucoreMediaReferenceModesNormalizeLegacyAliases(t *testing.T) {
 
 func TestYucoreMediaReferenceModeAliasesKeepEnvironmentAndOptionLayersActive(t *testing.T) {
 	t.Setenv("YUCORE_MEDIA_MODEL_CAPABILITIES", `{
-		"SEEDANCE-2.0": {
+		"SD4-SEEDANCE-2.0": {
 			"supports_audio": false,
 			"reference_modes": ["image", "video", "audio"]
 		}
@@ -452,7 +437,7 @@ func TestYucoreMediaReferenceModeAliasesKeepEnvironmentAndOptionLayersActive(t *
 	originalOptions := common.OptionMap
 	common.OptionMap = map[string]string{
 		"yucore_media.model_capabilities": `{
-			"seedance-2.0": {
+			"sd4-seedance-2.0": {
 				"durations": [],
 				"reference_modes": [" FRAME ", "TeXT", "image", "frames", "MEDIA"]
 			}
@@ -467,11 +452,11 @@ func TestYucoreMediaReferenceModeAliasesKeepEnvironmentAndOptionLayersActive(t *
 
 	config, err := getYucoreMediaAdapterConfigChecked()
 	require.NoError(t, err)
-	capability := config.ModelCapabilities["seedance-2.0"]
+	capability := config.ModelCapabilities["sd4-seedance-2.0"]
 	assert.False(t, capability.SupportsAudio)
 	assert.Empty(t, capability.Durations)
 	assert.Equal(t, []string{"text", "media", "frames"}, capability.ReferenceModes)
-	assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8}, capability.ReferenceLimits)
+	assert.Equal(t, YucoreMediaReferenceLimits{Images: 4, Videos: 3, Audios: 1, Total: 8, MinVideoDurationMS: 4000, MaxVideoDurationMS: 10000, MaxTotalVideoDurationMS: 15000, MaxAudioDurationMS: 15000, MaxTotalAudioDurationMS: 15000}, capability.ReferenceLimits)
 }
 
 func TestYucoreMediaReferenceInputRoleIsAlwaysSerialized(t *testing.T) {
