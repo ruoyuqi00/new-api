@@ -136,14 +136,14 @@ func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 	db := setupYucoreMediaCatalogTest(t)
 	createYucoreMediaCatalogUser(t, db, 9104)
 	common.OptionMapRWMutex.Lock()
-	common.OptionMap["yucore_media.model_capabilities"] = `{"SD4-seedance-2.0":{"reference_limits":{"min_video_duration_ms":4000,"max_video_duration_ms":15000,"max_total_video_duration_ms":15000,"max_audio_duration_ms":6000,"max_total_audio_duration_ms":12000,"max_images_with_video":3},"required_reference_kinds":["image"],"disallow_generated_audio_with_frames":true,"require_primary_image_for_media":true}}`
+	common.OptionMap["yucore_media.model_capabilities"] = `{"seedance-2.0":{"reference_limits":{"min_video_duration_ms":4000,"max_video_duration_ms":15000,"max_total_video_duration_ms":15000,"max_audio_duration_ms":6000,"max_total_audio_duration_ms":12000,"max_images_with_video":3},"required_reference_kinds":["image"],"disallow_generated_audio_with_frames":true,"require_primary_image_for_media":true}}`
 	common.OptionMapRWMutex.Unlock()
 
 	require.NoError(t, db.Create(&model.Channel{
 		Id: 31, Type: constant.ChannelTypeSora, Name: "seedance", Key: "key-31", Status: common.ChannelStatusEnabled,
 	}).Error)
 	require.NoError(t, db.Create(&model.Ability{
-		Group: "multimodal", Model: " sd4-seedance-2.0 ", ChannelId: 31, Enabled: true,
+		Group: "multimodal", Model: " seedance-2.0 ", ChannelId: 31, Enabled: true,
 	}).Error)
 
 	catalog, err := BuildYucoreMediaCatalog(9104)
@@ -152,17 +152,17 @@ func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 	require.Len(t, catalog.Groups[0].Models, 1)
 	item := catalog.Groups[0].Models[0]
 
-	assert.Equal(t, "sd4-seedance-2.0", item.Id)
+	assert.Equal(t, "seedance-2.0", item.Id)
 	assert.Equal(t, []int{4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, item.Durations)
-	assert.Equal(t, []string{"480p", "720p"}, item.Resolutions)
-	assert.Equal(t, []string{"480p", "720p"}, item.Sizes)
-	assert.Equal(t, []string{"media", "frames"}, item.ReferenceModes)
+	assert.Equal(t, []string{"720p"}, item.Resolutions)
+	assert.Equal(t, []string{"720p"}, item.Sizes)
+	assert.Equal(t, []string{"media"}, item.ReferenceModes)
 	assert.True(t, item.SupportsAudio)
 	assert.False(t, item.SupportsSeed)
-	assert.Equal(t, 4, item.InputLimits.MaxReferenceImages)
+	assert.Equal(t, 5, item.InputLimits.MaxReferenceImages)
 	assert.Equal(t, 3, item.InputLimits.MaxReferenceVideos)
-	assert.Equal(t, 1, item.InputLimits.MaxReferenceAudios)
-	assert.Equal(t, 8, item.InputLimits.MaxReferences)
+	assert.Equal(t, 3, item.InputLimits.MaxReferenceAudios)
+	assert.Equal(t, 11, item.InputLimits.MaxReferences)
 	assert.Equal(t, 15000, item.InputLimits.MaxReferenceVideoDurationMS)
 	assert.Equal(t, 4000, item.InputLimits.MinReferenceVideoDurationMS)
 	assert.Equal(t, 15000, item.InputLimits.MaxTotalReferenceVideoDurationMS)
@@ -223,7 +223,7 @@ func TestBuildYucoreMediaCatalogCapabilityProjectionIsolated(t *testing.T) {
 		Id: 33, Type: constant.ChannelTypeSora, Name: "seedance", Key: "key-33", Status: common.ChannelStatusEnabled,
 	}).Error)
 	require.NoError(t, db.Create(&model.Ability{
-		Group: "multimodal", Model: "sd4-seedance-2.0", ChannelId: 33, Enabled: true,
+		Group: "multimodal", Model: "seedance-2.0", ChannelId: 33, Enabled: true,
 	}).Error)
 
 	first, err := BuildYucoreMediaCatalog(9106)
@@ -240,8 +240,8 @@ func TestBuildYucoreMediaCatalogCapabilityProjectionIsolated(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, second.Groups)
 	assert.Equal(t, []int{4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, second.Groups[0].Models[0].Durations)
-	assert.Equal(t, []string{"480p", "720p"}, second.Groups[0].Models[0].Resolutions)
-	assert.Equal(t, []string{"media", "frames"}, second.Groups[0].Models[0].ReferenceModes)
+	assert.Equal(t, []string{"720p"}, second.Groups[0].Models[0].Resolutions)
+	assert.Equal(t, []string{"media"}, second.Groups[0].Models[0].ReferenceModes)
 	require.NotNil(t, second.Groups[0].Models[0].capability)
 	assert.NotEqual(t, "mutated", second.Groups[0].Models[0].capability.AllowedParameters[0])
 }
@@ -316,10 +316,10 @@ func TestResolveYucoreMediaSelectionKeepsCapabilitySnapshot(t *testing.T) {
 		Id: 35, Type: constant.ChannelTypeSora, Name: "snapshot", Key: "key-35", Status: common.ChannelStatusEnabled,
 	}).Error)
 	require.NoError(t, db.Create(&model.Ability{
-		Group: "multimodal", Model: "sd4-seedance-2.0", ChannelId: 35, Enabled: true,
+		Group: "multimodal", Model: "seedance-2.0", ChannelId: 35, Enabled: true,
 	}).Error)
 
-	_, selected, err := ResolveYucoreMediaSelection(9108, "multimodal", "sd4-seedance-2.0", YucoreMediaKindVideo)
+	_, selected, err := ResolveYucoreMediaSelection(9108, "multimodal", "seedance-2.0", YucoreMediaKindVideo)
 	require.NoError(t, err)
 	browserJSON, err := common.Marshal(selected)
 	require.NoError(t, err)
@@ -328,10 +328,10 @@ func TestResolveYucoreMediaSelectionKeepsCapabilitySnapshot(t *testing.T) {
 	assert.NotContains(t, string(browserJSON), "upstream_cost")
 
 	common.OptionMapRWMutex.Lock()
-	common.OptionMap["yucore_media.model_capabilities"] = `{"sd4-seedance-2.0":{"allowed_parameters":[]}}`
+	common.OptionMap["yucore_media.model_capabilities"] = `{"seedance-2.0":{"allowed_parameters":[]}}`
 	common.OptionMapRWMutex.Unlock()
 	_, refreshed := model.GetYucoreMediaCatalogSettings()
-	assert.Empty(t, refreshed["sd4-seedance-2.0"].AllowedParameters)
+	assert.Empty(t, refreshed["seedance-2.0"].AllowedParameters)
 	require.NotNil(t, selected.capability)
 	assert.Contains(t, selected.capability.AllowedParameters, "duration")
 

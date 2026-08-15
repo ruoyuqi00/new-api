@@ -40,7 +40,7 @@ func yucoreMediaTestDataURL(mimeType string, payload []byte) string {
 func TestNormalizeYucoreMediaRequestPreservesExplicitOptionalZeroValues(t *testing.T) {
 	generateAudio := false
 	seed := int64(0)
-	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	selected := yucoreMediaRequestTestModel("request-test-video")
 
 	normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{
 		GenerateAudio: &generateAudio,
@@ -59,7 +59,7 @@ func TestNormalizeYucoreMediaRequestPreservesExplicitOptionalZeroValues(t *testi
 }
 
 func TestNormalizeYucoreMediaRequestValidatesDurationResolutionAndAspectRatio(t *testing.T) {
-	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	selected := yucoreMediaRequestTestModel("request-test-video")
 
 	normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{
 		Resolution:  " 720P ",
@@ -121,7 +121,7 @@ func TestNormalizeYucoreMediaRequestRejectsUnsupportedOptionalParameters(t *test
 }
 
 func TestNormalizeYucoreMediaRequestValidatesReferenceModeCombinations(t *testing.T) {
-	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	selected := yucoreMediaRequestTestModel("request-test-video")
 	first := model.YucoreMediaReferenceInput{Role: "first_frame", URL: "https://cdn.example/first.png"}
 	last := model.YucoreMediaReferenceInput{Role: "last_frame", URL: "https://cdn.example/last.png"}
 	image := model.YucoreMediaReferenceInput{Role: "image", URL: "https://cdn.example/ref.png"}
@@ -173,7 +173,7 @@ func TestNormalizeYucoreMediaRequestRequiresPrimaryImageForMixedFamilyReferences
 }
 
 func TestNormalizeYucoreMediaRequestValidatesReferenceLimitsAndDurations(t *testing.T) {
-	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	selected := yucoreMediaRequestTestModel("request-test-video")
 	images := make([]model.YucoreMediaReferenceInput, 5)
 	for index := range images {
 		images[index] = model.YucoreMediaReferenceInput{Role: "image", URL: "https://cdn.example/image.png"}
@@ -263,7 +263,7 @@ func TestNormalizeYucoreMediaRequestRejectsGeneratedAudioWithFrames(t *testing.T
 }
 
 func TestNormalizeYucoreMediaRequestRejectsInvalidReferences(t *testing.T) {
-	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	selected := yucoreMediaRequestTestModel("request-test-video")
 	tests := []struct {
 		name    string
 		options YucoreMediaRequestOptions
@@ -282,7 +282,7 @@ func TestNormalizeYucoreMediaRequestRejectsInvalidReferences(t *testing.T) {
 }
 
 func TestNormalizeYucoreMediaRequestAcceptsSafeReferenceValues(t *testing.T) {
-	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	selected := yucoreMediaRequestTestModel("request-test-video")
 	pngDataURL := yucoreMediaTestDataURL("image/png", append([]byte("\x89PNG\r\n\x1a\n"), []byte("payload")...))
 	jpegDataURL := yucoreMediaTestDataURL("image/jpeg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'})
 	jpgAliasDataURL := yucoreMediaTestDataURL("image/jpg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'})
@@ -324,7 +324,7 @@ func TestNormalizeYucoreMediaRequestAcceptsSafeReferenceValues(t *testing.T) {
 }
 
 func TestNormalizeYucoreMediaRequestRejectsUnsafeReferenceValues(t *testing.T) {
-	selected := yucoreMediaRequestTestModel("seedance-2.0")
+	selected := yucoreMediaRequestTestModel("request-test-video")
 	pngPayload := append([]byte("\x89PNG\r\n\x1a\n"), []byte("payload")...)
 	jpegPayload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
 	tests := []struct {

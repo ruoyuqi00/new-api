@@ -4,7 +4,7 @@ Date: 2026-08-15
 
 Branch: `codex/cangyuan-video-refresh-20260815`
 
-Implementation verified through commit: `c7273539d`
+Implementation base before the final authenticated re-audit: `78ca6e12e`
 
 This handoff is intentionally redacted. It contains no credentials, API keys,
 cookies, real user identifiers, provider task identifiers, account balances,
@@ -12,8 +12,8 @@ private asset URLs, server addresses, container names, or image digests.
 
 ## Scope and release state
 
-- The embedded video catalog contains exactly 14 enabled, priced models and four
-  hidden probe models.
+- The embedded video catalog contains exactly 13 enabled, priced models and
+  seven hidden probe models.
 - Video task billing remains isolated from GPT token usage, cache accounting,
   and stream interruption behavior.
 - No production configuration, channel, container, image, Caddy route, or user
@@ -37,46 +37,69 @@ omni-fast
 omni-fast-no-water
 omni-v2v
 omni-v2v-no-water
-sd4-seedance-2.0
-sd4-seedance-2.0-fast
 sd7-seedance-2.0-1080p
 sd7-seedance-2.0-720p
 sd8-seedance-2.0
+seedance-2.0
 ```
 
 Hidden probes without an approved price or transport contract:
 
 ```text
+sd4-seedance-2.0
+sd4-seedance-2.0-fast
 sd8-seedance-2.0-fast
+seedance-2.0-fast
 seedance-2.0-mini
 seedance-2.0-mini-8s
 veo-clean
 ```
 
 The enabled-model upstream subtotal for one minimum accepted task per model is
-`34.873`. The four probe models must not receive paid requests.
+`31.973`. The seven probe models must not receive paid requests.
+
+## Authenticated upstream re-audit
+
+Immediately before paid probing, the authenticated VIDEO token and public
+pricing surface were read again without writing or displaying credentials. The
+upstream had changed after the initial implementation:
+
+- The VIDEO token listed 21 model identifiers: 20 video models plus one
+  out-of-scope audio model.
+- Public VIDEO-group pricing listed 14 rows: 13 video models plus the same
+  out-of-scope audio model.
+- `sd4-seedance-2.0` and `sd4-seedance-2.0-fast` remained token-visible but no
+  longer had a published price, so they moved from enabled to hidden probe.
+- `seedance-2.0` became token-visible and priced at `3.9` per generation, with
+  fixed 720p output, 4-15 second duration, generated audio, and limits of five
+  images, three videos, three audios, and 11 references total.
+- The retained 12 priced video rows had no price drift.
+- The upstream VIDEO group ratio remained `1.0`.
+
+The paid batch was stopped before any creation request or debit, as required by
+the inventory-drift gate. Tests, catalog, pricing, docs, runbook, and local
+candidate were then refreshed to the 13/7 baseline before paid work resumed.
 
 ## Pricing evidence
 
 Base prices use `ceil(upstream_cost * 1.20 * 10000) / 10000`, ensuring every
 base price is at least 20% above the observed upstream price.
 
-| Model | Upstream | Base price | `下游多模态` 1.0 | `多模态创作` 1.2 |
-| --- | ---: | ---: | ---: | ---: |
-| `grok-video` | 0.69 | 0.828 | 0.828 | 0.9936 |
-| `grok-video-1.5` | 1.39 | 1.668 | 1.668 | 2.0016 |
-| `happyhouse-1.0` | 4.5 | 5.4 | 5.4 | 6.48 |
-| `happyhouse-1.1` | 2.9 | 3.48 | 3.48 | 4.176 |
-| `minimax-h3-2k` | 3.5 | 4.2 | 4.2 | 5.04 |
-| `omni-fast` | 0.6624 | 0.7949 | 0.7949 | 0.95388 |
-| `omni-fast-no-water` | 0.81 | 0.972 | 0.972 | 1.1664 |
-| `omni-v2v` | 0.8856 | 1.0628 | 1.0628 | 1.27536 |
-| `omni-v2v-no-water` | 1.035 | 1.242 | 1.242 | 1.4904 |
-| `sd4-seedance-2.0` | 3.9 | 4.68 | 4.68 | 5.616 |
-| `sd4-seedance-2.0-fast` | 2.9 | 3.48 | 3.48 | 4.176 |
-| `sd7-seedance-2.0-1080p` | 4.9 | 5.88 | 5.88 | 7.056 |
-| `sd7-seedance-2.0-720p` | 3.9 | 4.68 | 4.68 | 5.616 |
-| `sd8-seedance-2.0` | 2.9 | 3.48 | 3.48 | 4.176 |
+| Model                    | Upstream | Base price | `下游多模态` 1.0 | `多模态创作` 1.2 |
+| ------------------------ | -------: | ---------: | ---------------: | ---------------: |
+| `grok-video`             |     0.69 |      0.828 |            0.828 |           0.9936 |
+| `grok-video-1.5`         |     1.39 |      1.668 |            1.668 |           2.0016 |
+| `happyhouse-1.0`         |      4.5 |        5.4 |              5.4 |             6.48 |
+| `happyhouse-1.1`         |      2.9 |       3.48 |             3.48 |            4.176 |
+| `minimax-h3-2k`          |      3.5 |        4.2 |              4.2 |             5.04 |
+| `omni-fast`              |   0.6624 |     0.7949 |           0.7949 |          0.95388 |
+| `omni-fast-no-water`     |     0.81 |      0.972 |            0.972 |           1.1664 |
+| `omni-v2v`               |   0.8856 |     1.0628 |           1.0628 |          1.27536 |
+| `omni-v2v-no-water`      |    1.035 |      1.242 |            1.242 |           1.4904 |
+| `sd7-seedance-2.0-1080p` |      4.9 |       5.88 |             5.88 |            7.056 |
+| `sd7-seedance-2.0-720p`  |      3.9 |       4.68 |             4.68 |            5.616 |
+| `sd8-seedance-2.0`       |      2.9 |       3.48 |             3.48 |            4.176 |
+| `seedance-2.0`           |      3.9 |       4.68 |             4.68 |            5.616 |
 
 All values are per accepted generation. Status polling, content retrieval, and
 asset download must not charge again. The exact runtime configuration is in
@@ -89,7 +112,7 @@ Backend formatting and tests:
 ```text
 gofmt on all touched Go files                                      PASS
 go test ./model ./service ./controller ./relay ./constant -count=1 PASS
-go test ./... -count=1                                             PASS
+go test -p 1 ./... -count=1                                        PASS
 ```
 
 Default frontend checks:
@@ -117,8 +140,8 @@ targeted lint and format checks above, and both frontend production builds pass.
 
 Documentation checks:
 
-- The 14 base and final price values match the audited formula exactly.
-- All eight fenced JSON examples and six JSON request bodies parse.
+- The 13 base and final price values match the audited formula exactly.
+- All seven fenced JSON examples and six JSON request bodies parse.
 - Removed full video model identifiers are absent from the refreshed developer
   guide and production runbook.
 - A generic credential/address scan found no secret-like value in the refreshed
@@ -131,7 +154,7 @@ Documentation checks:
 
 An isolated local application was built from this branch and started at
 `localhost:31845` with a disposable SQLite database, a synthetic local user,
-and a fake channel exposing the 14 enabled models. It used no production or
+and a fake channel exposing the 13 enabled models. It used no production or
 upstream credential and sent no generation request.
 
 Playwright exercised home, sign-in, console, pricing, Studio, Canvas, and
@@ -143,8 +166,8 @@ same-origin failed responses                                       1
 expected anonymous /api/user/auth/refresh response                 401
 desktop horizontal overflow                                        none
 mobile horizontal overflow                                         none
-Studio model buttons                                                14
-Pricing model badges                                                14
+Studio model buttons                                                13
+Pricing model badges                                                13
 720p control                                                        present
 1080p control                                                       present
 Native audio switch                                                 checked
@@ -172,8 +195,8 @@ area render without overlap at the tested desktop and mobile viewports.
 
 1. Re-read the authenticated upstream VIDEO group and stop on any inventory or
    price drift.
-2. Run exactly one smallest valid paid task for each of the 14 enabled models,
-   reusing accepted mapping probes and never probing the four unpriced models.
+2. Run exactly one smallest valid paid task for each of the 13 enabled models,
+   reusing accepted mapping probes and never probing the seven unpriced models.
 3. Record only redacted mapping, status, media metadata, and debit/charge
    comparisons; encode any proven contract correction test-first.
 4. Push the fully verified branch and re-audit production read-only.

@@ -164,11 +164,10 @@ GPT Image 2 支持蒙版；GPT Image 2 与 Nano Banana 最多可接收 9 张参�
 | `omni-fast-no-water`     | Omni 图生视频，无水印        |      1.1664 |
 | `omni-v2v`               | Omni 视频生视频              |     1.27536 |
 | `omni-v2v-no-water`      | Omni 视频生视频，无水印      |      1.4904 |
-| `sd4-seedance-2.0`       | Seedance SD4 多模态生成      |       5.616 |
-| `sd4-seedance-2.0-fast`  | Seedance SD4 多模态快速生成  |       4.176 |
 | `sd7-seedance-2.0-1080p` | Seedance SD7 固定 1080p      |       7.056 |
 | `sd7-seedance-2.0-720p`  | Seedance SD7 固定 720p       |       5.616 |
 | `sd8-seedance-2.0`       | Seedance SD8 多模态生成      |       4.176 |
+| `seedance-2.0`           | Seedance 2.0 固定 720p       |       5.616 |
 
 ## 7. 视频任务协议
 
@@ -272,33 +271,15 @@ curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
 
 无水印版本只需将模型改为 `omni-v2v-no-water`。
 
-### 7.6 SD4 Seedance
+### 7.6 Seedance 2.0
 
-`sd4-seedance-2.0` 与 `sd4-seedance-2.0-fast` 支持 4-15 秒、480p 或 720p。普通多模态模式最多接收 4 张图片、3 条视频和 1 条音频，总数不超过 8；参考视频单条为 4-10 秒、总时长不超过 15 秒，参考音频不超过 15 秒。
-
-首尾帧模式使用 `first_image_url` 与 `last_image_url`，不能再传普通多模态参考，也不能把 `generate_audio` 设为 `true`：
+`seedance-2.0` 支持 4-15 秒，分辨率固定为 720p，请求中不要传 `resolution`。最多接收 5 张图片、3 条视频和 3 条音频，总数不超过 11，并支持 `generate_audio`。普通多模态参考使用三个 `reference_*` 数组：
 
 ```json
 {
-  "model": "sd4-seedance-2.0-fast",
-  "prompt": "从室内自然过渡到窗外城市夜景，镜头稳定",
-  "duration": 4,
-  "resolution": "480p",
-  "aspect_ratio": "16:9",
-  "generate_audio": false,
-  "first_image_url": "https://assets.example.com/video/first.png",
-  "last_image_url": "https://assets.example.com/video/last.png"
-}
-```
-
-普通多模态参考使用三个 `reference_*` 数组：
-
-```json
-{
-  "model": "sd4-seedance-2.0",
+  "model": "seedance-2.0",
   "prompt": "参考人物、动作节奏和环境音，生成夜市中的自然行走镜头",
   "duration": 6,
-  "resolution": "720p",
   "aspect_ratio": "16:9",
   "generate_audio": false,
   "reference_image_urls": ["https://assets.example.com/video/person.png"],
@@ -358,23 +339,23 @@ curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content" \
 
 ## 8. 视频参数范围
 
-| 模型族               | 时长              | 分辨率         | 原生音频 | 参考素材限制                               |
-| -------------------- | ----------------- | -------------- | -------- | ------------------------------------------ |
-| `grok-video*`        | 4/6/8/10/12/15 秒 | 480p、720p     | 不支持   | 标准版 1 图，1.5 版 7 图                   |
-| `happyhouse-1.0`     | 3-15 秒           | 720p、1080p    | 支持     | 9 图；含 1 视频时最多 5 图，总数最多 9     |
-| `happyhouse-1.1`     | 3-15 秒           | 720p、1080p    | 支持     | 最多 9 图                                  |
-| `minimax-h3-2k`      | 5-15 秒           | 固定 2K        | 支持     | 5 图、3 音频，总数最多 8；也支持首尾帧     |
-| `omni-fast*`         | 固定约 10 秒      | 固定 720p      | 不支持   | 最多 5 图，或首尾帧                        |
-| `omni-v2v*`          | 固定约 10 秒      | 固定 720p      | 不支持   | 必须且只能提供 1 条视频                    |
-| `sd4-seedance-2.0*`  | 4-15 秒           | 480p、720p     | 支持     | 4 图、3 视频、1 音频，总数最多 8；或首尾帧 |
-| `sd7-seedance-2.0-*` | 4-15 秒           | 由模型 ID 固定 | 支持     | 5 图、3 视频、3 音频，总数最多 11          |
-| `sd8-seedance-2.0`   | 5/10/15 秒        | 模型固定       | 不支持   | 9 图、3 视频、3 音频，总数最多 15          |
+| 模型族               | 时长              | 分辨率         | 原生音频 | 参考素材限制                           |
+| -------------------- | ----------------- | -------------- | -------- | -------------------------------------- |
+| `grok-video*`        | 4/6/8/10/12/15 秒 | 480p、720p     | 不支持   | 标准版 1 图，1.5 版 7 图               |
+| `happyhouse-1.0`     | 3-15 秒           | 720p、1080p    | 支持     | 9 图；含 1 视频时最多 5 图，总数最多 9 |
+| `happyhouse-1.1`     | 3-15 秒           | 720p、1080p    | 支持     | 最多 9 图                              |
+| `minimax-h3-2k`      | 5-15 秒           | 固定 2K        | 支持     | 5 图、3 音频，总数最多 8；也支持首尾帧 |
+| `omni-fast*`         | 固定约 10 秒      | 固定 720p      | 不支持   | 最多 5 图，或首尾帧                    |
+| `omni-v2v*`          | 固定约 10 秒      | 固定 720p      | 不支持   | 必须且只能提供 1 条视频                |
+| `sd7-seedance-2.0-*` | 4-15 秒           | 由模型 ID 固定 | 支持     | 5 图、3 视频、3 音频，总数最多 11      |
+| `sd8-seedance-2.0`   | 5/10/15 秒        | 模型固定       | 不支持   | 9 图、3 视频、3 音频，总数最多 15      |
+| `seedance-2.0`       | 4-15 秒           | 固定 720p      | 支持     | 5 图、3 视频、3 音频，总数最多 11      |
 
 支持的宽高比：
 
 - Grok：`1:1`、`16:9`、`9:16`、`4:3`、`3:4`、`3:2`、`2:3`。
 - Happyhouse：`16:9`、`9:16`、`1:1`、`3:4`、`4:3`。
-- Minimax H3 与 SD4：`16:9`、`9:16`、`1:1`、`21:9`、`3:4`、`4:3`。
+- Minimax H3 与 Seedance 2.0：`16:9`、`9:16`、`1:1`、`21:9`、`3:4`、`4:3`。
 - Omni：`16:9`、`9:16`。
 - SD7：`16:9`、`9:16`、`1:1`、`4:3`、`3:4`、`21:9`。
 - SD8：`16:9`、`9:16`、`1:1`、`4:3`、`3:4`。
@@ -382,12 +363,12 @@ curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content" \
 模型族限制：
 
 - 当前启用模型统一使用 `duration`；不要传旧的 `seconds` 或 `audio` 布尔字段。
-- 只有 Happyhouse、Minimax、SD4 和 SD7 接收 `generate_audio`；显式 `false` 会原样保留。
+- 只有 Happyhouse、Minimax、Seedance 2.0 和 SD7 接收 `generate_audio`；显式 `false` 会原样保留。
 - Omni 固定时长模型不要传 `duration` 或 `resolution`；Omni V2V 必须使用 `reference_videos` 提供一条视频。
-- SD7 的分辨率由模型 ID 决定；SD8 不接收分辨率字段。字段、时长或模型 ID 不匹配时，请求会在创建任务前返回 `400`。
+- Seedance 2.0、SD7 与 SD8 不接收分辨率字段；前两者的分辨率分别由公开模型 ID 固定为 720p 或 SD7 对应档位。字段、时长或模型 ID 不匹配时，请求会在创建任务前返回 `400`。
 - 普通图片、视频和音频参考分别使用 `reference_image_urls`、`reference_videos`、`reference_audios`；首尾帧只使用 `first_image_url`、`last_image_url`，不要混用。
 - data URI 适合小图片；视频和音频参考应使用可由服务端访问的 HTTPS URL。不要使用需要 Cookie、Referer 或临时登录态的地址。
-- SD4 首尾帧模式和 Minimax 首尾帧模式不能同时开启模型生成音频；SD8 含人物的参考图片必须遮挡眼部。
+- Minimax 首尾帧模式不能同时开启模型生成音频；SD8 含人物的参考图片必须遮挡眼部。
 
 ## 9. 状态与错误处理
 

@@ -55,17 +55,19 @@ stream-settlement rules.
 
 ## 3. Audited provider state
 
-The authenticated VIDEO token returned 19 model identifiers: 18 video models
-and the out-of-scope `gemini-music` entry. Public pricing contained 15 video
-rows, but one priced identifier, `seedance-2.0`, was absent from the authenticated
-model list and is therefore not routable. The intersection yields 14 currently
-priced and visible video models.
+The latest authenticated VIDEO token returned 21 model identifiers: 20 video
+models and the out-of-scope `gemini-music` entry. Public VIDEO-group pricing
+contained 14 rows: 13 video models plus `gemini-music`. The intersection yields
+13 currently priced and routable video models.
 
-Four video identifiers are visible but have no public price. They are cataloged
+Seven video identifiers are visible but have no public price. They are cataloged
 as `probe` only and must not be placed on an enabled production channel until an
 auditable price and real debit are established:
 
+- `sd4-seedance-2.0`
+- `sd4-seedance-2.0-fast`
 - `sd8-seedance-2.0-fast`
+- `seedance-2.0-fast`
 - `seedance-2.0-mini`
 - `seedance-2.0-mini-8s`
 - `veo-clean`
@@ -78,7 +80,7 @@ observed provider debit, YuAPI charge, and refresh/download recovery.
 ### 3.1 Production delta
 
 The current Cangyuan production video routes expose 15 identifiers. The target
-starts with 14 verified-price identifiers.
+starts with 13 verified-price identifiers.
 
 Retain and revalidate:
 
@@ -97,14 +99,17 @@ authenticated VIDEO inventory:
 - `veo-3-1-ref`
 - `sd5-seedance-2.0`
 - `sd5-seedance-2.0-fast`
-- `seedance-2.0`
-- `seedance-2.0-fast`
 
 Remove from enabled channels and retain only as `probe` because no current price
 is published:
 
+- `sd4-seedance-2.0`
+- `sd4-seedance-2.0-fast`
+- `sd8-seedance-2.0-fast`
+- `seedance-2.0-fast`
 - `seedance-2.0-mini`
 - `seedance-2.0-mini-8s`
+- `veo-clean`
 
 Add after real validation:
 
@@ -113,15 +118,14 @@ Add after real validation:
 - `happyhouse-1.0`
 - `happyhouse-1.1`
 - `minimax-h3-2k`
-- `sd4-seedance-2.0`
-- `sd4-seedance-2.0-fast`
 - `sd7-seedance-2.0-1080p`
 - `sd7-seedance-2.0-720p`
 - `sd8-seedance-2.0`
+- `seedance-2.0`
 
 ## 4. Pricing design
 
-All 14 verified rows are billed by the provider per generation. They must use
+All 13 verified rows are billed by the provider per generation. They must use
 YuAPI fixed task pricing and be included in `TASK_PRICE_PATCH`; duration,
 resolution, generated audio, references, polling, content reads, and downloads
 must not multiply the charge.
@@ -139,22 +143,21 @@ reduces the intended 20% base markup. Existing ratios remain unchanged:
 - `多模态创作`: `1.2`
 - `下游多模态`: `1.0`
 
-| Public model ID | Provider price | YuAPI base | `多模态创作` final | `下游多模态` final |
-| --- | ---: | ---: | ---: | ---: |
-| `grok-video` | 0.69 | 0.828 | 0.9936 | 0.828 |
-| `grok-video-1.5` | 1.39 | 1.668 | 2.0016 | 1.668 |
-| `happyhouse-1.0` | 4.5 | 5.4 | 6.48 | 5.4 |
-| `happyhouse-1.1` | 2.9 | 3.48 | 4.176 | 3.48 |
-| `minimax-h3-2k` | 3.5 | 4.2 | 5.04 | 4.2 |
-| `omni-fast` | 0.6624 | 0.7949 | 0.95388 | 0.7949 |
-| `omni-fast-no-water` | 0.81 | 0.972 | 1.1664 | 0.972 |
-| `omni-v2v` | 0.8856 | 1.0628 | 1.27536 | 1.0628 |
-| `omni-v2v-no-water` | 1.035 | 1.242 | 1.4904 | 1.242 |
-| `sd4-seedance-2.0` | 3.9 | 4.68 | 5.616 | 4.68 |
-| `sd4-seedance-2.0-fast` | 2.9 | 3.48 | 4.176 | 3.48 |
-| `sd7-seedance-2.0-1080p` | 4.9 | 5.88 | 7.056 | 5.88 |
-| `sd7-seedance-2.0-720p` | 3.9 | 4.68 | 5.616 | 4.68 |
-| `sd8-seedance-2.0` | 2.9 | 3.48 | 4.176 | 3.48 |
+| Public model ID          | Provider price | YuAPI base | `多模态创作` final | `下游多模态` final |
+| ------------------------ | -------------: | ---------: | -----------------: | -----------------: |
+| `grok-video`             |           0.69 |      0.828 |             0.9936 |              0.828 |
+| `grok-video-1.5`         |           1.39 |      1.668 |             2.0016 |              1.668 |
+| `happyhouse-1.0`         |            4.5 |        5.4 |               6.48 |                5.4 |
+| `happyhouse-1.1`         |            2.9 |       3.48 |              4.176 |               3.48 |
+| `minimax-h3-2k`          |            3.5 |        4.2 |               5.04 |                4.2 |
+| `omni-fast`              |         0.6624 |     0.7949 |            0.95388 |             0.7949 |
+| `omni-fast-no-water`     |           0.81 |      0.972 |             1.1664 |              0.972 |
+| `omni-v2v`               |         0.8856 |     1.0628 |            1.27536 |             1.0628 |
+| `omni-v2v-no-water`      |          1.035 |      1.242 |             1.4904 |              1.242 |
+| `sd7-seedance-2.0-1080p` |            4.9 |       5.88 |              7.056 |               5.88 |
+| `sd7-seedance-2.0-720p`  |            3.9 |       4.68 |              5.616 |               4.68 |
+| `sd8-seedance-2.0`       |            2.9 |       3.48 |              4.176 |               3.48 |
+| `seedance-2.0`           |            3.9 |       4.68 |              5.616 |               4.68 |
 
 The published developer table shows the `多模态创作` final price because that
 is the main user-facing creative group. The API pricing surface remains the
@@ -173,17 +176,17 @@ between absent and explicit `0` or `false`.
 
 ### 5.1 Family summary
 
-| Family | Audited capability boundary |
-| --- | --- |
-| Grok | 4/6/8/10/12/15 seconds; 480p or 720p; `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`; image references supported. |
-| Happyhouse 1.0 | 3-15 seconds; 720p or 1080p; generated audio; up to 9 images, or up to 5 images with one reference video. |
-| Happyhouse 1.1 | 3-15 seconds; 720p or 1080p; generated audio; up to 9 images; no reference video/audio or frame mode. |
-| Minimax H3 | 5-15 seconds; fixed 2K family; generated audio; frame mode; up to 5 images and 3 audio references; no reference video. |
-| Omni Fast | Fixed about 10 seconds and 720p; `16:9` or `9:16`; up to 5 images; frame inputs supported; duration/resolution omitted upstream. |
-| Omni V2V | Fixed about 10 seconds and 720p; `16:9` or `9:16`; exactly one reference video; duration/resolution omitted upstream. |
-| SD4 | 4-15 seconds; 480p or 720p; six documented aspect ratios; generated audio; frame and multimodal modes are mutually exclusive; up to 4 images, 3 videos, and 1 audio. |
-| SD7 | 4-15 seconds; resolution fixed by the public model ID; six documented aspect ratios; generated audio; up to 5 images, 3 videos, and 3 audios. |
-| SD8 | 5, 10, or 15 seconds; five documented aspect ratios; no generated-audio or frame control; up to 9 images, 3 videos, and 3 audios; enforce the documented person-image eye-mask rule. |
+| Family         | Audited capability boundary                                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Grok           | 4/6/8/10/12/15 seconds; 480p or 720p; `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`; image references supported.                                                                 |
+| Happyhouse 1.0 | 3-15 seconds; 720p or 1080p; generated audio; up to 9 images, or up to 5 images with one reference video.                                                                            |
+| Happyhouse 1.1 | 3-15 seconds; 720p or 1080p; generated audio; up to 9 images; no reference video/audio or frame mode.                                                                                |
+| Minimax H3     | 5-15 seconds; fixed 2K family; generated audio; frame mode; up to 5 images and 3 audio references; no reference video.                                                               |
+| Omni Fast      | Fixed about 10 seconds and 720p; `16:9` or `9:16`; up to 5 images; frame inputs supported; duration/resolution omitted upstream.                                                     |
+| Omni V2V       | Fixed about 10 seconds and 720p; `16:9` or `9:16`; exactly one reference video; duration/resolution omitted upstream.                                                                |
+| SD7            | 4-15 seconds; resolution fixed by the public model ID; six documented aspect ratios; generated audio; up to 5 images, 3 videos, and 3 audios.                                        |
+| SD8            | 5, 10, or 15 seconds; five documented aspect ratios; no generated-audio or frame control; up to 9 images, 3 videos, and 3 audios; enforce the documented person-image eye-mask rule. |
+| Seedance 2.0   | 4-15 seconds; fixed 720p; six documented aspect ratios; generated audio; up to 5 images, 3 videos, and 3 audios.                                                                     |
 
 Exact allowed values and payload field names are copied from the current
 authenticated pricing metadata and API documentation, then frozen in fixtures
@@ -194,7 +197,7 @@ capabilities merely because they exist in the previous 33-model catalog.
 
 The public YuAPI IDs are the authenticated `/v1/models` IDs in this design.
 Some provider examples use prefixed or historical aliases instead of those
-public IDs. In particular, Grok, Omni, and SD4 examples are not consistent with
+public IDs. In particular, Grok, Omni, and Seedance examples are not consistent with
 the inventory response.
 
 Real probes resolve this discrepancy. A prefixed alias may be placed in channel
@@ -214,7 +217,7 @@ single family can be disabled without taking down all video routes:
 - Grok: two new models.
 - Happyhouse: two new models.
 - Minimax: one new model.
-- Seedance: five SD4/SD7/SD8 models.
+- Seedance: four Seedance/SD7/SD8 models.
 
 The legacy Cangyuan video channel rows are retained disabled during the
 observation period as an exact configuration rollback source. They are not
@@ -226,8 +229,8 @@ The scoped production configuration set consists only of:
 
 - replacement video channel rows and their model mappings;
 - enabled/disabled states for the legacy and replacement video channels;
-- the 14 video entries in `ModelPrice`;
-- the exact 14-model `TASK_PRICE_PATCH` value;
+- the 13 video entries in `ModelPrice`;
+- the exact 13-model `TASK_PRICE_PATCH` value;
 - the refreshed `yucore_media.model_capabilities` override only if an operator
   override is still needed after the embedded catalog is updated.
 
@@ -305,9 +308,9 @@ MySQL, or PostgreSQL.
 
 ### 9.2 Real paid tasks
 
-Run one smallest valid task for each of the 14 target models through an isolated
+Run one smallest valid task for each of the 13 target models through an isolated
 candidate using the real VIDEO-group quota. The known provider-price subtotal
-for one accepted task per model is `34.873` provider pricing units. Explicitly
+for one accepted task per model is `31.973` provider pricing units. Explicitly
 rejected, non-debited model-ID checks may precede a successful task; accepted or
 ambiguous requests are never repeated.
 
@@ -318,7 +321,7 @@ creation attempt count, accepted-ID presence, normalized status progression,
 result MIME/dimensions/duration, provider balance delta, expected YuAPI base and
 group charge, Studio/Canvas recovery, download outcome, and pass/fail.
 
-The four unpriced `probe` models are not included in the known-cost batch. They
+The seven unpriced `probe` models are not included in the known-cost batch. They
 remain unavailable unless a separately reviewed price/debit procedure first
 bounds their unknown spend.
 
@@ -387,7 +390,7 @@ missing/double/below-cost billing, poll billing, or image/GPT/auth regressions.
 
 The work is complete only when:
 
-- the 14 priced and visible video models pass real generation and are the only
+- the 13 priced and visible video models pass real generation and are the only
   enabled Cangyuan video inventory;
 - all removed and unpriced models are absent from enabled channels;
 - every base price follows the exact 20%-markup formula and both group totals

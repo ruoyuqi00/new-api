@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the stale production Cangyuan video inventory with the 14 currently visible and priced VIDEO-group models, enforce their observed request contracts, publish the exact 20%-markup prices, and prepare a verified no-stop production release.
+**Goal:** Replace the stale production Cangyuan video inventory with the 13 currently priced VIDEO-group models, enforce their observed request contracts, publish the exact 20%-markup prices, and prepare a verified no-stop production release.
 
 **Architecture:** Keep the existing YuCore capability catalog and asynchronous task state machine. Extend only the reusable reference-constraint vocabulary that the current upstream contract needs, generate provider payloads from explicit allowed fields, and let normal YuAPI channels continue to own routing and billing. Production channel/price changes remain runtime configuration and are applied only after local and private-candidate verification; the old container and legacy channel rows remain available for rollback.
 
@@ -13,7 +13,7 @@
 ## File map
 
 - `model/yucore_media_capability.go`: reusable capability and reference-limit schema, cloning, normalization, and validation.
-- `model/yucore_media_cangyuan_catalog.json`: current Cangyuan image rows plus the exact 18 visible video rows (14 enabled, 4 probe).
+- `model/yucore_media_cangyuan_catalog.json`: current Cangyuan image rows plus the exact 20 VIDEO-token-visible video rows (13 enabled, 7 probe).
 - `model/yucore_media_capability_test.go`: embedded inventory, pricing-unit, cost, and capability regression contracts.
 - `model/yucore_media_openai_compatible.go`: exact JSON field mapping for references, duration, resolution, audio, and upstream model IDs.
 - `model/yucore_media_openai_compatible_test.go`: public-to-upstream payload and async same-ID task behavior.
@@ -232,12 +232,12 @@ func TestCangyuanCatalogMatchesAuditedVideoInventory(t *testing.T) {
 	enabled := []string{
 		"grok-video", "grok-video-1.5", "happyhouse-1.0", "happyhouse-1.1",
 		"minimax-h3-2k", "omni-fast", "omni-fast-no-water", "omni-v2v",
-		"omni-v2v-no-water", "sd4-seedance-2.0", "sd4-seedance-2.0-fast",
-		"sd7-seedance-2.0-1080p", "sd7-seedance-2.0-720p", "sd8-seedance-2.0",
+		"omni-v2v-no-water", "sd7-seedance-2.0-1080p", "sd7-seedance-2.0-720p",
+		"sd8-seedance-2.0", "seedance-2.0",
 	}
 	probes := []string{
-		"sd8-seedance-2.0-fast", "seedance-2.0-mini",
-		"seedance-2.0-mini-8s", "veo-clean",
+		"sd4-seedance-2.0", "sd4-seedance-2.0-fast", "sd8-seedance-2.0-fast",
+		"seedance-2.0-fast", "seedance-2.0-mini", "seedance-2.0-mini-8s", "veo-clean",
 	}
 
 	actualEnabled := make([]string, 0)
@@ -258,7 +258,7 @@ func TestCangyuanCatalogMatchesAuditedVideoInventory(t *testing.T) {
 	sort.Strings(actualProbes)
 	assert.Equal(t, enabled, actualEnabled)
 	assert.Equal(t, probes, actualProbes)
-	for _, stale := range []string{"sora-2", "veo-3-1", "sd5-seedance-2.0", "seedance-2.0", "kling-3.0"} {
+	for _, stale := range []string{"sora-2", "veo-3-1", "sd5-seedance-2.0", "kling-3.0"} {
 		assert.NotContains(t, catalog, stale)
 	}
 }
@@ -290,12 +290,14 @@ omni-fast|enabled|0.6624|fixed:10|720p|16:9,9:16|5|0|0|5|false|true
 omni-fast-no-water|enabled|0.81|fixed:10|720p|16:9,9:16|5|0|0|5|false|true
 omni-v2v|enabled|0.8856|fixed:10|720p|16:9,9:16|0|1|0|1|false|false
 omni-v2v-no-water|enabled|1.035|fixed:10|720p|16:9,9:16|0|1|0|1|false|false
-sd4-seedance-2.0|enabled|3.9|4,5,6,7,8,9,10,11,12,13,14,15|480p,720p|16:9,9:16,1:1,21:9,3:4,4:3|4|3|1|8|true|true
-sd4-seedance-2.0-fast|enabled|2.9|4,5,6,7,8,9,10,11,12,13,14,15|480p,720p|16:9,9:16,1:1,21:9,3:4,4:3|4|3|1|8|true|true
+sd4-seedance-2.0|probe|unknown|none|none|none|0|0|0|0|false|false
+sd4-seedance-2.0-fast|probe|unknown|none|none|none|0|0|0|0|false|false
 sd7-seedance-2.0-1080p|enabled|4.9|4,5,6,7,8,9,10,11,12,13,14,15|1080p|16:9,9:16,1:1,4:3,3:4,21:9|5|3|3|11|true|false
 sd7-seedance-2.0-720p|enabled|3.9|4,5,6,7,8,9,10,11,12,13,14,15|720p|16:9,9:16,1:1,4:3,3:4,21:9|5|3|3|11|true|false
 sd8-seedance-2.0|enabled|2.9|5,10,15|none|16:9,9:16,1:1,4:3,3:4|9|3|3|15|false|false
 sd8-seedance-2.0-fast|probe|unknown|none|none|none|0|0|0|0|false|false
+seedance-2.0|enabled|3.9|4,5,6,7,8,9,10,11,12,13,14,15|720p|16:9,9:16,1:1,4:3,3:4,21:9|5|3|3|11|true|false
+seedance-2.0-fast|probe|unknown|none|none|none|0|0|0|0|false|false
 seedance-2.0-mini|probe|unknown|none|none|none|0|0|0|0|false|false
 seedance-2.0-mini-8s|probe|unknown|none|none|none|0|0|0|0|false|false
 veo-clean|probe|unknown|none|none|none|0|0|0|0|false|false
@@ -313,7 +315,7 @@ pretend it can be inferred from pixels by the gateway.
 - [ ] **Step 4: Add exact cost and capability assertions**
 
 Use a table test with exact expected `UpstreamCost`, duration policy, reference
-limits, and allowed parameters for all 14 enabled rows. Assert every enabled row
+limits, and allowed parameters for all 13 enabled rows. Assert every enabled row
 uses `per_call`, every probe has no cost/transport fields, and all target video
 rows use `/v1/videos` lifecycle paths.
 
@@ -325,7 +327,7 @@ Run:
 go test ./model ./service -run 'CangyuanCatalog|BuildYucoreMediaCatalog' -count=1
 ```
 
-Expected: PASS with 14 enabled and 4 hidden probes.
+Expected: PASS with 13 enabled and 7 hidden probes.
 
 - [ ] **Step 6: Commit the catalog refresh**
 
@@ -354,7 +356,7 @@ tests := []struct {
 	{model: "grok-video", wantModel: "grok-video", wantFields: map[string]any{"duration": 4, "resolution": "480p", "reference_image_urls": []string{"https://cdn.example/ref.png"}}, absent: []string{"seconds", "size", "image_urls"}},
 	{model: "happyhouse-1.0", wantModel: "happyhouse-1.0", wantFields: map[string]any{"duration": 3, "resolution": "720p", "generate_audio": false, "reference_image_urls": []string{"https://cdn.example/ref.png"}, "reference_videos": []string{"https://cdn.example/ref.mp4"}}, absent: []string{"seconds", "audio", "image_urls"}},
 	{model: "minimax-h3-2k", wantModel: "minimax-h3-2k", wantFields: map[string]any{"duration": 5, "resolution": "2k", "reference_image_urls": []string{"https://cdn.example/ref.png"}, "reference_audios": []string{"https://cdn.example/ref.mp3"}}, absent: []string{"seconds", "image_url"}},
-	{model: "sd4-seedance-2.0", wantModel: "sd4-seedance-2.0", wantFields: map[string]any{"duration": 4, "resolution": "480p", "generate_audio": false, "reference_image_urls": []string{"https://cdn.example/ref.png"}}, absent: []string{"seconds", "audio", "image_url"}},
+	{model: "seedance-2.0", wantModel: "seedance-2.0", wantFields: map[string]any{"duration": 4, "generate_audio": false, "reference_image_urls": []string{"https://cdn.example/ref.png"}}, absent: []string{"seconds", "resolution", "audio", "image_url"}},
 	{model: "sd7-seedance-2.0-720p", wantModel: "sd7-seedance-2.0-720p", wantFields: map[string]any{"duration": 4, "reference_image_urls": []string{"https://cdn.example/ref.png"}}, absent: []string{"seconds", "resolution", "size"}},
 	{model: "sd8-seedance-2.0", wantModel: "sd8-seedance-2.0", wantFields: map[string]any{"duration": 5, "reference_image_urls": []string{"https://cdn.example/ref.png"}}, absent: []string{"seconds", "resolution", "generate_audio", "audio"}},
 }
@@ -555,11 +557,10 @@ omni-fast=0.95388
 omni-fast-no-water=1.1664
 omni-v2v=1.27536
 omni-v2v-no-water=1.4904
-sd4-seedance-2.0=5.616
-sd4-seedance-2.0-fast=4.176
 sd7-seedance-2.0-1080p=7.056
 sd7-seedance-2.0-720p=5.616
 sd8-seedance-2.0=4.176
+seedance-2.0=5.616
 ```
 
 State that every listed model is per generation, the `下游多模态` amount is the
@@ -585,7 +586,7 @@ identifiers and credentials.
 The exact fixed-price environment value is:
 
 ```text
-grok-video,grok-video-1.5,happyhouse-1.0,happyhouse-1.1,minimax-h3-2k,omni-fast,omni-fast-no-water,omni-v2v,omni-v2v-no-water,sd4-seedance-2.0,sd4-seedance-2.0-fast,sd7-seedance-2.0-1080p,sd7-seedance-2.0-720p,sd8-seedance-2.0
+grok-video,grok-video-1.5,happyhouse-1.0,happyhouse-1.1,minimax-h3-2k,omni-fast,omni-fast-no-water,omni-v2v,omni-v2v-no-water,sd7-seedance-2.0-1080p,sd7-seedance-2.0-720p,sd8-seedance-2.0,seedance-2.0
 ```
 
 The staged family channels and base-price values are:
@@ -595,7 +596,7 @@ cangyuan-video-refresh-20260815-omni=omni-fast,omni-fast-no-water,omni-v2v,omni-
 cangyuan-video-refresh-20260815-grok=grok-video,grok-video-1.5
 cangyuan-video-refresh-20260815-happyhouse=happyhouse-1.0,happyhouse-1.1
 cangyuan-video-refresh-20260815-minimax=minimax-h3-2k
-cangyuan-video-refresh-20260815-seedance=sd4-seedance-2.0,sd4-seedance-2.0-fast,sd7-seedance-2.0-1080p,sd7-seedance-2.0-720p,sd8-seedance-2.0
+cangyuan-video-refresh-20260815-seedance=sd7-seedance-2.0-1080p,sd7-seedance-2.0-720p,sd8-seedance-2.0,seedance-2.0
 
 grok-video=0.828
 grok-video-1.5=1.668
@@ -606,11 +607,10 @@ omni-fast=0.7949
 omni-fast-no-water=0.972
 omni-v2v=1.0628
 omni-v2v-no-water=1.242
-sd4-seedance-2.0=4.68
-sd4-seedance-2.0-fast=3.48
 sd7-seedance-2.0-1080p=5.88
 sd7-seedance-2.0-720p=4.68
 sd8-seedance-2.0=3.48
+seedance-2.0=4.68
 ```
 
 - [ ] **Step 4: Scan documentation for stale models and secrets**
@@ -706,13 +706,13 @@ git commit -m "docs: record local video refresh verification"
 - [ ] **Step 1: Capture non-secret pre-probe facts**
 
 Read the authenticated model list, pricing version, token group, and balance
-without displaying or saving credentials. Confirm the 14 target models remain
-visible/priced and the four probes remain unpriced. Stop if inventory or price
+without displaying or saving credentials. Confirm the 13 target models remain
+visible/priced and the seven probes remain unpriced. Stop if inventory or price
 differs from the approved table.
 
 - [ ] **Step 2: Probe mapping ambiguities safely**
 
-For Grok, Omni, and SD4, configure the isolated candidate with the public model
+For Grok, Omni, and Seedance 2.0, configure the isolated candidate with the public model
 ID first and send the smallest valid YuAPI request. Only an explicit validation
 rejection with no accepted ID and no debit permits one alternate runtime channel
 mapping attempt. Once accepted or ambiguous, never send a replacement POST.
@@ -728,13 +728,13 @@ happyhouse*=3s,720p,16:9
 minimax-h3-2k=5s,2k,16:9
 omni-fast*=fixed 10s,720p,16:9,one image
 omni-v2v*=fixed 10s,720p,16:9,one video
-sd4*=4s,480p,16:9
 sd7-720p=4s,16:9
 sd7-1080p=4s,16:9
 sd8=5s,16:9
+seedance-2.0=4s,fixed 720p,16:9
 ```
 
-The known accepted-task provider subtotal is `34.873`. Accepted mapping probes
+The known accepted-task provider subtotal is `31.973`. Accepted mapping probes
 from Step 2 are the model's one paid task and must not be repeated in Step 3.
 Poll only each accepted ID, download one completed asset through the
 authenticated content path, and compare provider debit and YuAPI quota with the
@@ -841,7 +841,7 @@ existing task rows.
 
 - [ ] **Step 4: Verify public production**
 
-Check public health/assets, login/console/pricing/Studio/docs, 14 enabled and four
+Check public health/assets, login/console/pricing/Studio/docs, 13 enabled and seven
 hidden probe models, one cheapest target generation, accepted-ID polling,
 content/download, exact base/group charge, aggregate 4xx/5xx/502 counts,
 container restarts, DB/Redis errors, existing image route, and a bounded GPT text
