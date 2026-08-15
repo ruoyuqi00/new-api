@@ -1,6 +1,6 @@
 # YuAPI 接入与模型调用文档
 
-> 最后验证：2026-08-01<br>
+> 最后验证：2026-08-15<br>
 > 模型、价格和可用分组以本站模型广场与 `GET /v1/models` 的实时结果为准。
 
 ## 1. 客户端配置
@@ -56,7 +56,7 @@ print([model.id for model in models.data])
 
 - `grok-4.5` 是文本模型，按实际输入与输出 Token 计费，仅由 `grok`、`下游grok` 等文本分组提供。
 - `grok-imagine-image` 与 `grok-imagine-image-quality` 是按张计费的图片模型，由 `生图按次` 和 `多模态创作` 分组提供。
-- `grok-imagine-video-1.5-preview` 是最长 15 秒、按实际生成秒数计费的异步视频模型，仅由 `多模态创作` 分组提供。
+- `grok-video` 与 `grok-video-1.5` 是按次计费的异步视频模型，仅由 `多模态创作` 等已授权视频分组提供。
 
 文本、图片和视频使用不同的渠道协议。切换分组不会把 `grok-4.5` 自动转换为图片或视频模型，调用时必须填写下表中的准确 API 模型 ID。
 
@@ -149,26 +149,26 @@ GPT Image 2 支持蒙版；GPT Image 2 与 Nano Banana 最多可接收 9 张参�
 
 ## 6. 视频模型与价格
 
-以下模型仅在“多模态创作”分组提供。固定价格模型按一次成功提交的视频任务计费，不会再按 `duration`、分辨率或参考素材数量重复乘价；标明按秒计费的模型按实际支持时长计费。价格与图片按次模型、IMAGE / `gpt-image-2` 图片池分别独立。
+以下模型仅在“多模态创作”等已授权视频分组提供，全部按一次视频生成计费。`duration`、分辨率、生成音频和参考素材不会重复乘价，查询、内容读取和下载也不会再次扣费。视频计费与 GPT 文字 Token、图片按次模型及 IMAGE / `gpt-image-2` 图片池严格隔离。
 
-| API 模型 ID                      | 用途                      |   最终价格 |
-| -------------------------------- | ------------------------- | ---------: |
-| `grok-imagine-video-1.5-preview` | Grok Imagine 1.5 图生视频 | 0.78/秒；11.70/15 秒 |
-| `omni-fast`                      | Omni 图生视频             | 0.86112/条 |
-| `omni-fast-no-water`             | Omni 图生视频，无水印     |  1.0530/条 |
-| `omni-v2v`                       | Omni 视频生视频           | 1.15128/条 |
-| `omni-v2v-no-water`              | Omni 视频生视频，无水印   |  1.3455/条 |
-| `sora-2`                         | Sora 视频                 |  0.9100/条 |
-| `sora-2-pro`                     | Sora Pro 视频             |  1.1700/条 |
-| `veo-3-1`                        | Veo 3.1                   |  1.1700/条 |
-| `veo-3-1-fast`                   | Veo 3.1 Fast              |  0.9100/条 |
-| `veo-3-1-ref`                    | Veo 3.1 多参考图          |  1.1700/条 |
-| `sd5-seedance-2.0`               | Seedance 2.0 多模态       |  5.0050/条 |
-| `sd5-seedance-2.0-fast`          | Seedance 2.0 多模态 Fast  |  3.3800/条 |
-| `seedance-2.0`                   | Seedance 2.0              |  6.3050/条 |
-| `seedance-2.0-fast`              | Seedance 2.0 Fast         |  4.6800/条 |
-| `seedance-2.0-mini`              | Seedance 2.0 Mini         |  3.7700/条 |
-| `seedance-2.0-mini-8s`           | Seedance 2.0 Mini 8s      |  2.5870/条 |
+表内价格是“多模态创作”分组倍率计算后的最终价格。`下游多模态` 分组倍率为 `1.0`，其价格等于定价 API 为该分组返回的基础价格；所有分组的实时金额仍以模型广场和定价 API 为准。
+
+| API 模型 ID                   | 用途                         | 最终价格/条 |
+| ----------------------------- | ---------------------------- | ----------: |
+| `grok-video`                  | Grok 视频生成                |      0.9936 |
+| `grok-video-1.5`              | Grok 1.5 视频生成            |      2.0016 |
+| `happyhouse-1.0`              | Happyhouse 图像/视频参考生成  |        6.48 |
+| `happyhouse-1.1`              | Happyhouse 多图参考生成       |       4.176 |
+| `minimax-h3-2k`               | Minimax H3 2K 视频生成        |        5.04 |
+| `omni-fast`                   | Omni 图生视频                |     0.95388 |
+| `omni-fast-no-water`          | Omni 图生视频，无水印        |      1.1664 |
+| `omni-v2v`                    | Omni 视频生视频              |     1.27536 |
+| `omni-v2v-no-water`           | Omni 视频生视频，无水印      |      1.4904 |
+| `sd4-seedance-2.0`            | Seedance SD4 多模态生成       |       5.616 |
+| `sd4-seedance-2.0-fast`       | Seedance SD4 多模态快速生成   |       4.176 |
+| `sd7-seedance-2.0-1080p`      | Seedance SD7 固定 1080p       |       7.056 |
+| `sd7-seedance-2.0-720p`       | Seedance SD7 固定 720p        |       5.616 |
+| `sd8-seedance-2.0`            | Seedance SD8 多模态生成       |       4.176 |
 
 ## 7. 视频任务协议
 
@@ -180,61 +180,65 @@ GPT Image 2 支持蒙版；GPT Image 2 与 Nano Banana 最多可接收 9 张参�
 
 创建成功后保存响应中的 `id` 或 `task_id`，每 5-10 秒查询同一个任务。创建接口返回成功只表示任务已经进入队列，不表示视频已经生成。客户端超时也不代表生成失败，不要重新提交同一任务，以免重复扣费。
 
-视频字段不是所有 OpenAI 兼容客户端都能完整配置。模型列表和图片接口可以直接使用 OpenAI SDK；视频任务建议使用原生 HTTP 请求，确保 `duration`、`seconds`、`aspect_ratio`、参考素材等自定义字段不会被客户端删除。
+视频字段不是所有 OpenAI 兼容客户端都能完整配置。模型列表和图片接口可以直接使用 OpenAI SDK；视频任务建议使用原生 HTTP 请求，确保 `duration`、`resolution`、`aspect_ratio`、`generate_audio` 和 `reference_*` 字段不会被客户端删除。
 
-Sora 最小参数示例：
+所有示例都使用公开模型 ID。参考素材 URL 必须可由服务端直接访问，不得依赖 Cookie、Referer 或登录态。创建接口只调用一次；收到任务 ID 后只能查询同一个 ID，不能用重复 `POST` 代替轮询。
+
+### 7.1 Grok 视频
+
+`grok-video` 与 `grok-video-1.5` 使用 `duration`，不要使用 `seconds`。两者支持 4、6、8、10、12、15 秒，480p 或 720p；`grok-video` 最多 1 张参考图，`grok-video-1.5` 最多 7 张。
 
 ```bash
 curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
   -H "Authorization: Bearer $YUAPI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "sora-2",
-    "prompt": "清晨海边的固定机位，轻微海浪，自然光，无文字",
+    "model": "grok-video",
+    "prompt": "保持主体一致，镜头缓慢向前推进，光影自然，无文字",
     "duration": 4,
+    "resolution": "480p",
     "aspect_ratio": "16:9",
-    "generate_audio": false
+    "reference_image_urls": ["https://assets.example.com/video/subject.jpg"]
   }'
 ```
 
-Sora 参考图放在 `images` 数组中，标准版和 Pro 版都最多接收 1 张。`duration` 可选 4、8、12，`generate_audio` 控制是否生成音频；`sora-2-pro` 使用相同字段，只需更换模型 ID。
+### 7.2 Happyhouse
 
-### Grok Imagine Video 1.5
+`happyhouse-1.0` 与 `happyhouse-1.1` 支持 3-15 秒、720p 或 1080p，并可通过 `generate_audio` 显式控制模型原生音频。1.0 最多接收 9 张图片，或一条 3-10 秒参考视频加最多 5 张图片，总素材数不超过 9；1.1 最多接收 9 张图片，不接收视频或音频参考。
 
-`grok-imagine-video-1.5-preview` 支持最长 15 秒的视频，常用 10 秒或 15 秒；它不是固定 5 秒。这个模型使用 `seconds`，不要使用 `duration`。当前基础单价是 0.65/秒，多模态分组倍率保持 1.2，因此用户最终单价是 0.78/秒。任务价格为 `seconds × 0.65 × 1.2`，例如 10 秒收取 7.80，15 秒收取 11.70。
-
-图生视频需要一张无需 Cookie、Referer 或登录即可访问的 HTTPS 图片。请求体必须是 JSON，参考图放入 `image_urls` 数组。推荐的完整请求如下：
-
-```bash
-curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
-  -H "Authorization: Bearer $YUAPI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "grok-imagine-video-1.5-preview",
-    "prompt": "保持主体一致，镜头缓慢向前推进，光影自然，避免闪烁和变形",
-    "seconds": "10",
-    "aspect_ratio": "16:9",
-    "image_urls": ["https://cdn.example.com/first-frame.jpg"],
-    "response_format": "url"
-  }'
+```json
+{
+  "model": "happyhouse-1.0",
+  "prompt": "沿用人物外观和参考视频动作，生成稳定的电影感运镜",
+  "duration": 3,
+  "resolution": "720p",
+  "aspect_ratio": "16:9",
+  "generate_audio": false,
+  "reference_image_urls": ["https://assets.example.com/video/person.png"],
+  "reference_videos": ["https://assets.example.com/video/motion.mp4"]
+}
 ```
 
-字段格式：
+### 7.3 Minimax H3 2K
 
-| 字段              | 类型              | 是否必填     | 说明                                                      |
-| ----------------- | ----------------- | ------------ | --------------------------------------------------------- |
-| `model`           | string            | 是           | 固定为 `grok-imagine-video-1.5-preview`。                 |
-| `prompt`          | string            | 是           | 描述主体动作、镜头运动、节奏和需要保持不变的内容。        |
-| `seconds`         | string 或 integer | 是           | 生成秒数，最大 15；推荐 10 或 15。不要同时传 `duration`。 |
-| `image_urls`      | array of string   | 图生视频必填 | 当前模型使用一张公网 HTTPS 首帧图。                       |
-| `aspect_ratio`    | string            | 否           | 常用 `16:9`、`9:16`、`1:1`，应与首帧方向一致。            |
-| `response_format` | string            | 否           | 建议使用 `url`。                                          |
+`minimax-h3-2k` 支持 5-15 秒，分辨率固定为 `2k`。最多接收 5 张图片和 3 条音频，总数不超过 8；每条及全部参考音频总时长均不得超过 15 秒。使用首尾帧时传 `first_image_url` 与 `last_image_url`，且不能同时开启模型生成音频。
 
-创建接口只调用一次。响应中保存 `id` 或 `task_id`，之后每 5 秒调用 `GET /v1/videos/{task_id}`；状态为 `queued`、`pending`、`processing` 或 `in_progress` 时继续查询。不要把重复 `POST` 当成轮询，否则会创建多个任务并分别计费。
+```json
+{
+  "model": "minimax-h3-2k",
+  "prompt": "参考人物和音乐节奏，生成夜间街景中的自然行走镜头",
+  "duration": 5,
+  "resolution": "2k",
+  "aspect_ratio": "16:9",
+  "generate_audio": false,
+  "reference_image_urls": ["https://assets.example.com/video/person.png"],
+  "reference_audios": ["https://assets.example.com/video/ambient.mp3"]
+}
+```
 
-### 7.1 Omni 图生视频
+### 7.4 Omni 图生视频
 
-`omni-fast` 与 `omni-fast-no-water` 固定约 10 秒、720p，不要传 `duration` 或 `resolution`。单张参考图使用 `image_url`：
+`omni-fast` 与 `omni-fast-no-water` 固定约 10 秒、720p，只支持 `16:9` 或 `9:16`。不要传 `duration`、`resolution` 或 `generate_audio`。普通参考图统一使用 `reference_image_urls`，最多 5 张：
 
 ```bash
 curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
@@ -244,27 +248,15 @@ curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
     "model": "omni-fast",
     "prompt": "保持人物和服装一致，镜头缓慢向前推进",
     "aspect_ratio": "16:9",
-    "image_url": "https://cdn.example.com/input.jpg"
+    "reference_image_urls": ["https://assets.example.com/video/input.jpg"]
   }'
 ```
 
-首尾帧分别使用 `first_image_url` 与 `last_image_url`。多张普通参考图必须改用 multipart，并重复提交 `input_reference` 文件字段，最多 5 张，每张不超过 5 MB：
+首尾帧分别使用 `first_image_url` 与 `last_image_url`，使用首尾帧时不要再传普通参考图。无水印版本参数相同，只需将模型改为 `omni-fast-no-water`。
 
-```bash
-curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
-  -H "Authorization: Bearer $YUAPI_API_KEY" \
-  -F "model=omni-fast" \
-  -F "prompt=综合参考图中的人物、服装和场景生成自然运镜" \
-  -F "aspect_ratio=9:16" \
-  -F "input_reference=@./person.jpg" \
-  -F "input_reference=@./scene.jpg"
-```
+### 7.5 Omni 视频生视频
 
-无水印版本的请求参数相同，只需将模型改为 `omni-fast-no-water`。
-
-### 7.2 Omni 视频生视频
-
-`omni-v2v` 与 `omni-v2v-no-water` 需要源视频。公网视频使用 `video_url`：
+`omni-v2v` 与 `omni-v2v-no-water` 固定约 10 秒、720p，只支持 `16:9` 或 `9:16`，并且必须提供且只能提供一条源视频。不要传 `duration`、`resolution` 或 `generate_audio`。
 
 ```bash
 curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
@@ -274,137 +266,78 @@ curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
     "model": "omni-v2v",
     "prompt": "保留原始动作和构图，将画面转换为写实电影风格",
     "aspect_ratio": "16:9",
-    "video_url": "https://cdn.example.com/source.mp4"
+    "reference_videos": ["https://assets.example.com/video/source.mp4"]
   }'
 ```
 
-本地文件使用 multipart 字段 `input_video`。源文件不超过 5 MB，分辨率不超过 1920x1080。无水印版本只需将模型改为 `omni-v2v-no-water`。
+无水印版本只需将模型改为 `omni-v2v-no-water`。
 
-### 7.3 Veo Standard、Fast 与 Reference
+### 7.6 SD4 Seedance
 
-`veo-3-1` 与 `veo-3-1-fast` 的参数一致。`images` 中第 1 张是首帧，第 2 张是尾帧，最多 2 张：
+`sd4-seedance-2.0` 与 `sd4-seedance-2.0-fast` 支持 4-15 秒、480p 或 720p。普通多模态模式最多接收 4 张图片、3 条视频和 1 条音频，总数不超过 8；参考视频单条为 4-10 秒、总时长不超过 15 秒，参考音频不超过 15 秒。
 
-`resolution` 仅接受 `720p` 或 `1080p`，不要传 `Auto`。
-
-```bash
-curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
-  -H "Authorization: Bearer $YUAPI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "veo-3-1-fast",
-    "prompt": "从首帧自然过渡到尾帧，人物一致，镜头稳定",
-    "duration": 4,
-    "aspect_ratio": "16:9",
-    "resolution": "720p",
-    "generate_audio": false,
-    "reference_mode": "frame",
-    "images": [
-      "https://cdn.example.com/first.jpg",
-      "https://cdn.example.com/last.jpg"
-    ]
-  }'
-```
-
-`veo-3-1-ref` 的图片是主体或素材约束，不代表首尾帧。固定使用 `reference_mode: "image"`，最多 3 张：
+首尾帧模式使用 `first_image_url` 与 `last_image_url`，不能再传普通多模态参考，也不能把 `generate_audio` 设为 `true`：
 
 ```json
 {
-  "model": "veo-3-1-ref",
-  "prompt": "让参考图片中的产品出现在现代展厅中，保持外观一致",
-  "duration": 8,
+  "model": "sd4-seedance-2.0-fast",
+  "prompt": "从室内自然过渡到窗外城市夜景，镜头稳定",
+  "duration": 4,
+  "resolution": "480p",
   "aspect_ratio": "16:9",
-  "resolution": "1080p",
-  "generate_audio": true,
-  "reference_mode": "image",
-  "images": [
-    "https://cdn.example.com/product-front.jpg",
-    "https://cdn.example.com/product-side.jpg"
-  ]
+  "generate_audio": false,
+  "first_image_url": "https://assets.example.com/video/first.png",
+  "last_image_url": "https://assets.example.com/video/last.png"
 }
 ```
 
-Veo 三个模型都只接受 4、6、8 秒和 720p、1080p，不支持 `negative_prompt`、`seed`、`n`、音频参考或 `response_format`。
-
-### 7.4 Seedance 2.0 全能参考
-
-`sd5-seedance-2.0` 与 `sd5-seedance-2.0-fast` 支持首尾帧和全能参考两种互斥模式。
-
-首尾帧模式必须成对传入 `first_image_url`、`last_image_url`：
+普通多模态参考使用三个 `reference_*` 数组：
 
 ```json
 {
-  "model": "sd5-seedance-2.0-fast",
-  "prompt": "从室内自然过渡到窗外城市夜景",
+  "model": "sd4-seedance-2.0",
+  "prompt": "参考人物、动作节奏和环境音，生成夜市中的自然行走镜头",
+  "duration": 6,
+  "resolution": "720p",
+  "aspect_ratio": "16:9",
+  "generate_audio": false,
+  "reference_image_urls": ["https://assets.example.com/video/person.png"],
+  "reference_videos": ["https://assets.example.com/video/motion.mp4"],
+  "reference_audios": ["https://assets.example.com/video/ambient.mp3"]
+}
+```
+
+### 7.7 SD7 Seedance
+
+SD7 的分辨率固定在模型 ID 中：720p 使用 `sd7-seedance-2.0-720p`，1080p 使用 `sd7-seedance-2.0-1080p`。请求中不要再传 `resolution`。两者支持 4-15 秒、最多 5 张图片、3 条视频和 3 条音频，总数不超过 11，并支持 `generate_audio`。
+
+```json
+{
+  "model": "sd7-seedance-2.0-720p",
+  "prompt": "保持参考角色一致，在城市天台完成缓慢环绕运镜",
   "duration": 4,
   "aspect_ratio": "16:9",
-  "resolution": "720p",
   "generate_audio": true,
-  "reference_mode": "frame",
-  "first_image_url": "https://cdn.example.com/first.png",
-  "last_image_url": "https://cdn.example.com/last.png"
+  "reference_image_urls": ["https://assets.example.com/video/character.png"]
 }
 ```
 
-全能参考模式固定使用 `reference_mode: "media"`。最多 9 张图片、3 条视频、3 条音频，三类素材总数不能超过 12：
+### 7.8 SD8 Seedance
+
+`sd8-seedance-2.0` 仅支持 5、10、15 秒，不接收 `resolution` 或 `generate_audio`。最多接收 9 张图片、3 条视频和 3 条音频，总数不超过 15。含人物的参考图片必须先按上游规则遮挡眼部。
 
 ```json
 {
-  "model": "sd5-seedance-2.0",
-  "prompt": "参考图片中的人物，在参考视频的动作节奏下穿过夜市，使用参考音频的氛围",
-  "negative_prompt": "画面抖动、主体变形、文字水印",
-  "duration": 8,
+  "model": "sd8-seedance-2.0",
+  "prompt": "参考环境与动作节奏，生成稳定的写实电影镜头",
+  "duration": 5,
   "aspect_ratio": "16:9",
-  "resolution": "720p",
-  "generate_audio": true,
-  "reference_mode": "media",
-  "images": [
-    "https://cdn.example.com/person.png",
-    "https://cdn.example.com/scene.png"
-  ],
-  "reference_videos": ["https://cdn.example.com/motion.mp4"],
-  "reference_audios": ["https://cdn.example.com/ambient.wav"],
-  "seed": 12345
+  "reference_image_urls": ["https://assets.example.com/video/masked-reference.png"],
+  "reference_videos": ["https://assets.example.com/video/motion.mp4"]
 }
 ```
 
-### 7.5 Seedance 2.0、Fast 与 Mini
-
-`seedance-2.0`、`seedance-2.0-fast`、`seedance-2.0-mini` 与 `seedance-2.0-mini-8s` 使用同一套字段。注意这个模型族使用 `audio`，不是 `generate_audio`：
-
-```bash
-curl -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
-  -H "Authorization: Bearer $YUAPI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "seedance-2.0-mini-8s",
-    "prompt": "白色纸飞机从桌面缓慢滑过，镜头稳定，无文字",
-    "duration": 4,
-    "resolution": "480p",
-    "aspect_ratio": "16:9",
-    "audio": false
-  }'
-```
-
-单图可传 HTTPS URL 或 data URI；多模态图片总数最多 4 张，第一张使用 `image_url`，其余放入 `reference_image_urls`。参考视频最多 3 条且总时长不超过 15 秒，参考音频最多 1 条且不超过 15 秒：
-
-```json
-{
-  "model": "seedance-2.0-mini",
-  "prompt": "参考 @image1 与 @image2 的人物和场景，沿用 @video1 的动作节奏与 @audio1 的音乐氛围",
-  "duration": 6,
-  "resolution": "480p",
-  "aspect_ratio": "1:1",
-  "audio": true,
-  "image_url": "https://cdn.example.com/person.jpg",
-  "reference_image_urls": ["https://cdn.example.com/scene.jpg"],
-  "reference_videos": ["https://cdn.example.com/motion.mp4"],
-  "reference_audios": ["https://cdn.example.com/music.mp3"]
-}
-```
-
-首尾帧使用成对的 `first_image_url`、`last_image_url`，不能同时再传多模态参考素材。`seedance-2.0-mini-8s` 必须使用完整模型 ID，时长不能超过 8 秒。
-
-### 7.6 查询与下载
+### 7.9 查询与下载
 
 查询任务：
 
@@ -423,26 +356,36 @@ curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content" \
 
 ## 8. 视频参数范围
 
-| 模型族                           | 时长         | 分辨率      | 参考素材                                                |
-| -------------------------------- | ------------ | ----------- | ------------------------------------------------------- |
-| `grok-imagine-video-1.5-preview` | 最长 15 秒   | 最高 720p   | 1 张公网首帧图，使用 `image_urls` 数组                  |
-| `sora-2*`                        | 4、8、12 秒  | 模型默认    | 最多 1 张图，支持 `negative_prompt`                     |
-| `veo-3-1` / `fast`               | 4、6、8 秒   | 720p、1080p | 首尾帧最多 2 张                                         |
-| `veo-3-1-ref`                    | 4、6、8 秒   | 720p、1080p | 素材图最多 3 张                                         |
-| `sd5-seedance-*`                 | 4-15 秒      | 480p、720p  | 首尾帧，或最多 9 图/3 视频/3 音频，总数不超过 12        |
-| `seedance-2.0*`                  | 4-15 秒      | 480p、720p  | 最多 4 图/3 视频/1 音频；多模态与首尾帧不能混用         |
-| `seedance-2.0-mini-8s`           | 4-8 秒       | 480p、720p  | 与 Seedance Mini 相同                                   |
-| `omni-fast*`                     | 固定约 10 秒 | 固定 720p   | 单图 `image_url`，多图最多 5 张，或首尾帧               |
-| `omni-v2v*`                      | 固定约 10 秒 | 固定 720p   | `video_url` 或 multipart `input_video`，文件不超过 5 MB |
+| 模型族                  | 时长                  | 分辨率              | 原生音频 | 参考素材限制                                      |
+| ----------------------- | --------------------- | ------------------- | -------- | ------------------------------------------------- |
+| `grok-video*`           | 4/6/8/10/12/15 秒     | 480p、720p          | 不支持   | 标准版 1 图，1.5 版 7 图                          |
+| `happyhouse-1.0`        | 3-15 秒               | 720p、1080p         | 支持     | 9 图；含 1 视频时最多 5 图，总数最多 9            |
+| `happyhouse-1.1`        | 3-15 秒               | 720p、1080p         | 支持     | 最多 9 图                                         |
+| `minimax-h3-2k`         | 5-15 秒               | 固定 2K             | 支持     | 5 图、3 音频，总数最多 8；也支持首尾帧            |
+| `omni-fast*`            | 固定约 10 秒          | 固定 720p           | 不支持   | 最多 5 图，或首尾帧                               |
+| `omni-v2v*`             | 固定约 10 秒          | 固定 720p           | 不支持   | 必须且只能提供 1 条视频                           |
+| `sd4-seedance-2.0*`     | 4-15 秒               | 480p、720p          | 支持     | 4 图、3 视频、1 音频，总数最多 8；或首尾帧        |
+| `sd7-seedance-2.0-*`    | 4-15 秒               | 由模型 ID 固定      | 支持     | 5 图、3 视频、3 音频，总数最多 11                 |
+| `sd8-seedance-2.0`      | 5/10/15 秒            | 模型固定            | 不支持   | 9 图、3 视频、3 音频，总数最多 15                 |
+
+支持的宽高比：
+
+- Grok：`1:1`、`16:9`、`9:16`、`4:3`、`3:4`、`3:2`、`2:3`。
+- Happyhouse：`16:9`、`9:16`、`1:1`、`3:4`、`4:3`。
+- Minimax H3 与 SD4：`16:9`、`9:16`、`1:1`、`21:9`、`3:4`、`4:3`。
+- Omni：`16:9`、`9:16`。
+- SD7：`16:9`、`9:16`、`1:1`、`4:3`、`3:4`、`21:9`。
+- SD8：`16:9`、`9:16`、`1:1`、`4:3`、`3:4`。
 
 模型族限制：
 
-- Omni 图生视频不要传 `duration` 或 `resolution`；Omni V2V 必须提供视频输入。
-- Sora 与 Veo 使用 `generate_audio`；`seedance-2.0*` 使用 `audio`；`sd5-seedance-*` 使用 `generate_audio`。
-- Grok Imagine Video 1.5 只传 `seconds`；其他模型按各自说明选择 `duration` 或 `seconds`。分辨率、时长和模型 ID 不匹配时，请求会在创建任务前返回 `400`。
-- `image_url`、`images`、`reference_image_urls`、`input_reference` 的用途不同，不要在模型族之间照搬字段。
+- 当前启用模型统一使用 `duration`；不要传旧的 `seconds` 或 `audio` 布尔字段。
+- 只有 Happyhouse、Minimax、SD4 和 SD7 接收 `generate_audio`；显式 `false` 会原样保留。
+- Omni 固定时长模型不要传 `duration` 或 `resolution`；Omni V2V 必须使用 `reference_videos` 提供一条视频。
+- SD7 的分辨率由模型 ID 决定；SD8 不接收分辨率字段。字段、时长或模型 ID 不匹配时，请求会在创建任务前返回 `400`。
+- 普通图片、视频和音频参考分别使用 `reference_image_urls`、`reference_videos`、`reference_audios`；首尾帧只使用 `first_image_url`、`last_image_url`，不要混用。
 - data URI 适合小图片；视频和音频参考应使用可由服务端访问的 HTTPS URL。不要使用需要 Cookie、Referer 或临时登录态的地址。
-- 参考视频使用 MP4/MOV、H.264/H.265 和 24-60 FPS。普通 Seedance 参考视频每边建议 720-2160 px。
+- SD4 首尾帧模式和 Minimax 首尾帧模式不能同时开启模型生成音频；SD8 含人物的参考图片必须遮挡眼部。
 
 ## 9. 状态与错误处理
 
@@ -489,7 +432,9 @@ from urllib.parse import urljoin
 
 import requests
 
-base_url = "https://vip.yuaiapi.com/v1"
+base_url = os.environ.get(
+    "YUAPI_MEDIA_BASE_URL", "https://vip.yuaiapi.com/v1"
+).rstrip("/")
 api_origin = base_url.removesuffix("/v1")
 headers = {"Authorization": f"Bearer {os.environ['YUAPI_API_KEY']}"}
 
@@ -497,7 +442,7 @@ created = requests.post(
     f"{base_url}/videos",
     headers=headers,
     json={
-        "model": "veo-3-1-fast",
+        "model": "grok-video",
         "prompt": "雨夜城市街道，镜头缓慢推进",
         "duration": 4,
         "aspect_ratio": "16:9",
