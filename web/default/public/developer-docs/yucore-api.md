@@ -169,6 +169,8 @@ GPT Image 2 支持蒙版；GPT Image 2 与 Nano Banana 最多可接收 9 张参�
 | `sd8-seedance-2.0`       | Seedance SD8 多模态生成      |       4.176 |
 | `seedance-2.0`           | Seedance 2.0 固定 720p       |       5.616 |
 
+表中的 720p、1080p 和 2K 是上游模型档位，不保证成片像素严格等于标准宽高；实际宽高、时长和 MIME 类型以任务结果元数据为准。
+
 ## 7. 视频任务协议
 
 视频统一使用异步任务：

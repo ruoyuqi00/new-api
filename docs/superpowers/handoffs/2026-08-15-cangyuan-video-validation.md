@@ -191,17 +191,54 @@ Visual inspection confirmed that the video model list, per-generation prices,
 resolution controls, duration controls, audio switch, action area, and results
 area render without overlap at the tested desktop and mobile viewports.
 
+## Real upstream paid-probe evidence
+
+On 2026-08-16 (Asia/Shanghai), the authenticated VIDEO inventory, public
+prices, group ratio, token-visible probe inventory, and public reference assets
+were rechecked before any creation request. Each accepted task used exactly one
+creation POST followed by same-ID GET polling and one content download. The
+seven unpriced probe models received no paid requests.
+
+| Model                    | Create/result                                                   | Status path                        | Verified media          | Billing evidence                                                                                     |
+| ------------------------ | --------------------------------------------------------------- | ---------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `grok-video`             | Explicit capacity rejection; no task ID                         | HTTP 429                           | None                    | Three bounded client attempts; zero-amount error logs and zero balance delta                         |
+| `grok-video-1.5`         | Explicit capacity rejection; no task ID                         | HTTP 429                           | None                    | Two bounded client attempts; zero-amount error logs and no charge                                    |
+| `happyhouse-1.0`         | Completed                                                       | queued -> in progress -> completed | MP4, 1280x720, 3.163 s  | Final consume log `4.5`; the initially observed partial balance settlement reconciled to this amount |
+| `happyhouse-1.1`         | Completed                                                       | queued -> in progress -> completed | MP4, 1280x720, 3.163 s  | Balance delta and consume log `2.9`                                                                  |
+| `minimax-h3-2k`          | Completed                                                       | queued -> in progress -> completed | MP4, 2560x1440, 5.167 s | Balance delta and consume log `3.5`                                                                  |
+| `omni-fast`              | Completed                                                       | queued -> in progress -> completed | MP4, 1280x720, 10.005 s | Single-model balance delta and consume log `0.6624`                                                  |
+| `omni-fast-no-water`     | Completed                                                       | queued -> in progress -> completed | MP4, 1280x720, 10.005 s | Balance delta and consume log `0.81`                                                                 |
+| `omni-v2v`               | Completed                                                       | queued -> in progress -> completed | MP4, 1280x720, 5.013 s  | Balance delta and consume log `0.8856`                                                               |
+| `omni-v2v-no-water`      | Completed                                                       | queued -> in progress -> completed | MP4, 1280x720, 5.013 s  | Balance delta `1.034998` versus price `1.035`; two-millionths quota-conversion rounding              |
+| `sd7-seedance-2.0-1080p` | Completed                                                       | queued -> in progress -> completed | MP4, 1902x1092, 4.042 s | Balance delta and consume log `4.9`                                                                  |
+| `sd7-seedance-2.0-720p`  | Completed                                                       | queued -> in progress -> completed | MP4, 1268x728, 4.042 s  | Balance delta and consume log `3.9`                                                                  |
+| `sd8-seedance-2.0`       | Accepted, then failed because no provider account was available | pending -> queued -> failed        | None                    | Two bounded tasks; each consumed `2.9`, refunded `2.9`, and had net `0`                              |
+| `seedance-2.0`           | Completed                                                       | queued -> in progress -> completed | MP4, 1268x728, 4.042 s  | Balance delta `3.9`; upstream consume log used its internal 720p route name                          |
+
+The ten completed models consumed `26.992998` in total versus published cost
+`26.993`; the difference is the same two-millionths quota-conversion rounding
+on `omni-v2v-no-water`. Polling and content retrieval produced no additional
+charges. The two Grok rejections and the failed `sd8-seedance-2.0` task had zero
+net cost.
+
+The observed 1080p and 720p outputs were close to, but not exactly, standard
+1920x1080 and 1280x720 pixel dimensions. Public documentation therefore keeps
+these values as provider model tiers and does not promise exact output pixels.
+The capacity failures do not indicate a request-mapping defect, but they remain
+release evidence gaps. A cooldown retry produced the same result, so those
+three models require one successful bounded probe after the provider restores
+capacity; no further immediate retry is authorized.
+
 ## Remaining gates
 
-1. Re-read the authenticated upstream VIDEO group and stop on any inventory or
-   price drift.
-2. Run exactly one smallest valid paid task for each of the 13 enabled models,
-   reusing accepted mapping probes and never probing the seven unpriced models.
-3. Record only redacted mapping, status, media metadata, and debit/charge
-   comparisons; encode any proven contract correction test-first.
-4. Push the fully verified branch and re-audit production read-only.
-5. Capture scoped server-local rollback artifacts, then build and privately
+1. After a fresh no-drift audit, retry only `grok-video`, `grok-video-1.5`, and
+   `sd8-seedance-2.0`. Do not repeat any of the ten completed paid probes.
+2. Require a completed MP4 and reconciled charge for each retry. A new explicit
+   capacity rejection may be retried only after operator review; an ambiguous
+   create result must never be retried.
+3. Push the fully verified branch and re-audit production read-only.
+4. Capture scoped server-local rollback artifacts, then build and privately
    verify a blue-green candidate without changing public routing or stopping the
    current application.
-6. Present the exact candidate and rollback facts and wait for explicit traffic
+5. Present the exact candidate and rollback facts and wait for explicit traffic
    switch approval before any Caddy reload or replacement-channel activation.
