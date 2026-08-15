@@ -17,9 +17,9 @@
   use a graceful reload.
 - Public traffic changes only after explicit user approval of the verified
   candidate facts. Candidate preparation does not imply switch approval.
-- Change only video channel rows, the 13 listed `ModelPrice` entries,
-  `TASK_PRICE_PATCH`, and a media capability override if runtime readback proves
-  one is still required.
+- Change only video channel rows, the 13 target `ModelPrice` entries, the 11
+  canceled `ModelPrice` entries listed below, `TASK_PRICE_PATCH`, and removal of
+  the single obsolete video capability override.
 - Do not change image routes or prices, group ratios, GPT relay/cache/usage
   behavior, users, balances, existing tasks, MySQL, Redis, DNS, TLS, or other
   Caddy routes.
@@ -44,6 +44,28 @@ cangyuan-video-refresh-20260815-seedance=sd7-seedance-2.0-1080p,sd7-seedance-2.0
 Do not delete legacy video channels. Preserve their full rows disabled as the
 configuration rollback source. A model must not be active in both a legacy and
 replacement channel at the same priority.
+
+Remove these canceled models from active channel mappings, `ModelPrice`, and
+`TASK_PRICE_PATCH`. Preserve their prior values only in the protected rollback
+artifact:
+
+```text
+grok-imagine-video-1.5-preview
+sora-2
+sora-2-pro
+veo-3-1
+veo-3-1-fast
+veo-3-1-ref
+sd5-seedance-2.0
+sd5-seedance-2.0-fast
+seedance-2.0-fast
+seedance-2.0-mini
+seedance-2.0-mini-8s
+```
+
+The runtime capability override currently contains one obsolete video key,
+`grok-imagine-video-1.5-preview`, alongside unrelated image overrides. Remove
+only that video key; preserve every image override byte-for-byte.
 
 ## 3. Fixed prices
 
@@ -109,7 +131,7 @@ repository, owned by root and mode `0600`. Store only:
 
 - complete legacy and replacement video channel rows, including status and
   model mapping;
-- the previous values or absence markers for the 13 affected `ModelPrice` keys;
+- the previous values or absence markers for all 24 affected `ModelPrice` keys;
 - the previous `TASK_PRICE_PATCH` value;
 - the previous media capability override;
 - candidate environment names without printing secret values;
@@ -130,10 +152,14 @@ tasks, or unrelated settings.
 4. Attach Caddy to the candidate release network only as needed for a private
    connectivity check; do not alter either public upstream reference.
 5. Verify health, restart count, source commit, frontend asset fingerprints,
-   database compatibility, private authenticated catalog, the 13 prices, seven
-   hidden probe models, and one bounded cheapest real task with same-ID polling
-   and content retrieval.
-6. Verify the unchanged image route and a bounded GPT text request. Video work
+   database compatibility, and the disabled replacement-channel readback. The
+   already completed isolated candidate must prove the exact 13 prices and seven
+   hidden probe models. Do not mutate shared production prices merely to expose
+   the new catalog on the private candidate before approval.
+6. Reuse the redacted real-upstream evidence for the ten completed models. The
+   two Grok models and `sd8-seedance-2.0` remain blocked on upstream capacity;
+   do not repeat the ten successful paid tasks.
+7. Verify the unchanged image route and a bounded GPT text request. Video work
    must not inherit GPT cache, usage estimation, stream-disconnect, or token
    settlement behavior.
 
@@ -156,7 +182,9 @@ Run only after explicit approval and a fresh no-drift check:
    confirm exactly two candidate references and zero unintended changes.
 6. Apply one scoped video configuration transaction: enable only the five
    replacement channels, disable only the identified legacy video channels,
-   set exactly the 13 base prices, and set the exact `TASK_PRICE_PATCH` value.
+   set exactly the 13 target base prices, delete exactly the 11 canceled price
+   keys, remove only the obsolete video capability override, and set the exact
+   `TASK_PRICE_PATCH` value.
 7. Refresh the relevant settings/channel caches and read back every changed
    value. Confirm group ratios and all no-touch settings are unchanged.
 
