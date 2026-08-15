@@ -25,6 +25,9 @@ type YucoreCopy = Record<string, string>
 
 const yucoreCopy: Record<YucoreLocale, YucoreCopy> = {
   zh: {
+    'Generate native audio': '生成原生音频',
+    'Include model-generated audio in the video.':
+      '在视频中包含模型生成的音频。',
     'YUCORE BOOT / MODEL ROUTE FABRIC / CORE WAKE':
       'YUCORE 启动 / 模型路由织网 / 核心唤醒',
     'YuCore AI is connecting to the model core': 'YuCore AI 正在连接模型核心',
@@ -378,6 +381,9 @@ const yucoreCopy: Record<YucoreLocale, YucoreCopy> = {
     'next run': '下一次运行',
   },
   fr: {
+    'Generate native audio': "Generer l'audio natif",
+    'Include model-generated audio in the video.':
+      "Inclure l'audio genere par le modele dans la video.",
     'YUCORE BOOT / MODEL ROUTE FABRIC / CORE WAKE':
       'DEMARRAGE YUCORE / ROUTAGE MODELE / REVEIL DU COEUR',
     'YuCore AI is connecting to the model core':
@@ -591,6 +597,9 @@ const yucoreCopy: Record<YucoreLocale, YucoreCopy> = {
     'Manage API keys': 'Gerer les cles API',
   },
   ru: {
+    'Generate native audio': 'Создавать встроенный звук',
+    'Include model-generated audio in the video.':
+      'Включать в видео звук, созданный моделью.',
     'YUCORE BOOT / MODEL ROUTE FABRIC / CORE WAKE':
       'ЗАПУСК YUCORE / МАРШРУТЫ МОДЕЛЕЙ / ПРОБУЖДЕНИЕ ЯДРА',
     'YuCore AI is connecting to the model core':
@@ -771,6 +780,9 @@ const yucoreCopy: Record<YucoreLocale, YucoreCopy> = {
     'Manage API keys': 'Управлять API-ключами',
   },
   ja: {
+    'Generate native audio': 'ネイティブ音声を生成',
+    'Include model-generated audio in the video.':
+      'モデルが生成した音声を動画に含めます。',
     'YUCORE BOOT / MODEL ROUTE FABRIC / CORE WAKE':
       'YUCORE 起動 / モデルルート構築 / コア起動',
     'YuCore AI is connecting to the model core':
@@ -949,6 +961,9 @@ const yucoreCopy: Record<YucoreLocale, YucoreCopy> = {
     'Manage API keys': 'API キーを管理',
   },
   vi: {
+    'Generate native audio': 'Tao am thanh goc',
+    'Include model-generated audio in the video.':
+      'Bao gom am thanh do mo hinh tao trong video.',
     'YUCORE BOOT / MODEL ROUTE FABRIC / CORE WAKE':
       'YUCORE KHOI DONG / LUOI DINH TUYEN MODEL / DANH THUC CORE',
     'YuCore AI is connecting to the model core':

@@ -95,6 +95,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
 import {
@@ -1234,6 +1235,7 @@ export function YucoreStudioWorkspace({
   const [streamMode, setStreamMode] = useState('final')
   const [partialImages, setPartialImages] = useState(0)
   const [duration, setDuration] = useState(8)
+  const [generateAudio, setGenerateAudio] = useState(true)
   const [visibility, setVisibility] = useState('private')
   const [count, setCount] = useState(3)
   const [referenceFiles, setReferenceFiles] = useState<ReferenceAssetDraft[]>(
@@ -1890,6 +1892,9 @@ export function YucoreStudioWorkspace({
     if (activeCounts.length > 0) {
       setCount((current) => keepOption(current, activeCounts, activeCounts[0]))
     }
+    if (!activeModel.supports_audio) {
+      setGenerateAudio(true)
+    }
     setReferenceFiles((items) => items.slice(0, maxReferenceImages))
   }, [
     activeAspectRatios,
@@ -2477,6 +2482,9 @@ export function YucoreStudioWorkspace({
             ? { partial_images: partialImages }
             : {}),
           ...(currentModel.durations?.includes(duration) ? { duration } : {}),
+          ...(currentModel.supports_audio
+            ? { generate_audio: generateAudio }
+            : {}),
           visibility,
           reference_count: referenceFiles.length,
           surface: 'yucore-studio',
@@ -3381,6 +3389,9 @@ export function YucoreStudioWorkspace({
             : {}),
           ...(agentMediaModel.durations?.includes(duration)
             ? { duration }
+            : {}),
+          ...(agentMediaModel.supports_audio
+            ? { generate_audio: generateAudio }
             : {}),
           visibility,
           reference_count: referenceFiles.length,
@@ -5540,6 +5551,34 @@ export function YucoreStudioWorkspace({
                               </SegmentedButton>
                             ))}
                           </div>
+                        </div>
+                      )}
+
+                      {view === 'video' && activeModel?.supports_audio && (
+                        <div className='flex items-center justify-between gap-4 border-t border-white/10 pt-3'>
+                          <div className='min-w-0'>
+                            <label
+                              htmlFor='studio-generate-audio'
+                              className='text-sm font-semibold text-white'
+                            >
+                              {t('Generate native audio')}
+                            </label>
+                            <p
+                              id='studio-generate-audio-description'
+                              className='mt-1 text-xs leading-5 text-white/45'
+                            >
+                              {t(
+                                'Include model-generated audio in the video.'
+                              )}
+                            </p>
+                          </div>
+                          <Switch
+                            id='studio-generate-audio'
+                            aria-describedby='studio-generate-audio-description'
+                            className='shrink-0 data-checked:bg-cyan-300'
+                            checked={generateAudio}
+                            onCheckedChange={setGenerateAudio}
+                          />
                         </div>
                       )}
 

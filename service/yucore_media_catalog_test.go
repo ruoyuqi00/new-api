@@ -155,6 +155,7 @@ func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 	assert.Equal(t, "sd4-seedance-2.0", item.Id)
 	assert.Equal(t, []int{4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, item.Durations)
 	assert.Equal(t, []string{"480p", "720p"}, item.Resolutions)
+	assert.Equal(t, []string{"480p", "720p"}, item.Sizes)
 	assert.Equal(t, []string{"media", "frames"}, item.ReferenceModes)
 	assert.True(t, item.SupportsAudio)
 	assert.False(t, item.SupportsSeed)

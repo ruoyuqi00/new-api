@@ -184,6 +184,7 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 		item.InputLimits.MaxImagesWithVideo = capability.ReferenceLimits.MaxImagesWithVideo
 	}
 	if kind == YucoreMediaKindVideo {
+		item.Sizes = append([]string(nil), capability.Resolutions...)
 		item.Modes = []string{"text-to-video"}
 		item.Async = true
 		item.InputLimits.MaxPromptChars = 2000

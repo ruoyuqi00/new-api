@@ -145,6 +145,10 @@ export interface YucoreMediaModel {
   output_formats?: string[]
   counts?: number[]
   durations?: number[]
+  resolutions?: string[]
+  reference_modes?: string[]
+  supports_audio?: boolean
+  supports_seed?: boolean
   backgrounds?: string[]
   moderations?: string[]
   stream_modes?: string[]
