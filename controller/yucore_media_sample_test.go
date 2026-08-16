@@ -415,3 +415,145 @@ func TestDeleteYucoreMediaSampleRejectsOrdinaryTask(t *testing.T) {
 	require.NoError(t, model.DB.Model(&model.YucoreMediaTask{}).Where("task_id = ?", ordinary.TaskId).Count(&count).Error)
 	assert.Equal(t, int64(1), count)
 }
+
+type yucoreMediaSamplePageResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Total int `json:"total"`
+		Items []struct {
+			TaskID string `json:"task_id"`
+		} `json:"items"`
+	} `json:"data"`
+}
+
+func performYucoreMediaSampleTaskRequest(t *testing.T, method string, target string, taskID string, userID int, role int, body string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(method, target, strings.NewReader(body))
+	if body != "" {
+		context.Request.Header.Set("Content-Type", "application/json")
+	}
+	if taskID != "" {
+		context.Params = gin.Params{{Key: "task_id", Value: taskID}, {Key: "index", Value: "0"}}
+	}
+	context.Set("id", userID)
+	context.Set("role", role)
+	handler(context)
+	return recorder
+}
+
+func TestYucoreMediaSampleAccessAndGalleryRespectCurrentOwnerRole(t *testing.T) {
+	setupYucoreMediaSampleControllerTest(t)
+	content := yucoreMediaTestFTYP("isom", "mp41")
+	checksum := yucoreMediaSampleChecksum(content)
+	_, imported := performYucoreMediaSampleImport(
+		t, common.RoleAdminUser, content, "video/mp4", "sample-test-video", checksum,
+		model.YucoreMediaSampleCollectionID, nil,
+	)
+	require.True(t, imported.Success, imported.Message)
+	adminOrdinary := &model.YucoreMediaTask{
+		TaskId: "admin-ordinary", UserId: 42, Kind: "video", Mode: "text-to-video",
+		ModelId: "sample-test-video", Status: model.YucoreMediaTaskStatusCompleted,
+	}
+	userOrdinary := &model.YucoreMediaTask{
+		TaskId: "user-ordinary", UserId: 7, Kind: "video", Mode: "text-to-video",
+		ModelId: "sample-test-video", Status: model.YucoreMediaTaskStatusCompleted,
+	}
+	require.NoError(t, model.DB.Create(adminOrdinary).Error)
+	require.NoError(t, model.DB.Create(userOrdinary).Error)
+
+	assertPage := func(handler gin.HandlerFunc, userID int, role int, expectedIDs ...string) {
+		t.Helper()
+		recorder := performYucoreMediaSampleTaskRequest(t, http.MethodGet, "/api/yucore/media/gallery?p=1&page_size=100", "", userID, role, "", handler)
+		var response yucoreMediaSamplePageResponse
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.True(t, response.Success, response.Message)
+		assert.Equal(t, len(expectedIDs), response.Data.Total)
+		actualIDs := make([]string, 0, len(response.Data.Items))
+		for _, item := range response.Data.Items {
+			actualIDs = append(actualIDs, item.TaskID)
+		}
+		assert.ElementsMatch(t, expectedIDs, actualIDs)
+	}
+	for _, handler := range []gin.HandlerFunc{ListYucoreMediaTasks, ListYucoreMediaGallery} {
+		assertPage(handler, 42, common.RoleAdminUser, imported.Data.TaskID, adminOrdinary.TaskId)
+		assertPage(handler, 42, common.RoleCommonUser, adminOrdinary.TaskId)
+		assertPage(handler, 7, common.RoleCommonUser, userOrdinary.TaskId)
+	}
+
+	adminDetail := performYucoreMediaSampleTaskRequest(t, http.MethodGet, "/api/yucore/media/tasks/"+imported.Data.TaskID, imported.Data.TaskID, 42, common.RoleAdminUser, "", GetYucoreMediaTask)
+	assert.Equal(t, http.StatusOK, adminDetail.Code)
+	var detailResponse struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(adminDetail.Body.Bytes(), &detailResponse))
+	assert.True(t, detailResponse.Success)
+
+	demotedDetail := performYucoreMediaSampleTaskRequest(t, http.MethodGet, "/api/yucore/media/tasks/"+imported.Data.TaskID, imported.Data.TaskID, 42, common.RoleCommonUser, "", GetYucoreMediaTask)
+	assert.Equal(t, http.StatusNotFound, demotedDetail.Code)
+	otherUserDetail := performYucoreMediaSampleTaskRequest(t, http.MethodGet, "/api/yucore/media/tasks/"+imported.Data.TaskID, imported.Data.TaskID, 7, common.RoleCommonUser, "", GetYucoreMediaTask)
+	assert.Equal(t, http.StatusNotFound, otherUserDetail.Code)
+	demotedAsset := performYucoreMediaSampleTaskRequest(t, http.MethodGet, "/api/yucore/media/tasks/"+imported.Data.TaskID+"/assets/0", imported.Data.TaskID, 42, common.RoleCommonUser, "", ServeYucoreMediaTaskAsset)
+	assert.Equal(t, http.StatusNotFound, demotedAsset.Code)
+	otherUserAsset := performYucoreMediaSampleTaskRequest(t, http.MethodGet, "/api/yucore/media/tasks/"+imported.Data.TaskID+"/assets/0", imported.Data.TaskID, 7, common.RoleCommonUser, "", ServeYucoreMediaTaskAsset)
+	assert.Equal(t, http.StatusNotFound, otherUserAsset.Code)
+}
+
+func TestYucoreMediaSampleGenericDeleteAndPatchAreRejected(t *testing.T) {
+	uploadRoot := setupYucoreMediaSampleControllerTest(t)
+	content := yucoreMediaTestFTYP("isom", "mp41")
+	checksum := yucoreMediaSampleChecksum(content)
+	_, imported := performYucoreMediaSampleImport(
+		t, common.RoleAdminUser, content, "video/mp4", "sample-test-video", checksum,
+		model.YucoreMediaSampleCollectionID, nil,
+	)
+	require.True(t, imported.Success, imported.Message)
+
+	patchResponse := performYucoreMediaSampleTaskRequest(t, http.MethodPatch, "/api/yucore/media/tasks/"+imported.Data.TaskID, imported.Data.TaskID, 42, common.RoleAdminUser, `{"action":"cancel"}`, UpdateYucoreMediaTask)
+	deleteResponse := performYucoreMediaSampleTaskRequest(t, http.MethodDelete, "/api/yucore/media/tasks/"+imported.Data.TaskID, imported.Data.TaskID, 42, common.RoleAdminUser, "", DeleteYucoreMediaTask)
+	for _, recorder := range []*httptest.ResponseRecorder{patchResponse, deleteResponse} {
+		var response struct {
+			Success bool `json:"success"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.False(t, response.Success)
+	}
+	var count int64
+	require.NoError(t, model.DB.Model(&model.YucoreMediaTask{}).Where("task_id = ?", imported.Data.TaskID).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+	stored, err := os.ReadFile(filepath.Join(uploadRoot, "42", model.YucoreMediaSampleFileName(checksum)))
+	require.NoError(t, err)
+	assert.Equal(t, content, stored)
+
+	demotedRollback := performYucoreMediaSampleTaskRequest(t, http.MethodDelete, "/api/yucore/media/admin/sample-assets/"+imported.Data.TaskID, imported.Data.TaskID, 42, common.RoleCommonUser, "", DeleteYucoreMediaSample)
+	assert.Equal(t, http.StatusForbidden, demotedRollback.Code)
+}
+
+func TestYucoreMediaSampleRangeServesPrivateManagedVideo(t *testing.T) {
+	setupYucoreMediaSampleControllerTest(t)
+	content := append(yucoreMediaTestFTYP("isom", "mp41"), []byte("0123456789abcdef")...)
+	checksum := yucoreMediaSampleChecksum(content)
+	_, imported := performYucoreMediaSampleImport(
+		t, common.RoleAdminUser, content, "video/mp4", "sample-test-video", checksum,
+		model.YucoreMediaSampleCollectionID, nil,
+	)
+	require.True(t, imported.Success, imported.Message)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/yucore/media/tasks/"+imported.Data.TaskID+"/assets/0", nil)
+	context.Request.Header.Set("Range", "bytes=0-15")
+	context.Params = gin.Params{{Key: "task_id", Value: imported.Data.TaskID}, {Key: "index", Value: "0"}}
+	context.Set("id", 42)
+	context.Set("role", common.RoleAdminUser)
+	ServeYucoreMediaTaskAsset(context)
+
+	assert.Equal(t, http.StatusPartialContent, recorder.Code)
+	assert.Equal(t, content[:16], recorder.Body.Bytes())
+	assert.Equal(t, fmt.Sprintf("bytes 0-15/%d", len(content)), recorder.Header().Get("Content-Range"))
+	assert.Equal(t, "video/mp4", recorder.Header().Get("Content-Type"))
+	assert.Equal(t, "private, max-age=86400", recorder.Header().Get("Cache-Control"))
+	assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+}

@@ -1476,12 +1476,13 @@ func ServeYucoreMediaUploadedReference(c *gin.Context) {
 
 func ListYucoreMediaTasks(c *gin.Context) {
 	userId := c.GetInt("id")
+	includeAdminSamples := c.GetInt("role") >= common.RoleAdminUser
 	pageInfo := common.GetPageQuery(c)
 	sessionId := strings.TrimSpace(c.Query("session_id"))
 	kind := strings.TrimSpace(c.Query("kind"))
 	status := strings.TrimSpace(c.Query("status"))
 	if model.IsYucoreMediaUAGProxyConfigured() {
-		tasks, total, err := model.ListYucoreMergedUAGProxyMediaTasks(userId, sessionId, kind, status, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), yucoreMediaUAGProxyHeadersFromRequest(c))
+		tasks, total, err := model.ListYucoreMergedUAGProxyMediaTasks(userId, sessionId, kind, status, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), yucoreMediaUAGProxyHeadersFromRequest(c), includeAdminSamples)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -1491,12 +1492,12 @@ func ListYucoreMediaTasks(c *gin.Context) {
 		common.ApiSuccess(c, pageInfo)
 		return
 	}
-	tasks, err := model.ListYucoreMediaTasks(userId, sessionId, kind, status, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	tasks, err := model.ListYucoreMediaTasks(userId, sessionId, kind, status, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), includeAdminSamples)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	total, _ := model.CountYucoreMediaTasks(userId, sessionId, kind, status)
+	total, _ := model.CountYucoreMediaTasks(userId, sessionId, kind, status, includeAdminSamples)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(buildYucoreMediaTaskResponses(tasks))
 	common.ApiSuccess(c, pageInfo)
@@ -1532,7 +1533,10 @@ func GetYucoreMediaTask(c *gin.Context) {
 	}
 	task, err := model.GetYucoreMediaTaskByTaskIdWithHeaders(taskId, c.GetInt("id"), yucoreMediaUAGProxyHeadersFromRequest(c))
 	if err != nil {
-		common.ApiError(c, err)
+		writeYucoreMediaTaskNotFound(c)
+		return
+	}
+	if denyYucoreMediaSampleAccess(c, task) {
 		return
 	}
 	common.ApiSuccess(c, buildYucoreMediaTaskResponse(task))
@@ -1554,6 +1558,9 @@ func UpdateYucoreMediaTask(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if rejectYucoreMediaSampleMutation(c, task) {
+		return
+	}
 	if strings.EqualFold(req.Action, "cancel") {
 		if err := model.CancelYucoreMediaTaskWithHeaders(task, yucoreMediaUAGProxyHeadersFromRequest(c)); err != nil {
 			common.ApiError(c, err)
@@ -1571,6 +1578,14 @@ func DeleteYucoreMediaTask(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid task id")
 		return
 	}
+	task, err := model.GetYucoreMediaTaskByTaskIdWithHeaders(taskId, c.GetInt("id"), yucoreMediaUAGProxyHeadersFromRequest(c))
+	if err != nil {
+		writeYucoreMediaTaskNotFound(c)
+		return
+	}
+	if rejectYucoreMediaSampleMutation(c, task) {
+		return
+	}
 	if err := model.DeleteYucoreMediaTaskByTaskId(taskId, c.GetInt("id")); err != nil {
 		common.ApiError(c, err)
 		return
@@ -1580,10 +1595,11 @@ func DeleteYucoreMediaTask(c *gin.Context) {
 
 func ListYucoreMediaGallery(c *gin.Context) {
 	userId := c.GetInt("id")
+	includeAdminSamples := c.GetInt("role") >= common.RoleAdminUser
 	pageInfo := common.GetPageQuery(c)
 	kind := strings.TrimSpace(c.Query("kind"))
 	if model.IsYucoreMediaUAGProxyConfigured() {
-		tasks, total, err := model.ListYucoreMergedUAGProxyMediaTasks(userId, "", kind, model.YucoreMediaTaskStatusCompleted, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), yucoreMediaUAGProxyHeadersFromRequest(c))
+		tasks, total, err := model.ListYucoreMergedUAGProxyMediaTasks(userId, "", kind, model.YucoreMediaTaskStatusCompleted, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), yucoreMediaUAGProxyHeadersFromRequest(c), includeAdminSamples)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -1593,12 +1609,12 @@ func ListYucoreMediaGallery(c *gin.Context) {
 		common.ApiSuccess(c, pageInfo)
 		return
 	}
-	tasks, err := model.ListYucoreMediaTasks(userId, "", kind, model.YucoreMediaTaskStatusCompleted, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	tasks, err := model.ListYucoreMediaTasks(userId, "", kind, model.YucoreMediaTaskStatusCompleted, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), includeAdminSamples)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	total, _ := model.CountYucoreMediaTasks(userId, "", kind, model.YucoreMediaTaskStatusCompleted)
+	total, _ := model.CountYucoreMediaTasks(userId, "", kind, model.YucoreMediaTaskStatusCompleted, includeAdminSamples)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(buildYucoreMediaTaskResponses(tasks))
 	common.ApiSuccess(c, pageInfo)
@@ -1647,12 +1663,36 @@ func ServeYucoreMediaTaskAsset(c *gin.Context) {
 		c.String(http.StatusNotFound, "asset not found")
 		return
 	}
+	if denyYucoreMediaSampleAccess(c, task) {
+		return
+	}
 	assets := model.YucoreMediaTaskAssets(task)
 	if index >= len(assets) {
 		c.String(http.StatusNotFound, "asset not found")
 		return
 	}
 	asset := assets[index]
+	if asset.ManagedFileName != "" {
+		if !model.IsYucoreMediaSampleTask(task) {
+			c.String(http.StatusNotFound, "asset not found")
+			return
+		}
+		managedPath, err := yucoreMediaSafeUploadPath(task.UserId, asset.ManagedFileName)
+		if err != nil {
+			c.String(http.StatusNotFound, "asset not found")
+			return
+		}
+		info, err := os.Lstat(managedPath)
+		if err != nil || !info.Mode().IsRegular() {
+			c.String(http.StatusNotFound, "asset not found")
+			return
+		}
+		c.Header("Content-Type", "video/mp4")
+		c.Header("Cache-Control", "private, max-age=86400")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.File(managedPath)
+		return
+	}
 	if model.IsYucoreMediaMockTask(task) {
 		if model.GetYucoreMediaAdapterInfo().RequireRealAssets {
 			c.String(http.StatusBadGateway, "mock media assets are disabled")

@@ -23,6 +23,32 @@ var yucoreMediaSampleImportLocks sync.Map
 
 var errYucoreMediaSampleChecksumMismatch = errors.New("sample checksum mismatch")
 
+func denyYucoreMediaSampleAccess(c *gin.Context, task *model.YucoreMediaTask) bool {
+	if task == nil || !strings.HasPrefix(task.TaskId, model.YucoreMediaSampleTaskPrefix) {
+		return false
+	}
+	if c.GetInt("role") < common.RoleAdminUser || !model.IsYucoreMediaSampleTask(task) {
+		writeYucoreMediaTaskNotFound(c)
+		return true
+	}
+	return false
+}
+
+func rejectYucoreMediaSampleMutation(c *gin.Context, task *model.YucoreMediaTask) bool {
+	if denyYucoreMediaSampleAccess(c, task) {
+		return true
+	}
+	if model.IsYucoreMediaSampleTask(task) {
+		common.ApiErrorMsg(c, "managed sample tasks must be deleted through the sample rollback endpoint")
+		return true
+	}
+	return false
+}
+
+func writeYucoreMediaTaskNotFound(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "media task not found"})
+}
+
 func ImportYucoreMediaSample(c *gin.Context) {
 	if c.GetInt("role") < common.RoleAdminUser {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "administrator access is required"})

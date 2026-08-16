@@ -1847,13 +1847,13 @@ func ListYucoreUAGProxyMediaTasksWithHeaders(userId int, kind string, status str
 	return tasks[startIdx:end], total, nil
 }
 
-func ListYucoreMergedUAGProxyMediaTasks(userId int, sessionId string, kind string, status string, startIdx int, num int, upstreamHeaders YucoreMediaUAGProxyHeaders) ([]*YucoreMediaTask, int64, error) {
+func ListYucoreMergedUAGProxyMediaTasks(userId int, sessionId string, kind string, status string, startIdx int, num int, upstreamHeaders YucoreMediaUAGProxyHeaders, includeAdminSamples bool) ([]*YucoreMediaTask, int64, error) {
 	config := getYucoreMediaAdapterConfig()
 	pageSize := max(startIdx+num, 100)
 	if pageSize > 200 {
 		pageSize = 200
 	}
-	localTasks, localErr := ListYucoreMediaTasksWithHeaders(userId, sessionId, kind, status, 0, pageSize, upstreamHeaders)
+	localTasks, localErr := ListYucoreMediaTasksWithHeaders(userId, sessionId, kind, status, 0, pageSize, upstreamHeaders, includeAdminSamples)
 	if localErr != nil {
 		return nil, 0, localErr
 	}
@@ -2280,9 +2280,12 @@ func CreateYucoreMediaTaskWithHeaders(task *YucoreMediaTask, upstreamHeaders Yuc
 	return nil
 }
 
-func CountYucoreMediaTasks(userId int, sessionId string, kind string, status string) (int64, error) {
+func CountYucoreMediaTasks(userId int, sessionId string, kind string, status string, includeAdminSamples bool) (int64, error) {
 	var total int64
 	query := DB.Model(&YucoreMediaTask{}).Where("user_id = ?", userId)
+	if !includeAdminSamples {
+		query = excludeYucoreMediaSamples(query)
+	}
 	if sessionId != "" {
 		query = query.Where("session_id = ?", sessionId)
 	}
@@ -2296,13 +2299,16 @@ func CountYucoreMediaTasks(userId int, sessionId string, kind string, status str
 	return total, err
 }
 
-func ListYucoreMediaTasks(userId int, sessionId string, kind string, status string, startIdx int, num int) ([]*YucoreMediaTask, error) {
-	return ListYucoreMediaTasksWithHeaders(userId, sessionId, kind, status, startIdx, num, nil)
+func ListYucoreMediaTasks(userId int, sessionId string, kind string, status string, startIdx int, num int, includeAdminSamples bool) ([]*YucoreMediaTask, error) {
+	return ListYucoreMediaTasksWithHeaders(userId, sessionId, kind, status, startIdx, num, nil, includeAdminSamples)
 }
 
-func ListYucoreMediaTasksWithHeaders(userId int, sessionId string, kind string, status string, startIdx int, num int, upstreamHeaders YucoreMediaUAGProxyHeaders) ([]*YucoreMediaTask, error) {
+func ListYucoreMediaTasksWithHeaders(userId int, sessionId string, kind string, status string, startIdx int, num int, upstreamHeaders YucoreMediaUAGProxyHeaders, includeAdminSamples bool) ([]*YucoreMediaTask, error) {
 	var tasks []*YucoreMediaTask
 	query := DB.Where("user_id = ?", userId)
+	if !includeAdminSamples {
+		query = excludeYucoreMediaSamples(query)
+	}
 	if sessionId != "" {
 		query = query.Where("session_id = ?", sessionId)
 	}
@@ -2325,6 +2331,11 @@ func ListYucoreMediaTasksWithHeaders(userId int, sessionId string, kind string, 
 		}
 	}
 	return tasks, nil
+}
+
+func excludeYucoreMediaSamples(query *gorm.DB) *gorm.DB {
+	pattern := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(YucoreMediaSampleTaskPrefix) + "%"
+	return query.Where("task_id NOT LIKE ? ESCAPE '!'", pattern)
 }
 
 func GetYucoreMediaTaskByTaskId(taskId string, userId int) (*YucoreMediaTask, error) {

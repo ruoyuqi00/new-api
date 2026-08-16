@@ -149,3 +149,42 @@ func TestYucoreMediaSampleTaskPersistsCompletedWithoutBilling(t *testing.T) {
 	assert.Equal(t, checksum, metadata["sha256"])
 	assert.Equal(t, float64(4096), metadata["size"])
 }
+
+func TestYucoreMediaSampleQueryAccessExcludesSamplesFromRowsAndTotals(t *testing.T) {
+	originalDB := DB
+	db, err := gorm.Open(sqlite.Open("file:yucore_media_sample_query_access?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&YucoreMediaTask{}))
+	DB = db
+	t.Cleanup(func() { DB = originalDB })
+
+	checksum := strings.Repeat("e", 64)
+	sample, err := CreateYucoreMediaSampleTask(42, "seedance-2.0", checksum, 4096)
+	require.NoError(t, err)
+	ordinary := &YucoreMediaTask{
+		TaskId: "yu_ordinary_query_task", UserId: 42, Kind: "video", Mode: "text-to-video",
+		ModelId: "seedance-2.0", Status: YucoreMediaTaskStatusCompleted,
+	}
+	wildcardLookalike := &YucoreMediaTask{
+		TaskId: "yuxsampleynot-managed", UserId: 42, Kind: "video", Mode: "text-to-video",
+		ModelId: "seedance-2.0", Status: YucoreMediaTaskStatusCompleted,
+	}
+	require.NoError(t, db.Create(ordinary).Error)
+	require.NoError(t, db.Create(wildcardLookalike).Error)
+
+	visible, err := ListYucoreMediaTasks(42, "", "video", YucoreMediaTaskStatusCompleted, 0, 100, false)
+	require.NoError(t, err)
+	require.Len(t, visible, 2)
+	assert.ElementsMatch(t, []string{ordinary.TaskId, wildcardLookalike.TaskId}, []string{visible[0].TaskId, visible[1].TaskId})
+	visibleTotal, err := CountYucoreMediaTasks(42, "", "video", YucoreMediaTaskStatusCompleted, false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), visibleTotal)
+
+	withSamples, err := ListYucoreMediaTasks(42, "", "video", YucoreMediaTaskStatusCompleted, 0, 100, true)
+	require.NoError(t, err)
+	require.Len(t, withSamples, 3)
+	assert.ElementsMatch(t, []string{ordinary.TaskId, wildcardLookalike.TaskId, sample.TaskId}, []string{withSamples[0].TaskId, withSamples[1].TaskId, withSamples[2].TaskId})
+	withSamplesTotal, err := CountYucoreMediaTasks(42, "", "video", YucoreMediaTaskStatusCompleted, true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), withSamplesTotal)
+}
