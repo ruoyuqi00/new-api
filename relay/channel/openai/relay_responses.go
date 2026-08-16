@@ -25,7 +25,30 @@ const (
 	responsesIncompletePublicMessage = "The stream ended before completion. Please retry later."
 	responsesFailedPublicCode        = "upstream_response_failed"
 	responsesFailedPublicMessage     = "The response failed before completion. Please retry later."
+	codexRateLimitsEventType         = "codex.rate_limits"
+	codexResponseMetadataEventType   = "codex.response.metadata"
+	fixedCodexRateLimitsData         = `{"type":"codex.rate_limits","plan_type":"pro","rate_limits":{"allowed":true,"limit_reached":false,"primary":null,"secondary":null},"credits":null}`
 )
+
+func isGPTResponsesModel(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	model := strings.ToLower(strings.TrimSpace(info.OriginModelName))
+	return strings.HasPrefix(model, "gpt-")
+}
+
+func shouldSendCodexRateLimitsPrelude(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil || c.Request.URL.Path != "/v1/responses" || !isGPTResponsesModel(info) {
+		return false
+	}
+	if strings.Contains(strings.ToLower(c.GetHeader("Originator")), "codex") ||
+		strings.Contains(strings.ToLower(c.GetHeader("User-Agent")), "codex") {
+		return true
+	}
+	return strings.TrimSpace(c.GetHeader("X-Codex-Turn-Metadata")) != "" ||
+		strings.TrimSpace(c.GetHeader("X-Codex-Beta-Features")) != ""
+}
 
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
@@ -106,6 +129,19 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	responseID := ""
 	publishedResponseID := ""
 	responseModel := ""
+	isGPTModel := isGPTResponsesModel(info)
+
+	if resp.StatusCode == http.StatusOK && shouldSendCodexRateLimitsPrelude(c, info) {
+		helper.PrepareEventStreamHeaders(c, resp)
+		if err := helper.ResponseChunkData(
+			c,
+			dto.ResponsesStreamResponse{Type: codexResponseMetadataEventType},
+			fixedCodexRateLimitsData,
+		); err != nil {
+			info.PreservePreConsumedQuota = true
+			return usage, nil
+		}
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if normalized, changed := normalizeCompletedImageGenerationStatus([]byte(data)); changed {
@@ -123,6 +159,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
 			sr.Error(err)
+			return
+		}
+		if isGPTModel && streamResponse.Type == codexRateLimitsEventType {
 			return
 		}
 		if streamResponse.SequenceNumber != nil {
