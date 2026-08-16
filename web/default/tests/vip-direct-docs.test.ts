@@ -42,7 +42,7 @@ describe('VIP direct API documentation', () => {
     expect(docs).toContain('base_url = "https://vip.yuaiapi.com/v1"')
     expect(docs).toContain('$YUAPI_MEDIA_BASE_URL/images/generations')
     expect(docs).toContain('$YUAPI_MEDIA_BASE_URL/images/edits')
-    expect(docs).toContain('curl -X POST "$YUAPI_MEDIA_BASE_URL/videos"')
+    expect(docs).toContain('$YUAPI_MEDIA_BASE_URL/videos')
     expect(docs).toContain('curl "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID"')
     expect(docs).toContain(
       'curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content"'
@@ -70,19 +70,20 @@ describe('VIP direct API documentation', () => {
     expect(docs).toContain('YUAPI_BASE_URL="https://api.yuaiapi.com/v1"')
   })
 
-  it('documents Grok text, image, and video group boundaries', () => {
+  it('documents current text, image, and video boundaries', () => {
     expect(docs).toContain('`grok-4.5`')
     expect(docs).toContain('`grok-imagine-image`')
     expect(docs).toContain('`grok-imagine-image-quality`')
-    expect(docs).toContain('`grok-imagine-video-1.5-preview`')
+    expect(docs).toContain('`grok-video`')
+    expect(docs).toContain('`grok-video-1.5`')
     expect(docs).toContain('0.072')
-    expect(docs).toContain('0.78/秒')
-    expect(docs).toContain('11.70/15 秒')
-    expect(docs).toContain('最长 15 秒')
-    expect(docs).toContain('"seconds": "10"')
-    expect(docs).toContain('"image_urls": [')
+    expect(docs).toContain('0.9936')
+    expect(docs).toContain('2.0016')
+    expect(docs).toContain('"duration": 4')
+    expect(docs).toContain('"reference_image_urls": [')
     expect(docs).toContain('"aspect_ratio": "16:9"')
-    expect(docs).not.toContain('0.24/次')
-    expect(docs).not.toContain('只支持 5 秒图生视频')
+    expect(docs).not.toContain('grok-imagine-video-1.5-preview')
+    expect(docs).not.toContain('上游')
+    expect(docs).not.toContain('加价')
   })
 })
