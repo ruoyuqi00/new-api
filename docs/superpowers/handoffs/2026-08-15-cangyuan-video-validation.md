@@ -394,7 +394,62 @@ HTTP 200, and the public fingerprints remained
 zero Caddy 502 entries and zero application fatal, database, or Redis error
 entries. Production contained zero managed sample tasks and had 24% root-disk
 use. This audit made no server change. Commit `a262a341f` has been pushed but
-has not been built, staged, or deployed to production.
+had not yet been built or staged at the time of that read-only audit.
+
+## Media-asset candidate after sample scope reduction
+
+The user subsequently narrowed the release scope to a working video chain and
+explicitly declined regenerating or importing the ten provider samples. No paid
+generation request was sent, no sample file was imported, and the production
+managed-sample count remained zero.
+
+Commit `d6605a79a0ccb34c1d89e982f82b8b10058e8c53` combines the native-media
+authorization fix with a documentation correction that makes all six tutorial
+screenshots use explicit site paths. It was pushed before the server build. A
+uniquely tagged image was built from that commit, and its revision label matched
+the full source commit. The exact image and container identifiers remain only
+in the protected server-local release artifact.
+
+The final private candidate uses a loopback-only port and unique network aliases
+with no stable or public alias. It remained healthy with restart count zero.
+The current live application, retained rollback application, and Caddy also
+remained healthy with restart count zero. Caddy reached the candidate directly
+through its unique alias, but no Caddy route, reload, stable alias, or public
+traffic was changed.
+
+Private verification results:
+
+```text
+candidate API status                                               200
+desktop/mobile documentation browser tests                         2/2 PASS
+tutorial screenshot failures                                            0
+three-edition documentation contract                               PASS
+public pricing rows / target / canceled                       95 / 13 / 0
+exact target prices and both enabled groups                        PASS
+anonymous administrator import                                      401
+anonymous task-asset read                                            401
+managed production sample tasks                                       0
+candidate fatal/database/Redis errors                                 0
+Caddy-to-candidate private request                                 PASS
+```
+
+An initial candidate was discarded before public traffic because starting it
+on the isolated release network before the internal service network caused
+seven database-name-resolution restarts. The corrected candidate starts on the
+internal network first, then attaches the isolated network; it has restart count
+zero. The discarded candidate never owned a production alias.
+
+The protected release directory is mode `0700`; its redacted container
+inspection, image identifier, active Caddy baseline, network mapping, build log,
+scope declarations, and verification summary are mode `0600`. Every recorded
+checksum verifies. The sample-scope record states that import is disabled by the
+user and both sample counts are zero.
+
+After candidate verification, the primary and global public status endpoints
+still returned HTTP 200. Public fingerprints remained
+`index.8580691911.css` / `index.52ddaa4d5e.js`, and the preceding 30 minutes
+contained zero Caddy 502 responses. The candidate is ready for the final
+no-stop traffic guard, but traffic switching is not approved by this record.
 
 ## Remaining constraints
 
@@ -408,6 +463,6 @@ has not been built, staged, or deployed to production.
 3. Keep the retained production application, legacy channel rows, old image,
    stable-alias rollback script, and protected rollback artifacts until a
    separate cleanup approval is given.
-4. Production contains no administrator sample collection yet. Do not use the
-   synthetic fixtures. Obtain the original retained outputs or explicit paid
-   regeneration approval before preparing the sample-asset candidate.
+4. Production samples are deliberately out of scope. Do not generate, import,
+   or delete provider samples unless a later request explicitly reopens that
+   work. The empty sample collection does not block the media-chain cutover.

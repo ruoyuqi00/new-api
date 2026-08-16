@@ -528,6 +528,11 @@ git commit -m "ops: add private video sample importer"
 
 - [ ] **Step 1: Verify the source set without changing it**
 
+Scope amendment (2026-08-16): canceled by the user. The original provider
+files were unavailable, and the user explicitly declined regeneration and
+production import. Steps 2-7 remain valid local verification evidence; this
+unchecked source-file step is no longer a release gate.
+
 Resolve the user-approved source directory outside Git. Assert exactly ten `.mp4` files and no other import candidates. Compute names, sizes, MIME/container data, durations, and SHA-256 into an operator-local manifest. Do not move, rename, rewrite, or delete any source file.
 
 - [x] **Step 2: Run backend verification**
@@ -589,7 +594,7 @@ git commit -m "docs: record private sample asset verification"
 **Files:**
 - Modify: `docs/superpowers/handoffs/2026-08-15-cangyuan-video-validation.md`
 
-- [ ] **Step 1: Push the fully verified branch**
+- [x] **Step 1: Push the fully verified branch**
 
 ```powershell
 git push -u origin codex/cangyuan-video-refresh-20260815
@@ -597,27 +602,31 @@ git push -u origin codex/cangyuan-video-refresh-20260815
 
 Expected: remote branch HEAD equals local HEAD.
 
-- [ ] **Step 2: Re-audit production read-only**
+- [x] **Step 2: Re-audit production read-only**
 
 Over an interactive SSH session, resolve the current live container, retained rollback container, image IDs, restart counts, health, Caddy container and effective config, stable alias `yuapi-production-live`, attached release network, private bindings, database/Redis health, disk space, and current public static fingerprints. Runtime readback overrides older handoff names. Do not print or save environment secrets.
 
-- [ ] **Step 3: Capture scoped rollback artifacts**
+- [x] **Step 3: Capture scoped rollback artifacts**
 
 Create a new root-only server directory with mode `0700`. Save checksummed copies of only the active Caddy config, current live container inspect output with environment values redacted, image ID, network alias mapping, and the exact sample-task IDs/files that would be created. Use file mode `0600`. Do not dump the database or user tables.
 
-- [ ] **Step 4: Build and start the parallel candidate**
+- [x] **Step 4: Build and start the parallel candidate**
 
 Build a unique image tagged with the reviewed short commit. Start a uniquely named container on a new loopback-only port and attach it to the currently audited release network under a new candidate alias. Keep the live and rollback containers running/preserved, and keep every hostname referenced by any active Caddy generation reachable.
 
-- [ ] **Step 5: Verify the candidate privately**
+- [x] **Step 5: Verify the candidate privately**
 
-Before changing public routing, verify health/restart count, revision label, new static fingerprints, three docs URLs and locale selector, `docs:check` contract, admin import endpoint authorization, ordinary-user denial, one disposable MP4 import/idempotency/play/rollback cycle, database/Redis error counts, and Caddy-to-candidate connectivity. Do not use any active user's API Key or assets.
+Before changing public routing, verify health/restart count, revision label, new static fingerprints, three docs URLs and locale selector, `docs:check` contract, admin import endpoint authorization, ordinary-user denial, database/Redis error counts, and Caddy-to-candidate connectivity. Reuse the completed disposable local MP4 import/idempotency/play/rollback evidence; do not import a production sample after the user removed samples from scope. Do not use any active user's API Key or assets.
 
-- [ ] **Step 6: Record evidence and stop at the traffic gate**
+- [x] **Step 6: Record evidence and stop at the traffic gate**
 
-Append redacted candidate facts to the handoff. Present the audited old/candidate container identifiers, image digest, private port health, exact alias operation, Caddy reload validation, rollback operation, and the fact that the ten production samples have not yet been imported. Obtain explicit user approval before switching the stable alias or public traffic.
+Append redacted candidate facts to the handoff. Keep exact container identifiers and image digest in the protected server-local artifact; record private health, alias isolation, Caddy reachability, rollback readiness, and the user-canceled sample scope in Git. Obtain explicit user approval before switching the stable alias or public traffic.
 
-### Task 8: Hot cutover, production import, observation, and retained rollback
+### Task 8: Hot cutover, observation, and retained rollback
+
+Scope amendment (2026-08-16): production sample generation and import are
+canceled. A successful media-chain cutover must keep the production sample
+count at zero and must not spend upstream generation credit.
 
 **Files:**
 - Modify: `docs/superpowers/handoffs/2026-08-15-cangyuan-video-validation.md`
@@ -634,15 +643,18 @@ Attach `yuapi-production-live` to the candidate before detaching/remapping it fr
 
 Check public health, homepage, sign-in, `/keys`, pricing, Studio, Canvas, all three docs URLs, static fingerprints, restart counts, and aggregate Caddy 502/database/Redis errors. On failure, remap the stable alias to the retained old app while both remain running.
 
-- [ ] **Step 4: Import the ten production samples sequentially**
+- [ ] **Step 4: Preserve the empty production sample scope**
 
-Set `YUAPI_ADMIN_AUTH_HEADER` only in the current protected shell, run the importer with the approved outside-Git source directory and a root-only outside-Git result path, then immediately clear the environment value. Stop on the first failed item; do not delete successful prior items automatically.
+Do not set an administrator authorization value, run the importer, or call an
+upstream generation endpoint. Verify the managed sample count remains zero and
+that no sample file or task was created or deleted during the switch.
 
-Verify exactly ten response entries, ten unique task IDs, zero quota/balance change, ten owner-scoped completed sample tasks, ten byte-equal production copies, and `created=false` on a second dry idempotency pass.
+- [ ] **Step 5: Verify the public media authorization boundary**
 
-- [ ] **Step 5: Verify production permissions and Canvas behavior**
-
-As the importing administrator, verify the private collection contains exactly ten videos and one sample can be played, downloaded, added to Canvas, removed from Canvas, and still found in the library. Using a dedicated synthetic ordinary account, verify list/detail/content denial. Never use or inspect an active user's assets.
+Verify anonymous task-asset access remains denied and the public Studio and
+Canvas pages render normally. Do not borrow an active user's session, Key,
+balance, or assets; the authenticated play/download/Canvas behavior is covered
+by the completed isolated browser verification.
 
 - [ ] **Step 6: Observe and retain rollback**
 
@@ -658,4 +670,6 @@ git commit -m "docs: record video docs and sample release"
 git push
 ```
 
-Completion requires a clean worktree, pushed HEAD, three public docs editions, no privacy-scan findings, exactly ten administrator-only sample videos, unchanged original files, no production 502, and a live no-stop rollback target.
+Completion requires a clean worktree, pushed HEAD, three public docs editions,
+no privacy-scan findings, zero production sample imports, no production 502,
+and a live no-stop rollback target.
