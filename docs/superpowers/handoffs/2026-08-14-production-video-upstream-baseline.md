@@ -1,5 +1,11 @@
 # YuAPI Production Baseline and Video Upstream Handoff
 
+> Runtime update: the container, image, port, Caddy target, and rollback facts
+> in this document were superseded on 2026-08-16. Use
+> `docs/superpowers/handoffs/2026-08-16-gpt-codex-prelude-production.md` for
+> the current production runtime baseline. Keep this document as historical
+> context for the video integration and stable-alias constraints.
+
 > Status: active handoff baseline
 >
 > Recorded: 2026-08-14 (Asia/Shanghai)
