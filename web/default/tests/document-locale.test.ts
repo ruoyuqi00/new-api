@@ -23,7 +23,7 @@ import {
   readApiDocsLocale,
   resolveApiDocsLocale,
   writeApiDocsLocale,
-} from './document-locale'
+} from '../src/features/docs/document-locale'
 
 describe('API documentation locale', () => {
   test('prefers a valid remembered choice', () => {

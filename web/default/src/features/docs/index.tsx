@@ -18,18 +18,27 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { BookOpen, CircleDollarSign, FileText } from 'lucide-react'
+import { BookOpen, CircleDollarSign, FileText, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/ui/markdown'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
-const apiDocsPath = '/developer-docs/yucore-api.md'
+import {
+  API_DOCS_LOCALES,
+  type ApiDocsLocale,
+  type ApiDocsLocaleConfig,
+  readApiDocsLocale,
+  resolveApiDocsLocale,
+  writeApiDocsLocale,
+} from './document-locale'
 
-async function fetchApiDocs(): Promise<string> {
-  const response = await fetch(apiDocsPath)
+async function fetchApiDocs(path: string): Promise<string> {
+  const response = await fetch(path)
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`)
   }
@@ -37,12 +46,33 @@ async function fetchApiDocs(): Promise<string> {
 }
 
 export function ApiDocs() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const [docsLocale, setDocsLocale] = useState<ApiDocsLocale>(() =>
+    resolveApiDocsLocale(
+      readApiDocsLocale(),
+      i18n.resolvedLanguage ?? i18n.language,
+      typeof navigator === 'undefined' ? [] : navigator.languages
+    )
+  )
+  const docsConfig = API_DOCS_LOCALES[docsLocale]
   const docsQuery = useQuery({
-    queryKey: ['public-api-docs'],
-    queryFn: fetchApiDocs,
+    queryKey: ['public-api-docs', docsLocale],
+    queryFn: () => fetchApiDocs(docsConfig.path),
     staleTime: Number.POSITIVE_INFINITY,
   })
+
+  function handleDocsLocaleChange(values: unknown[]): void {
+    const nextLocale = values[0]
+    if (
+      typeof nextLocale !== 'string' ||
+      !(nextLocale in API_DOCS_LOCALES)
+    ) {
+      return
+    }
+    const locale = nextLocale as ApiDocsLocale
+    setDocsLocale(locale)
+    writeApiDocsLocale(locale)
+  }
 
   return (
     <PublicLayout showMainContainer={false} showYuCoreBackground>
@@ -58,12 +88,38 @@ export function ApiDocs() {
             </div>
           </div>
 
-          <div className='mt-5 flex gap-2 lg:grid'>
+          <ToggleGroup
+            value={[docsLocale]}
+            onValueChange={handleDocsLocaleChange}
+            variant='outline'
+            size='sm'
+            spacing={0}
+            aria-label={t('Documentation language')}
+            className='mt-5 grid w-full grid-cols-3'
+          >
+            {(
+              Object.entries(API_DOCS_LOCALES) as Array<
+                [ApiDocsLocale, ApiDocsLocaleConfig]
+              >
+            ).map(([locale, config]) => (
+              <ToggleGroupItem
+                key={locale}
+                value={locale}
+                className='min-w-0 px-2'
+              >
+                <span className='truncate'>{t(config.labelKey)}</span>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+
+          <div className='mt-3 flex gap-2 lg:grid'>
             <Button
               size='sm'
               variant='outline'
               className='justify-start border-white/10 bg-white/[0.035] text-white hover:bg-white/[0.08]'
-              render={<a href={apiDocsPath} target='_blank' rel='noreferrer' />}
+              render={
+                <a href={docsConfig.path} target='_blank' rel='noreferrer' />
+              }
             >
               <FileText data-icon='inline-start' />
               Markdown
@@ -94,8 +150,19 @@ export function ApiDocs() {
           )}
 
           {docsQuery.isError && (
-            <div className='mx-auto max-w-4xl border-l-2 border-rose-300/50 py-2 pl-4 text-sm text-rose-100'>
-              {t('Failed to load')}: {apiDocsPath}
+            <div className='mx-auto flex max-w-4xl flex-wrap items-center gap-3 border-l-2 border-rose-300/50 py-2 pl-4 text-sm text-rose-100'>
+              <span>
+                {t('Failed to load')}: {docsConfig.path}
+              </span>
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                onClick={() => docsQuery.refetch()}
+              >
+                <RefreshCw data-icon='inline-start' />
+                {t('Retry')}
+              </Button>
             </div>
           )}
 
