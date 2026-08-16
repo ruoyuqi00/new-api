@@ -1252,6 +1252,10 @@ func yucoreMediaParseMPEGFrame(data []byte) (yucoreMediaMPEGFrame, bool) {
 }
 
 func storeYucoreMediaUpload(reader io.Reader, finalPath string, maxBytes int64) (written int64, returnErr error) {
+	return storeYucoreMediaUploadValidated(reader, finalPath, maxBytes, nil)
+}
+
+func storeYucoreMediaUploadValidated(reader io.Reader, finalPath string, maxBytes int64, validate func(written int64) error) (written int64, returnErr error) {
 	ownerDir := filepath.Dir(finalPath)
 	if err := os.MkdirAll(ownerDir, 0o700); err != nil {
 		return 0, err
@@ -1283,6 +1287,11 @@ func storeYucoreMediaUpload(reader io.Reader, finalPath string, maxBytes int64) 
 	}
 	if err := tempFile.Close(); err != nil {
 		return written, err
+	}
+	if validate != nil {
+		if err := validate(written); err != nil {
+			return written, err
+		}
 	}
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		return written, err

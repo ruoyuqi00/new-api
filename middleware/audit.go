@@ -94,6 +94,10 @@ var auditRouteActions = map[string]string{
 
 	// 日志
 	"DELETE /api/log/": "log.clear",
+
+	// YuCore 媒体示例素材
+	"POST /api/yucore/media/admin/sample-assets":            "yucore.media_sample_import",
+	"DELETE /api/yucore/media/admin/sample-assets/:task_id": "yucore.media_sample_delete",
 }
 
 // beginAdminAudit 在管理/root 写操作进入 handler 前包装 ResponseWriter，

@@ -266,6 +266,12 @@ func SetApiRouter(router *gin.Engine) {
 				mediaRoute.GET("/health", controller.GetYucoreMediaHealth)
 				mediaRoute.GET("/gallery", controller.ListYucoreMediaGallery)
 				mediaRoute.POST("/uploads", controller.UploadYucoreMediaReference)
+				mediaAdminRoute := mediaRoute.Group("/admin")
+				mediaAdminRoute.Use(middleware.AdminAuth())
+				{
+					mediaAdminRoute.POST("/sample-assets", controller.ImportYucoreMediaSample)
+					mediaAdminRoute.DELETE("/sample-assets/:task_id", controller.DeleteYucoreMediaSample)
+				}
 				mediaTasksRoute := mediaRoute.Group("/tasks")
 				{
 					mediaTasksRoute.GET("", controller.ListYucoreMediaTasks)
