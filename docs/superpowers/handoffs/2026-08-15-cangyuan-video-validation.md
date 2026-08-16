@@ -384,6 +384,18 @@ verification. Production sample import remains blocked until the original ten
 files are supplied or a separate approval explicitly authorizes regenerating
 the ten already completed paid tasks.
 
+After the local commits were pushed, a production read-only audit was repeated
+at 2026-08-16 17:26 (Asia/Shanghai). The current application and retained
+rollback application were both healthy with restart count zero. Caddy retained
+its original start time and restart count zero; its persisted configuration
+validated successfully. The primary and global status endpoints both returned
+HTTP 200, and the public fingerprints remained
+`index.8580691911.css` / `index.52ddaa4d5e.js`. The prior 30 minutes contained
+zero Caddy 502 entries and zero application fatal, database, or Redis error
+entries. Production contained zero managed sample tasks and had 24% root-disk
+use. This audit made no server change. Commit `a262a341f` has been pushed but
+has not been built, staged, or deployed to production.
+
 ## Remaining constraints
 
 1. `grok-video`, `grok-video-1.5`, and `sd8-seedance-2.0` remain exposed under
