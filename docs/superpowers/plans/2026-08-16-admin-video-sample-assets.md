@@ -530,7 +530,7 @@ git commit -m "ops: add private video sample importer"
 
 Resolve the user-approved source directory outside Git. Assert exactly ten `.mp4` files and no other import candidates. Compute names, sizes, MIME/container data, durations, and SHA-256 into an operator-local manifest. Do not move, rename, rewrite, or delete any source file.
 
-- [ ] **Step 2: Run backend verification**
+- [x] **Step 2: Run backend verification**
 
 ```powershell
 go test ./model ./controller ./middleware -run 'YucoreMediaSample|YucoreMediaUpload|ServeYucoreMedia|AdminAudit' -count=1
@@ -540,7 +540,7 @@ go test -p 1 ./... -count=1
 
 Expected: all packages PASS.
 
-- [ ] **Step 3: Run frontend and operator-tool verification**
+- [x] **Step 3: Run frontend and operator-tool verification**
 
 ```powershell
 Set-Location web/default
@@ -556,11 +556,11 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Import all ten into a disposable local admin account**
+- [x] **Step 4: Import all ten into a disposable local admin account**
 
 Start the application with a temporary SQLite database and temporary `YUCORE_MEDIA_UPLOAD_DIR`. Use a synthetic admin authorization value and the operator tool. Verify import count 10, `created=true` for the first run, `created=false` for the second run, zero quota change, ten completed zero-cost tasks, and byte-for-byte checksum equality.
 
-- [ ] **Step 5: Verify browser and permission behavior**
+- [x] **Step 5: Verify browser and permission behavior**
 
 Using Playwright desktop and mobile:
 
@@ -571,11 +571,11 @@ Using Playwright desktop and mobile:
 - After demoting the owner below admin in the disposable DB, the former owner cannot list or read samples.
 - Restoring the role restores access without rewriting files.
 
-- [ ] **Step 6: Verify exact rollback locally**
+- [x] **Step 6: Verify exact rollback locally**
 
 Run manifest rollback. Assert the ten imported task rows and ten managed copies are gone, while all ten original source files and their SHA-256 values remain unchanged. Assert ordinary test tasks/uploads remain.
 
-- [ ] **Step 7: Record redacted evidence and commit**
+- [x] **Step 7: Record redacted evidence and commit**
 
 Append test counts, local import/idempotency/rollback counts, checksum equality count, browser pass counts, and source-preserved confirmation. Do not record auth, user IDs, absolute source paths, production paths, or private URLs.
 

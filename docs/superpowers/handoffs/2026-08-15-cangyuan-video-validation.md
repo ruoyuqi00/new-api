@@ -326,6 +326,64 @@ restart count zero, zero Caddy 502 responses, zero database/Redis errors, and
 zero fatal candidate errors. Server-local checksummed rollback artifacts now
 cover both the scoped database restore and a no-stop stable-alias handback.
 
+## Administrator sample asset local verification
+
+On 2026-08-16, the private sample import workflow was exercised against an
+isolated application, disposable database, disposable accounts, and ten
+one-second synthetic MP4 fixtures. These fixtures verify product behavior only;
+they are not provider outputs and must never be imported into production.
+
+The first sequential import created 10/10 completed, zero-cost tasks. A second
+import returned the same ten task identities with `created=false`, proving
+idempotency. Quota remained unchanged. Full-file and Range responses matched
+all ten source checksums.
+
+Permission checks covered an administrator, an ordinary user, and a temporary
+administrator demotion. The administrator could list, inspect, stream, and
+download all ten samples. The ordinary user and demoted owner received no
+sample list entries and could not read sample detail or content. Restoring the
+administrator role restored access without rewriting any managed file.
+
+Browser verification covered desktop and mobile viewports. Both rendered ten
+playable videos with no media errors, page errors, or horizontal overflow. The
+desktop flow downloaded an MP4 with the expected public filename, placed the
+sample on Canvas, played it there, removed only the Canvas node, and then still
+showed all ten gallery samples.
+
+That browser run exposed and then verified a native-media authentication fix in
+commit `a262a341f`. Native `<video>` and download requests cannot attach the
+dashboard Authorization header. Media reads now use a distinct 15-minute,
+HttpOnly, Secure-in-production, SameSite=Strict cookie scoped to task assets.
+The cookie is accepted only for `GET` and `HEAD` asset reads, remains bound to a
+live dashboard session, and cannot authenticate as a dashboard bearer token.
+Existing ownership, current-role, and sample mutation guards remain unchanged.
+
+The manifest rollback removed 10/10 sample tasks and 10/10 managed copies. The
+ten source hashes remained unchanged and an unrelated ordinary upload remained
+present. After rollback, the isolated task and gallery counts were both zero.
+
+Fresh verification after the authentication fix:
+
+```text
+focused service/middleware/router/controller tests                 PASS
+go test -p 1 ./... -count=1                                        PASS
+frontend docs/gallery/locale tests                         13/13 PASS
+operator importer tests                                      5/5 PASS
+operator importer assertions                               66/66 PASS
+three-edition documentation check                                PASS
+TypeScript typecheck                                               PASS
+default frontend production build                                 PASS
+git diff --check                                                   PASS
+```
+
+The original retained provider videos could not be recovered from local
+operator storage or the production host. Stored historical object references
+no longer returned media. No paid task was repeated, no production sample was
+imported, and no production route or runtime was changed during this local
+verification. Production sample import remains blocked until the original ten
+files are supplied or a separate approval explicitly authorizes regenerating
+the ten already completed paid tasks.
+
 ## Remaining constraints
 
 1. `grok-video`, `grok-video-1.5`, and `sd8-seedance-2.0` remain exposed under
@@ -338,3 +396,6 @@ cover both the scoped database restore and a no-stop stable-alias handback.
 3. Keep the retained production application, legacy channel rows, old image,
    stable-alias rollback script, and protected rollback artifacts until a
    separate cleanup approval is given.
+4. Production contains no administrator sample collection yet. Do not use the
+   synthetic fixtures. Obtain the original retained outputs or explicit paid
+   regeneration approval before preparing the sample-asset candidate.
