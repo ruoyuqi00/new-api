@@ -133,6 +133,7 @@ import {
 } from '../api/studio'
 import { YUCORE_STUDIO_NAME } from '../data/content'
 import { modelsForKind, resolveMediaSelection } from '../lib/media-catalog'
+import { splitMediaGalleryTasks } from '../lib/media-gallery'
 import { YucoreBrandMark } from './yucore-brand-mark'
 import { YucorePageShell } from './yucore-page-shell'
 
@@ -1354,6 +1355,10 @@ export function YucoreStudioWorkspace({
       return true
     })
   }, [galleryTasks, tasks])
+  const galleryGroups = useMemo(
+    () => splitMediaGalleryTasks(completedTasks),
+    [completedTasks]
+  )
   const selectedNode = useMemo(
     () =>
       selectedNodeId
@@ -5836,10 +5841,46 @@ export function YucoreStudioWorkspace({
                     </Button>
                   </div>
                 </div>
-                <AssetGrid
-                  tasks={completedTasks}
-                  onSendToCanvas={addAssetToCanvas}
-                />
+                {galleryGroups.samples.length > 0 ? (
+                  <div className='space-y-10'>
+                    <section aria-labelledby='video-model-examples-heading'>
+                      <div className='mb-4'>
+                        <h2
+                          id='video-model-examples-heading'
+                          className='text-lg font-semibold text-white'
+                        >
+                          {t('Video model examples')}
+                        </h2>
+                        <p className='mt-1 text-sm text-white/48'>
+                          {t(
+                            'Verified private examples available only to administrators.'
+                          )}
+                        </p>
+                      </div>
+                      <AssetGrid
+                        tasks={galleryGroups.samples}
+                        onSendToCanvas={addAssetToCanvas}
+                      />
+                    </section>
+                    <section aria-labelledby='personal-generated-assets-heading'>
+                      <h2
+                        id='personal-generated-assets-heading'
+                        className='mb-4 text-lg font-semibold text-white'
+                      >
+                        {t('Your generated assets')}
+                      </h2>
+                      <AssetGrid
+                        tasks={galleryGroups.personal}
+                        onSendToCanvas={addAssetToCanvas}
+                      />
+                    </section>
+                  </div>
+                ) : (
+                  <AssetGrid
+                    tasks={completedTasks}
+                    onSendToCanvas={addAssetToCanvas}
+                  />
+                )}
               </section>
             )}
           </main>
