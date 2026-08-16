@@ -343,6 +343,22 @@ func TestCopyCodexSSEHeaders(t *testing.T) {
 	assert.Empty(t, recorder.Header().Get("X-Unrelated"))
 }
 
+func TestPrepareEventStreamHeadersIsIdempotent(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	resp := &http.Response{Header: http.Header{
+		"X-Reasoning-Included": {"true"},
+		"X-Codex-Turn-State":   {"state-a", "state-b"},
+	}}
+
+	PrepareEventStreamHeaders(c, resp)
+	PrepareEventStreamHeaders(c, resp)
+
+	require.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
+	require.Equal(t, "true", recorder.Header().Get("X-Reasoning-Included"))
+	require.Equal(t, []string{"state-a", "state-b"}, recorder.Header().Values("X-Codex-Turn-State"))
+}
+
 func TestNewStreamScanner_AllowsLargeStreamLine(t *testing.T) {
 	oldBufferMB := constant.StreamScannerMaxBufferMB
 	constant.StreamScannerMaxBufferMB = 1
