@@ -20,6 +20,7 @@ const (
 	LoginSessionTTL       = 30 * 24 * time.Hour
 	RefreshReplayWindow   = 30 * time.Second
 	accessTokenUse        = "access"
+	yucoreMediaAccessUse  = "yucore_media_access"
 	securityProofTokenUse = "security_proof"
 	authTokenIssuer       = "new-api"
 	authTokenAudience     = "new-api-dashboard"
@@ -58,13 +59,21 @@ func authSigningKey(purpose string) []byte {
 }
 
 func IssueAccessToken(identity AuthIdentity) (string, int64, error) {
+	return issueIdentityToken(identity, accessTokenUse, AccessTokenTTL)
+}
+
+func IssueYucoreMediaAccessToken(identity AuthIdentity) (string, int64, error) {
+	return issueIdentityToken(identity, yucoreMediaAccessUse, AccessTokenTTL)
+}
+
+func issueIdentityToken(identity AuthIdentity, tokenUse string, ttl time.Duration) (string, int64, error) {
 	if identity.UserID <= 0 || identity.SessionID == "" || identity.UserAuthVersion <= 0 || identity.SessionVersion <= 0 {
 		return "", 0, ErrAuthTokenInvalid
 	}
 	now := time.Now()
-	expiresAt := now.Add(AccessTokenTTL)
+	expiresAt := now.Add(ttl)
 	claims := authClaims{
-		TokenUse:        accessTokenUse,
+		TokenUse:        tokenUse,
 		SessionID:       identity.SessionID,
 		UserAuthVersion: identity.UserAuthVersion,
 		SessionVersion:  identity.SessionVersion,
@@ -78,12 +87,20 @@ func IssueAccessToken(identity AuthIdentity) (string, int64, error) {
 			ID:        uuid.NewString(),
 		},
 	}
-	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(authSigningKey(accessTokenUse))
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(authSigningKey(tokenUse))
 	return signed, expiresAt.Unix(), err
 }
 
 func ParseAccessToken(raw string) (AuthIdentity, error) {
-	claims, err := parseAuthClaims(raw, accessTokenUse, authSigningKey(accessTokenUse))
+	return parseIdentityToken(raw, accessTokenUse)
+}
+
+func ParseYucoreMediaAccessToken(raw string) (AuthIdentity, error) {
+	return parseIdentityToken(raw, yucoreMediaAccessUse)
+}
+
+func parseIdentityToken(raw, tokenUse string) (AuthIdentity, error) {
+	claims, err := parseAuthClaims(raw, tokenUse, authSigningKey(tokenUse))
 	if err != nil {
 		return AuthIdentity{}, err
 	}
@@ -121,7 +138,7 @@ func ParseDashboardAccessToken(raw string) (identity AuthIdentity, internal bool
 			break
 		}
 	}
-	knownTokenUse := claims.TokenUse == accessTokenUse || claims.TokenUse == securityProofTokenUse
+	knownTokenUse := claims.TokenUse == accessTokenUse || claims.TokenUse == yucoreMediaAccessUse || claims.TokenUse == securityProofTokenUse
 	if claims.Issuer != authTokenIssuer || !audienceMatches || !knownTokenUse {
 		return AuthIdentity{}, false, nil
 	}

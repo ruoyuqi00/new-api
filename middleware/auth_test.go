@@ -252,3 +252,112 @@ func TestTryUserAuthCredentialClassification(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, databaseFailureResponse.Code)
 	assert.Contains(t, databaseFailureResponse.Body.String(), "AUTH_INTERNAL_ERROR")
 }
+
+func TestTryYucoreMediaTaskAssetAuthOnlyAcceptsCookieForReadAssets(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	gin.SetMode(gin.TestMode)
+	user := createMiddlewarePATUser(t, "media-cookie-user", "media-cookie-pat")
+	now := time.Now().Unix()
+	session := &model.UserSession{
+		SID:             "media-cookie-session",
+		UserID:          user.Id,
+		Version:         1,
+		UserAuthVersion: user.AuthVersion,
+		Status:          model.UserSessionStatusActive,
+		RefreshHash:     "media-cookie-refresh-hash",
+		LoginMethod:     "password",
+		LastActiveAt:    now,
+		ExpiresAt:       now + 3600,
+	}
+	require.NoError(t, model.CreateUserSession(session))
+	identity := service.AuthIdentity{
+		UserID:          user.Id,
+		SessionID:       session.SID,
+		UserAuthVersion: session.UserAuthVersion,
+		SessionVersion:  session.Version,
+	}
+	mediaToken, _, err := service.IssueYucoreMediaAccessToken(identity)
+	require.NoError(t, err)
+
+	router := gin.New()
+	handler := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"id": c.GetInt("id")}) }
+	router.GET("/api/yucore/media/tasks/:task_id/assets/:index", TryYucoreMediaTaskAssetAuth(), handler)
+	router.HEAD("/api/yucore/media/tasks/:task_id/assets/:index", TryYucoreMediaTaskAssetAuth(), handler)
+	router.POST("/api/yucore/media/tasks/:task_id/assets/:index", TryYucoreMediaTaskAssetAuth(), handler)
+	router.GET("/api/yucore/media/gallery", TryYucoreMediaTaskAssetAuth(), handler)
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		cookie     bool
+		tampered   bool
+		bearer     bool
+		wantStatus int
+		wantUserID int
+	}{
+		{name: "get asset", method: http.MethodGet, path: "/api/yucore/media/tasks/task/assets/0", cookie: true, wantStatus: http.StatusOK, wantUserID: user.Id},
+		{name: "head asset", method: http.MethodHead, path: "/api/yucore/media/tasks/task/assets/0", cookie: true, wantStatus: http.StatusOK, wantUserID: user.Id},
+		{name: "post asset", method: http.MethodPost, path: "/api/yucore/media/tasks/task/assets/0", cookie: true, wantStatus: http.StatusOK},
+		{name: "outside asset path", method: http.MethodGet, path: "/api/yucore/media/gallery", cookie: true, wantStatus: http.StatusOK},
+		{name: "tampered cookie", method: http.MethodGet, path: "/api/yucore/media/tasks/task/assets/0", cookie: true, tampered: true, wantStatus: http.StatusUnauthorized},
+		{name: "media token as bearer", method: http.MethodGet, path: "/api/yucore/media/tasks/task/assets/0", bearer: true, wantStatus: http.StatusUnauthorized},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, nil)
+			if test.cookie {
+				cookieToken := mediaToken
+				if test.tampered {
+					cookieToken = tamperDashboardToken(cookieToken)
+				}
+				request.AddCookie(&http.Cookie{Name: service.YucoreMediaAccessCookieName, Value: cookieToken})
+			}
+			if test.bearer {
+				request.Header.Set("Authorization", "Bearer "+mediaToken)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			assert.Equal(t, test.wantStatus, response.Code)
+			if test.method == http.MethodHead || test.wantStatus != http.StatusOK {
+				return
+			}
+			var body struct {
+				ID int `json:"id"`
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+			assert.Equal(t, test.wantUserID, body.ID)
+		})
+	}
+
+	issuerRouter := gin.New()
+	issuerRouter.GET("/api/yucore/media/gallery", UserAuth(), WriteYucoreMediaAccessCookie(), handler)
+	issuerRouter.POST("/api/yucore/media/tasks", UserAuth(), WriteYucoreMediaAccessCookie(), handler)
+	accessToken, _, err := service.IssueAccessToken(identity)
+	require.NoError(t, err)
+	issuerTests := []struct {
+		name       string
+		method     string
+		path       string
+		token      string
+		wantCookie bool
+	}{
+		{name: "session get", method: http.MethodGet, path: "/api/yucore/media/gallery", token: accessToken, wantCookie: true},
+		{name: "pat get", method: http.MethodGet, path: "/api/yucore/media/gallery", token: "media-cookie-pat"},
+		{name: "session post", method: http.MethodPost, path: "/api/yucore/media/tasks", token: accessToken},
+	}
+	for _, test := range issuerTests {
+		t.Run("issuer "+test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, nil)
+			request.Header.Set("Authorization", "Bearer "+test.token)
+			response := httptest.NewRecorder()
+			issuerRouter.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusOK, response.Code)
+			found := false
+			for _, cookie := range response.Result().Cookies() {
+				found = found || cookie.Name == service.YucoreMediaAccessCookieName
+			}
+			assert.Equal(t, test.wantCookie, found)
+		})
+	}
+}

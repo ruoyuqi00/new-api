@@ -89,6 +89,61 @@ func TryUserAuth() func(c *gin.Context) {
 	}
 }
 
+func TryYucoreMediaTaskAssetAuth() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		user, identity, credentialKind, err := classifyDashboardCredential(c)
+		if err != nil {
+			writeDashboardAuthError(c, err)
+			return
+		}
+		if credentialKind == dashboardCredentialUnmatched && strings.TrimSpace(c.GetHeader("Authorization")) == "" && isYucoreMediaTaskAssetRead(c.Request) {
+			rawToken, cookieErr := c.Cookie(service.YucoreMediaAccessCookieName)
+			if cookieErr == nil {
+				identity, err = service.ParseYucoreMediaAccessToken(rawToken)
+				if err == nil {
+					_, user, err = service.ValidateLoginSession(identity)
+				}
+				if err != nil {
+					writeDashboardAuthError(c, err)
+					return
+				}
+				credentialKind = dashboardCredentialInternal
+			}
+		}
+		if credentialKind != dashboardCredentialUnmatched {
+			setDashboardAuthContext(c, user, identity, credentialKind == dashboardCredentialPAT)
+		}
+		c.Next()
+	}
+}
+
+func WriteYucoreMediaAccessCookie() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
+			if identity, ok := GetSessionAuthIdentity(c); ok {
+				if err := service.WriteYucoreMediaAccessCookie(c, identity); err != nil {
+					writeDashboardAuthError(c, err)
+					return
+				}
+			}
+		}
+		c.Next()
+	}
+}
+
+func isYucoreMediaTaskAssetRead(request *http.Request) bool {
+	if request == nil || (request.Method != http.MethodGet && request.Method != http.MethodHead) {
+		return false
+	}
+	const prefix = "/api/yucore/media/tasks/"
+	relative := strings.TrimPrefix(request.URL.Path, prefix)
+	if relative == request.URL.Path {
+		return false
+	}
+	taskEnd := strings.IndexByte(relative, '/')
+	return taskEnd > 0 && strings.HasPrefix(relative[taskEnd:], "/assets/")
+}
+
 func UserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		authHelper(c, common.RoleCommonUser)

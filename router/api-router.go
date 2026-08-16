@@ -237,8 +237,10 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			yucoreMediaAssetRoute.GET("/uploads/:user_id/:file", controller.ServeYucoreMediaUploadedReference)
 			yucoreMediaAssetRoute.GET("/upstream-assets/*path", controller.ServeYucoreMediaUpstreamAsset)
-			yucoreMediaAssetRoute.GET("/tasks/:task_id/assets/:index", controller.ServeYucoreMediaTaskAsset)
 		}
+		yucoreMediaTaskAssetRoute := apiRouter.Group("/yucore/media/tasks")
+		yucoreMediaTaskAssetRoute.Use(middleware.TryYucoreMediaTaskAssetAuth())
+		yucoreMediaTaskAssetRoute.GET("/:task_id/assets/:index", controller.ServeYucoreMediaTaskAsset)
 		yucoreRoute := apiRouter.Group("/yucore")
 		yucoreRoute.Use(middleware.UserAuth())
 		{
@@ -258,6 +260,7 @@ func SetApiRouter(router *gin.Engine) {
 			}
 
 			mediaRoute := yucoreRoute.Group("/media")
+			mediaRoute.Use(middleware.WriteYucoreMediaAccessCookie())
 			{
 				mediaRoute.GET("/catalog", controller.GetYucoreMediaCatalog)
 				mediaRoute.GET("/models", controller.ListYucoreMediaModels)

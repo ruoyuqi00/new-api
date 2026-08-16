@@ -13,7 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const RefreshCookieName = "new_api_refresh"
+const (
+	RefreshCookieName           = "new_api_refresh"
+	YucoreMediaAccessCookieName = "new_api_yucore_media_access"
+)
 
 var (
 	ErrLoginSessionInvalid  = errors.New("login session is invalid")
@@ -302,6 +305,29 @@ func WriteRefreshCookie(c *gin.Context, rawToken string) {
 		Secure:   common.SessionCookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	})
+}
+
+func WriteYucoreMediaAccessCookie(c *gin.Context, identity AuthIdentity) error {
+	rawToken, expiresAtUnix, err := IssueYucoreMediaAccessToken(identity)
+	if err != nil {
+		return err
+	}
+	expiresAt := time.Unix(expiresAtUnix, 0)
+	maxAge := int(time.Until(expiresAt) / time.Second)
+	if maxAge < 1 {
+		maxAge = 1
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     YucoreMediaAccessCookieName,
+		Value:    rawToken,
+		Path:     "/api/yucore/media/tasks/",
+		MaxAge:   maxAge,
+		Expires:  expiresAt,
+		HttpOnly: true,
+		Secure:   common.SessionCookieSecure,
+		SameSite: http.SameSiteStrictMode,
+	})
+	return nil
 }
 
 func ClearRefreshCookie(c *gin.Context) {

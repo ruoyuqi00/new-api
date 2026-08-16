@@ -36,6 +36,25 @@ func TestAccessTokenRoundTripAndPurposeIsolation(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAuthTokenInvalid)
 }
 
+func TestMediaAccessTokenRoundTripAndDashboardIsolation(t *testing.T) {
+	useTestSessionSecret(t)
+	identity := AuthIdentity{UserID: 42, SessionID: "session-1", UserAuthVersion: 3, SessionVersion: 2}
+
+	token, expiresAt, err := IssueYucoreMediaAccessToken(identity)
+	require.NoError(t, err)
+	assert.Positive(t, expiresAt)
+
+	parsed, err := ParseYucoreMediaAccessToken(token)
+	require.NoError(t, err)
+	assert.Equal(t, identity, parsed)
+
+	_, err = ParseAccessToken(token)
+	assert.ErrorIs(t, err, ErrAuthTokenInvalid)
+	_, internal, err := ParseDashboardAccessToken(token)
+	assert.True(t, internal, "a media token must never fall through to PAT authentication")
+	assert.ErrorIs(t, err, ErrAuthTokenInvalid)
+}
+
 func TestAccessTokenRejectsTampering(t *testing.T) {
 	useTestSessionSecret(t)
 	identity := AuthIdentity{UserID: 42, SessionID: "session-1", UserAuthVersion: 1, SessionVersion: 1}

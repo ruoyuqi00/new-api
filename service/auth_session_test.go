@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,35 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestWriteYucoreMediaAccessCookieIsPrivateAndPathScoped(t *testing.T) {
+	useTestSessionSecret(t)
+	previousSecure := common.SessionCookieSecure
+	common.SessionCookieSecure = true
+	t.Cleanup(func() { common.SessionCookieSecure = previousSecure })
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	identity := AuthIdentity{UserID: 42, SessionID: "session-1", UserAuthVersion: 3, SessionVersion: 2}
+	require.NoError(t, WriteYucoreMediaAccessCookie(context, identity))
+
+	response := recorder.Result()
+	t.Cleanup(func() { require.NoError(t, response.Body.Close()) })
+	cookies := response.Cookies()
+	require.Len(t, cookies, 1)
+	cookie := cookies[0]
+	assert.Equal(t, YucoreMediaAccessCookieName, cookie.Name)
+	assert.Equal(t, "/api/yucore/media/tasks/", cookie.Path)
+	assert.True(t, cookie.HttpOnly)
+	assert.True(t, cookie.Secure)
+	assert.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
+	assert.Positive(t, cookie.MaxAge)
+	assert.WithinDuration(t, time.Now().Add(AccessTokenTTL), cookie.Expires, 5*time.Second)
+
+	parsed, err := ParseYucoreMediaAccessToken(cookie.Value)
+	require.NoError(t, err)
+	assert.Equal(t, identity, parsed)
+}
 
 func setupAuthSessionTestDB(t *testing.T) *model.User {
 	t.Helper()
