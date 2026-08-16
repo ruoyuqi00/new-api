@@ -631,38 +631,45 @@ count at zero and must not spend upstream generation credit.
 **Files:**
 - Modify: `docs/superpowers/handoffs/2026-08-15-cangyuan-video-validation.md`
 
-- [ ] **Step 1: Re-run the final no-stop guard after approval**
+- [x] **Step 1: Re-run the final no-stop guard after approval**
 
 Confirm live and candidate health/restart count, all currently referenced Caddy hostnames are reachable, staged Caddy config validates, database/Redis are healthy, and the candidate image digest still matches the approved evidence. Abort without changing traffic on any mismatch.
 
-- [ ] **Step 2: Move only the stable live alias and gracefully reload Caddy if required**
+- [x] **Step 2: Move only the stable live alias and gracefully reload Caddy if required**
 
 Attach `yuapi-production-live` to the candidate before detaching/remapping it from the prior live app. Preserve old hostname aliases for existing Caddy generations. Use `caddy validate` and graceful `caddy reload`; never restart Caddy and never stop the old application first.
 
-- [ ] **Step 3: Verify public traffic before data import**
+- [x] **Step 3: Verify public traffic before data import**
 
 Check public health, homepage, sign-in, `/keys`, pricing, Studio, Canvas, all three docs URLs, static fingerprints, restart counts, and aggregate Caddy 502/database/Redis errors. On failure, remap the stable alias to the retained old app while both remain running.
 
-- [ ] **Step 4: Preserve the empty production sample scope**
+- [x] **Step 4: Preserve the empty production sample scope**
 
 Do not set an administrator authorization value, run the importer, or call an
 upstream generation endpoint. Verify the managed sample count remains zero and
 that no sample file or task was created or deleted during the switch.
 
-- [ ] **Step 5: Verify the public media authorization boundary**
+- [x] **Step 5: Verify the public media authorization boundary**
 
 Verify anonymous task-asset access remains denied and the public Studio and
 Canvas pages render normally. Do not borrow an active user's session, Key,
 balance, or assets; the authenticated play/download/Canvas behavior is covered
 by the completed isolated browser verification.
 
-- [ ] **Step 6: Observe and retain rollback**
+- [x] **Step 6: Observe and retain rollback**
 
-Take repeated samples for at least five minutes covering public 200s, health, restart count, Caddy 502, application fatal errors, database/Redis errors, docs assets, and sample content Range requests. Keep the previous live image/container, stable-alias rollback operation, result manifest, and original ten source files. Do not clean them up without separate approval.
+Take repeated samples for at least five minutes covering public 200s, health,
+restart count, Caddy 502, application fatal errors, database/Redis errors, docs
+assets, and the anonymous media authorization boundary. Keep the previous live
+image/container and stable-alias rollback operation. Do not clean them up
+without separate approval.
 
-- [ ] **Step 7: Record redacted final evidence and commit**
+- [x] **Step 7: Record redacted final evidence and commit**
 
-Update the handoff with deployed commit/image facts, hot-switch timestamps, public checks, 10/10 checksum result, role tests, zero billing delta, observation counts, and exact retained rollback identifier. Exclude server address, auth, user ID, file paths, source domain, and private URLs.
+Update the handoff with deployed commit/image facts, hot-switch timestamps,
+public checks, the zero-sample scope, observation counts, checksum verification,
+and retained rollback state. Exclude server address, auth, user ID, file paths,
+source domain, and private URLs.
 
 ```powershell
 git add docs/superpowers/handoffs/2026-08-15-cangyuan-video-validation.md

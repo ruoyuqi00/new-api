@@ -449,7 +449,60 @@ After candidate verification, the primary and global public status endpoints
 still returned HTTP 200. Public fingerprints remained
 `index.8580691911.css` / `index.52ddaa4d5e.js`, and the preceding 30 minutes
 contained zero Caddy 502 responses. The candidate is ready for the final
-no-stop traffic guard, but traffic switching is not approved by this record.
+no-stop traffic guard. At this checkpoint, traffic switching had not yet been
+approved; the subsequent cutover is recorded below.
+
+## Media-asset hot-cutover evidence
+
+The user explicitly approved the no-stop switch. The final guard confirmed the
+candidate image and revision, candidate/current/retained application health,
+restart counts, Caddy start time and configuration checksum, database and Redis
+health, disk capacity, candidate pricing, documentation assets, unique-alias
+reachability, zero managed sample tasks, and a validated rollback configuration.
+
+The switch began at 2026-08-16 18:33:55 and was fully verified at 18:48:08
+(Asia/Shanghai). Caddy first received a graceful runtime reload that pointed
+directly to the new candidate's unique alias. After public checks passed, the
+stable aliases were attached to the new candidate, removed from the previous
+live application, and the unchanged canonical Caddyfile was gracefully
+reloaded. Caddy was never restarted. This two-phase sequence kept a reachable
+upstream throughout alias ownership changes.
+
+The previous live application was never stopped or restarted. It remains
+healthy on its unique internal aliases with restart count zero. A validated
+rollback configuration can route traffic directly to it before restoring the
+stable aliases, so rollback does not depend on stopping the new application.
+The older retained rollback application also remains healthy and preserved.
+
+Final public checks:
+
+```text
+primary/global status                                             200 / 200
+public fingerprints                 index.134936448f.js / index.16fc389747.css
+home/sign-in/keys/pricing/Studio/Canvas/docs routes                 7/7 PASS
+desktop/mobile documentation browser tests                         2/2 PASS
+documentation editions and tutorial images                         3/3, 6/6
+public pricing rows / target / canceled                       95 / 13 / 0
+exact target prices and both enabled groups                        PASS
+anonymous task-asset read                                            401
+managed production sample tasks                                       0
+paid generation requests                                               0
+production sample imports                                              0
+```
+
+Eleven observation samples ran from 18:39:09 through 18:44:39, spanning more
+than five minutes. Every sample reported primary and global HTTP 200, healthy
+new and previous applications, application restart count zero, Caddy restart
+count zero, zero Caddy 502 responses, and zero candidate fatal, database, or
+Redis errors. A final desktop/mobile browser run also completed without failed
+documentation assets, page errors, or horizontal overflow.
+
+The protected server-local release artifact now contains the canonical Caddy
+baseline, validated cutover and rollback configurations, redacted pre/post
+container state, post-cutover network ownership, runtime Caddy state, build
+evidence, the executable rollback operation, and the final verification
+summary. The directory remains mode `0700`; evidence files are mode `0600`, the
+rollback script is mode `0700`, and every recorded checksum verifies.
 
 ## Remaining constraints
 
@@ -457,9 +510,10 @@ no-stop traffic guard, but traffic switching is not approved by this record.
    the user's explicit risk acceptance even though their real upstream probes
    ended in capacity failures. Re-probe only after the provider reports restored
    capacity; do not repeat the ten completed paid probes.
-2. Authenticated production image and GPT smoke requests remain unexecuted
-   because no dedicated synthetic credential was available. Never borrow an
-   active user's key or balance.
+2. Authenticated production media and GPT smoke requests remain unexecuted
+   because no dedicated synthetic credential was available. The authenticated
+   media flow is covered by isolated browser verification. Never borrow an
+   active user's key, balance, session, or assets.
 3. Keep the retained production application, legacy channel rows, old image,
    stable-alias rollback script, and protected rollback artifacts until a
    separate cleanup approval is given.
