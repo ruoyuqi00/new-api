@@ -17,11 +17,14 @@ private asset URLs, server addresses, container names, or image digests.
 - Video task billing remains isolated from GPT token usage, cache accounting,
   and stream interruption behavior.
 - No production configuration, channel, container, image, Caddy route, or user
-  traffic was changed during this validation phase.
+  traffic was changed during the validation and candidate-preparation phase.
 - The current production application must remain running throughout candidate
   preparation, traffic switch, observation, and any rollback.
-- Public traffic switching and replacement-channel activation remain blocked on
-  a separate explicit approval after the private candidate is verified.
+- The user subsequently approved the production traffic switch and explicitly
+  accepted exposing all 13 models while the three recorded upstream capacity
+  failures remain unresolved.
+- The production cutover completed on 2026-08-16 without stopping or restarting
+  the retained production application.
 
 ## Audited inventory
 
@@ -273,17 +276,65 @@ Authenticated candidate image and GPT smoke requests were not run because no
 synthetic production credential was available and active users' keys or balances
 must not be borrowed for release testing.
 
-## Remaining gates
+## Production cutover evidence
 
-1. Choose whether to wait for successful real probes for `grok-video`,
-   `grok-video-1.5`, and `sd8-seedance-2.0`, switch only the ten proven models,
-   or explicitly accept exposing all 13 while those three upstream capacity
-   failures persist. Do not repeat any of the ten completed paid probes.
-2. Provide a dedicated synthetic production credential if authenticated image
-   and GPT candidate smoke tests are required before switching. Never borrow an
+The user explicitly accepted the known upstream capacity risk and approved all
+13 models for production. The final cutover began at 2026-08-16 09:05:59
+(Asia/Shanghai). The deployed image was built from
+`923edbb9b8110dc6f75bff146ea6c0dd62cedba9`; the final candidate used the exact
+13-model `TASK_PRICE_PATCH` and remained a slave with task polling, batch quota
+updates, automatic channel updates, and upstream model-update tasks disabled.
+
+The last preflight rejected an earlier candidate because its environment still
+contained the retired 15-model task-price patch. A corrected candidate was
+started and verified before any production traffic changed. Caddy's runtime
+readback also exposed an older read-only bind-mount inode that differed from the
+current host pathname. Guarded cutover attempts automatically restored both the
+database and route when this mismatch and a later verification-command quoting
+error were detected. Neither attempt produced a 502 or stopped an application.
+
+The durable switch moved the existing stable frontend alias to the verified
+candidate and restored the same stable-alias Caddyfile across runtime, container
+mount, and host persistence. Caddy was gracefully reloaded during validation
+but never restarted; its start time and restart count were unchanged. The
+retained production application remained running and healthy with restart count
+zero and is still available as the immediate rollback target.
+
+Committed database and public readback:
+
+```text
+replacement channels active                                      5/5
+replacement abilities active                                   26/26
+legacy video channels disabled                                    4/4
+legacy video abilities active                                       0
+target ModelPrice entries                                          13
+canceled ModelPrice entries                                         0
+exact target base prices                                             PASS
+obsolete video capability key                                        0
+group ratios 1.2 / 1.0                                              PASS
+public pricing rows / target / canceled                       95 / 13 / 0
+```
+
+The retained application, candidate, and production Caddy path returned the
+same 13 prices and both enabled groups. Production served the refreshed
+developer guide and the new static fingerprints
+`index.8580691911.css` / `index.52ddaa4d5e.js`.
+
+Six post-cutover samples over more than five minutes, followed by three samples
+after the stable-alias handoff, all reported HTTP 200, healthy applications,
+restart count zero, zero Caddy 502 responses, zero database/Redis errors, and
+zero fatal candidate errors. Server-local checksummed rollback artifacts now
+cover both the scoped database restore and a no-stop stable-alias handback.
+
+## Remaining constraints
+
+1. `grok-video`, `grok-video-1.5`, and `sd8-seedance-2.0` remain exposed under
+   the user's explicit risk acceptance even though their real upstream probes
+   ended in capacity failures. Re-probe only after the provider reports restored
+   capacity; do not repeat the ten completed paid probes.
+2. Authenticated production image and GPT smoke requests remain unexecuted
+   because no dedicated synthetic credential was available. Never borrow an
    active user's key or balance.
-3. Re-run the no-drift, health, pricing-surface, Caddy-reference, candidate, and
-   rollback-artifact checks immediately before the approved switch.
-4. Obtain explicit traffic-switch and video-activation approval before any
-   Caddy reload or activation transaction. The current application must remain
-   running throughout switch, observation, and rollback readiness.
+3. Keep the retained production application, legacy channel rows, old image,
+   stable-alias rollback script, and protected rollback artifacts until a
+   separate cleanup approval is given.

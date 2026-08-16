@@ -11,10 +11,12 @@
 ## 1. Release invariants
 
 - Use blue-green deployment. The current production container must remain
-  running, healthy, and attached to its existing aliases throughout candidate
-  preparation, traffic switch, observation, and any immediate rollback.
-- Never restart Caddy for this release. Validate the complete configuration and
-  use a graceful reload.
+  running and healthy throughout candidate preparation, traffic switch,
+  observation, and any immediate rollback. Move its stable frontend alias only
+  after the candidate has joined that network and passed direct health checks.
+- Never restart Caddy for this release. Prefer a stable-alias network handoff,
+  which requires no configuration reload. If a reload is required, validate the
+  complete configuration and use a graceful reload only.
 - Public traffic changes only after explicit user approval of the verified
   candidate facts. Candidate preparation does not imply switch approval.
 - Change only video channel rows, the 13 target `ModelPrice` entries, the 11
@@ -25,6 +27,31 @@
   Caddy routes.
 - Polling, content reads, downloads, refresh recovery, and Canvas restoration
   never create a second task and never charge again.
+
+## Production execution record (2026-08-16)
+
+The user approved all 13 target models and explicitly accepted the continuing
+upstream capacity risk for the two Grok models and `sd8-seedance-2.0`. The
+production cutover completed without stopping or restarting the retained
+application or Caddy.
+
+Final readback showed five active replacement channels, 26 active two-group
+abilities, four disabled legacy channels, 13 exact target prices, zero canceled
+prices, zero obsolete video capability keys, and unchanged group ratios. Public
+pricing returned 95 rows with all 13 targets and none of the 11 canceled models.
+
+The existing stable frontend alias was moved to the candidate after direct
+reachability checks. The retained application stayed running and healthy but no
+longer owns that frontend-network alias. Caddy runtime, its read-only mounted
+file, and the persisted host file now all use the same stable alias. This is
+important: a host pathname can diverge from a running read-only single-file bind
+mount after an atomic replacement, so runtime readback must take precedence.
+
+The final observation comprised six samples over more than five minutes plus
+three post-alias samples. Every sample returned HTTP 200 with zero Caddy 502,
+database/Redis, fatal-process, or restart events. Authenticated production image
+and GPT smoke requests were not run because no dedicated synthetic credential
+was available.
 
 ## 2. Target family channels
 
@@ -177,14 +204,19 @@ Then stop and request explicit traffic-switch approval.
 Run only after explicit approval and a fresh no-drift check:
 
 1. Produce a new timestamped Caddyfile rollback copy.
-2. Replace exactly the two current application references with the candidate
-   release alias in the staged complete Caddy configuration.
-3. Confirm the old alias still exists and the current container remains
-   healthy and reachable.
-4. Validate the complete staged Caddy configuration. Abort without reload on
-   any warning, parse error, unexpected third reference, or target mismatch.
-5. Gracefully reload Caddy. Do not restart it. Read back the runtime config and
-   confirm exactly two candidate references and zero unintended changes.
+2. Read the running Caddy configuration, its mounted Caddyfile, and the host
+   pathname separately. Stop on any unexplained mismatch; do not assume an
+   atomic host replacement changed an existing single-file bind mount.
+3. Attach the candidate to the existing frontend release network with the
+   stable alias while the current container remains attached. Prove repeated
+   direct Caddy-to-alias health before detaching the current container from only
+   that frontend network.
+4. Confirm the current container remains healthy and reachable on its private
+   binding and core network. Never stop it.
+5. Keep the existing two stable-alias Caddy references unchanged. If a reload is
+   necessary to reconcile files, validate the complete candidate and rollback
+   files, gracefully reload from the explicit verified path, and read back the
+   runtime config. Never restart Caddy.
 6. Apply one scoped video configuration transaction: enable only the five
    replacement channels, disable only the identified legacy video channels,
    set exactly the 13 target base prices, delete exactly the 11 canceled price
@@ -233,11 +265,14 @@ Execute in reverse order:
 1. Restore the scoped video settings from the rollback artifact, refresh the
    caches, and read back all legacy/replacement statuses, affected prices,
    capability override, group ratios, and `TASK_PRICE_PATCH`.
-2. Restore the exact two old Caddy references in the full staged configuration.
-3. Validate the complete old configuration and gracefully reload Caddy.
-4. Confirm exactly two old references in runtime config and verify public
-   health, authentication, one existing image route, pricing, and a bounded GPT
-   request.
+2. Reattach the retained production container to the frontend release network
+   with the original stable aliases and prove direct Caddy-to-alias health.
+3. Detach the candidate from that frontend network. The Caddyfile remains on the
+   same stable alias, so no reload is normally required.
+4. If Caddyfile recovery is required, validate the protected runtime-baseline
+   copy and gracefully reload it from its explicit path. Confirm exactly two
+   stable references and verify public health, authentication, one existing
+   image route, pricing, and a bounded GPT request.
 5. Keep both application containers and all aliases running until rollback
    verification passes. Never stop the current production app or restore a
    database snapshot during immediate rollback.
