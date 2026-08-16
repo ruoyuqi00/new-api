@@ -34,11 +34,11 @@ YuAPI 提供两个 Base URL：
 7. 打开模型限制，只选择 `seedance-2.0`。
 8. 创建后立即保存 Key。关闭显示窗口后，完整值可能不会再次出现。
 
-![API Key 列表中的创建按钮](./assets/video-api-key-zh-01.webp)
+![API Key 列表中的创建按钮](/developer-docs/assets/video-api-key-zh-01.webp)
 
-![测试 Key 的名称、分组、有效期和额度设置](./assets/video-api-key-zh-02.webp)
+![测试 Key 的名称、分组、有效期和额度设置](/developer-docs/assets/video-api-key-zh-02.webp)
 
-![只允许 seedance-2.0 的模型限制](./assets/video-api-key-zh-03.webp)
+![只允许 seedance-2.0 的模型限制](/developer-docs/assets/video-api-key-zh-03.webp)
 
 不要把完整 Key 发到聊天、工单或截图中。本文统一使用环境变量 `YUAPI_API_KEY`，不会在示例里硬编码 Key。
 

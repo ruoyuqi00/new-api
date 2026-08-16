@@ -34,11 +34,11 @@ Both addresses use the same API Keys, model list, account balance, and prices. Y
 7. Enable the model restriction and select only `seedance-2.0`.
 8. Store the Key immediately after creation. The complete value may not be shown again after you close the dialog.
 
-![Create API Key action on the API Keys page](./assets/video-api-key-en-01.webp)
+![Create API Key action on the API Keys page](/developer-docs/assets/video-api-key-en-01.webp)
 
-![Test Key name, group, expiration, and quota controls](./assets/video-api-key-en-02.webp)
+![Test Key name, group, expiration, and quota controls](/developer-docs/assets/video-api-key-en-02.webp)
 
-![Model restriction allowing only seedance-2.0](./assets/video-api-key-en-03.webp)
+![Model restriction allowing only seedance-2.0](/developer-docs/assets/video-api-key-en-03.webp)
 
 Do not include a complete Key in a chat, support ticket, or screenshot. Every example below reads `YUAPI_API_KEY` from the environment instead of embedding it in source code.
 
