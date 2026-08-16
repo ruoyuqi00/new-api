@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { type ColumnDef } from '@tanstack/react-table'
+import type { CellContext, ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import { BadgeCell, TruncatedCell } from '@/components/data-table'
@@ -35,7 +35,7 @@ import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { API_KEY_STATUSES } from '../constants'
-import { type ApiKey } from '../types'
+import type { ApiKey } from '../types'
 import {
   ApiKeyCell,
   ModelLimitsCell,
@@ -67,6 +67,10 @@ function useGroupRatios(): Record<string, number> {
   })
 
   return data ?? {}
+}
+
+function renderApiKeyTableCell({ row }: CellContext<ApiKey, unknown>) {
+  return <ApiKeyCell apiKey={row.original} />
 }
 
 export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
@@ -128,7 +132,7 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
       id: 'key',
       accessorKey: 'key',
       header: t('API Key'),
-      cell: ({ row }) => <ApiKeyCell apiKey={row.original} />,
+      cell: renderApiKeyTableCell,
       enableSorting: false,
       size: 260,
     },
