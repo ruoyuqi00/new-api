@@ -83,26 +83,28 @@ func (YucoreMediaAssets) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
 }
 
 type YucoreMediaAsset struct {
-	Id             string         `json:"id"`
-	Kind           string         `json:"kind"`
-	Url            string         `json:"url"`
-	ThumbUrl       string         `json:"thumb_url,omitempty"`
-	CachedUrl      string         `json:"-"`
-	SourceUrl      string         `json:"-"`
-	SourceThumbUrl string         `json:"-"`
-	Label          string         `json:"label"`
-	Width          int            `json:"width,omitempty"`
-	Height         int            `json:"height,omitempty"`
-	DurationMs     int            `json:"duration_ms,omitempty"`
-	MimeType       string         `json:"mime_type,omitempty"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
+	Id              string         `json:"id"`
+	Kind            string         `json:"kind"`
+	Url             string         `json:"url"`
+	ThumbUrl        string         `json:"thumb_url,omitempty"`
+	CachedUrl       string         `json:"-"`
+	SourceUrl       string         `json:"-"`
+	SourceThumbUrl  string         `json:"-"`
+	ManagedFileName string         `json:"-"`
+	Label           string         `json:"label"`
+	Width           int            `json:"width,omitempty"`
+	Height          int            `json:"height,omitempty"`
+	DurationMs      int            `json:"duration_ms,omitempty"`
+	MimeType        string         `json:"mime_type,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 type yucoreMediaPersistedAsset struct {
 	YucoreMediaAsset
-	CachedUrl      string `json:"cached_url,omitempty"`
-	SourceUrl      string `json:"source_url,omitempty"`
-	SourceThumbUrl string `json:"source_thumb_url,omitempty"`
+	CachedUrl       string `json:"cached_url,omitempty"`
+	SourceUrl       string `json:"source_url,omitempty"`
+	SourceThumbUrl  string `json:"source_thumb_url,omitempty"`
+	ManagedFileName string `json:"managed_file_name,omitempty"`
 }
 
 type openAICompatibleImageResponse struct {
@@ -858,6 +860,7 @@ func YucoreMediaTaskAssets(task *YucoreMediaTask) []YucoreMediaAsset {
 		asset.CachedUrl = persistedAsset.CachedUrl
 		asset.SourceUrl = persistedAsset.SourceUrl
 		asset.SourceThumbUrl = persistedAsset.SourceThumbUrl
+		asset.ManagedFileName = persistedAsset.ManagedFileName
 		assets = append(assets, asset)
 	}
 	return assets
@@ -871,6 +874,7 @@ func marshalYucoreMediaAssets(assets []YucoreMediaAsset) ([]byte, error) {
 			CachedUrl:        asset.CachedUrl,
 			SourceUrl:        asset.SourceUrl,
 			SourceThumbUrl:   asset.SourceThumbUrl,
+			ManagedFileName:  asset.ManagedFileName,
 		})
 	}
 	return common.Marshal(persistedAssets)
