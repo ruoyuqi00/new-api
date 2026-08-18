@@ -180,7 +180,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if quotaErr != nil {
 			logger.LogError(c, fmt.Sprintf("failed to calculate local sensitive input quota: %s", quotaErr.Error()))
 		}
-		service.ChargeLocalViolationFee(c, relayInfo, newAPIError, inputQuota, tokens, meta.CombineText, detectedSensitiveWords)
+		chargeResult := service.ChargeLocalViolationFee(c, relayInfo, newAPIError, inputQuota, tokens, meta.CombineText, detectedSensitiveWords)
+		newAPIError.SetMessage(chargeResult.PublicMessage())
+		types.ErrOptionWithPublicError(chargeResult.PublicError())(newAPIError)
 		return
 	}
 	if needInputModeration && meta != nil && strings.TrimSpace(meta.CombineText) != "" {

@@ -171,7 +171,7 @@ func TestCalculateLocalSensitiveInputQuota(t *testing.T) {
 	}
 }
 
-func TestCalculateLocalSensitiveInputQuotaAppliesConfiguredViolationMultiplier(t *testing.T) {
+func TestCalculateLocalSensitiveInputQuotaIgnoresConfiguredViolationMultiplier(t *testing.T) {
 	t.Setenv("SENSITIVE_VIOLATION_MULTIPLIER", "10")
 
 	tokenPricedInfo := &relaycommon.RelayInfo{
@@ -182,7 +182,7 @@ func TestCalculateLocalSensitiveInputQuotaAppliesConfiguredViolationMultiplier(t
 	}
 	quota, err := CalculateLocalSensitiveInputQuota(tokenPricedInfo, 1_250)
 	require.NoError(t, err)
-	assert.Equal(t, 37_500, quota)
+	assert.Equal(t, 3_750, quota)
 
 	tieredInfo := &relaycommon.RelayInfo{
 		PriceData: types.PriceData{
@@ -195,7 +195,82 @@ func TestCalculateLocalSensitiveInputQuotaAppliesConfiguredViolationMultiplier(t
 	}
 	quota, err = CalculateLocalSensitiveInputQuota(tieredInfo, 2_000)
 	require.NoError(t, err)
-	assert.Equal(t, 45_000, quota)
+	assert.Equal(t, 4_500, quota)
+}
+
+func TestLocalSensitiveViolationMessageDoesNotExposeSensitiveContent(t *testing.T) {
+	result := LocalSensitiveViolationChargeResult{
+		PromptTokens:    37_723,
+		ChargeSucceeded: true,
+		ChargedQuota:    123,
+	}
+
+	message := result.PublicMessage()
+	assert.Contains(t, message, "Input tokens: 37723.")
+	assert.Contains(t, message, "Normal input charge applied.")
+	assert.NotContains(t, message, "blocked-word")
+	assert.NotContains(t, message, "original sensitive input")
+}
+
+func TestLocalSensitiveViolationPublicError(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     LocalSensitiveViolationChargeResult
+		wantStatus string
+	}{
+		{
+			name: "successful normal charge",
+			result: LocalSensitiveViolationChargeResult{
+				PromptTokens:    37_723,
+				ChargedQuota:    123,
+				ChargeSucceeded: true,
+			},
+			wantStatus: "Normal input charge applied.",
+		},
+		{
+			name: "no charge applied",
+			result: LocalSensitiveViolationChargeResult{
+				PromptTokens: 37_723,
+			},
+			wantStatus: "No charge applied.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			publicError := tt.result.PublicError()
+			assert.Equal(t, string(types.ErrorCodeSensitiveWordsDetected), publicError.Type)
+			assert.Equal(t, types.ErrorCodeSensitiveWordsDetected, publicError.Code)
+			assert.Contains(t, publicError.Message, "Input tokens: 37723.")
+			assert.Contains(t, publicError.Message, tt.wantStatus)
+			assert.NotContains(t, publicError.Message, "blocked-word")
+		})
+	}
+}
+
+func TestLocalSensitiveViolationPublicErrorPreservesOpenAIAndClaudeContracts(t *testing.T) {
+	result := LocalSensitiveViolationChargeResult{
+		PromptTokens:    37_723,
+		ChargeSucceeded: true,
+	}
+	apiErr := types.NewErrorWithStatusCode(
+		errors.New(result.PublicMessage()),
+		types.ErrorCodeSensitiveWordsDetected,
+		http.StatusBadRequest,
+		types.ErrOptionWithPublicError(result.PublicError()),
+	)
+
+	openAI := apiErr.ToPublicOpenAIError("req-sensitive")
+	assert.Equal(t, types.ErrorCodeSensitiveWordsDetected, openAI.Code)
+	assert.Contains(t, openAI.Message, "Input tokens: 37723.")
+	assert.Contains(t, openAI.Message, "req-sensitive")
+	assert.NotContains(t, openAI.Message, "sensitive input")
+
+	claude := apiErr.ToPublicClaudeError("req-sensitive")
+	assert.Equal(t, string(types.ErrorCodeSensitiveWordsDetected), claude.Type)
+	assert.Contains(t, claude.Message, "Input tokens: 37723.")
+	assert.Contains(t, claude.Message, "req-sensitive")
+	assert.NotContains(t, claude.Message, "sensitive input")
 }
 
 func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.T) {
@@ -243,7 +318,10 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 	const promptTokens = 1_250
 	feeQuota, err := CalculateLocalSensitiveInputQuota(relayInfo, promptTokens)
 	require.NoError(t, err)
-	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, promptTokens, "", nil))
+	chargeResult := ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, promptTokens, "", nil)
+	require.True(t, chargeResult.ChargeSucceeded)
+	assert.Equal(t, promptTokens, chargeResult.PromptTokens)
+	assert.Equal(t, feeQuota, chargeResult.ChargedQuota)
 	assert.False(t, ChargeViolationFeeIfNeeded(c, relayInfo, apiErr), "local violations must not be charged again by the upstream failure path")
 
 	var user model.User
@@ -265,6 +343,8 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", userID, model.LogTypeConsume).Find(&logs).Error)
 	require.Len(t, logs, 1)
 	assert.Equal(t, feeQuota, logs[0].Quota)
+	assert.Equal(t, promptTokens, logs[0].PromptTokens)
+	assert.Zero(t, logs[0].CompletionTokens)
 	assert.Equal(t, 0, logs[0].ChannelId)
 	assert.NotContains(t, logs[0].Other, "sensitive words detected")
 
@@ -274,7 +354,7 @@ func TestChargeLocalViolationFeeChargesWalletOnceWithoutChannelUsage(t *testing.
 	assert.Equal(t, string(types.ErrorCodeSensitiveWordsDetected), other["violation_fee_code"])
 	assert.Equal(t, string(violationFeeReasonLocalSensitiveWord), other["violation_fee_reason"])
 	assert.Equal(t, float64(promptTokens), other["prompt_tokens"])
-	assert.Equal(t, defaultSensitiveViolationMultiplier, other["violation_multiplier"])
+	assert.Equal(t, float64(1), other["violation_multiplier"])
 	assert.Equal(t, float64(feeQuota), other["requested_quota"])
 	assert.Equal(t, float64(feeQuota), other["charged_quota"])
 	assert.Equal(t, true, other["charge_succeeded"])
@@ -361,7 +441,9 @@ func TestChargeLocalViolationFeeInsufficientQuotaKeepsBlockWithAuditLog(t *testi
 		types.ErrOptionWithSkipRetry(),
 	)
 
-	assert.False(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100, "", nil))
+	chargeResult := ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100, "", nil)
+	assert.False(t, chargeResult.ChargeSucceeded)
+	assert.Zero(t, chargeResult.ChargedQuota)
 
 	var user model.User
 	require.NoError(t, model.DB.First(&user, userID).Error)
@@ -439,7 +521,8 @@ func TestChargeLocalViolationFeeHonorsSubscriptionOnlyPreference(t *testing.T) {
 	)
 
 	const feeQuota = 100
-	require.True(t, ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100, "", nil))
+	chargeResult := ChargeLocalViolationFee(c, relayInfo, apiErr, feeQuota, 100, "", nil)
+	require.True(t, chargeResult.ChargeSucceeded)
 
 	var user model.User
 	require.NoError(t, model.DB.First(&user, userID).Error)
