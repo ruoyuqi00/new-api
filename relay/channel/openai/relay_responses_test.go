@@ -60,6 +60,149 @@ func TestOaiResponsesStreamHandlerParsesResponseDoneUsage(t *testing.T) {
 	require.True(t, info.StreamTerminalUsageSeen)
 }
 
+func TestOaiResponsesStreamHandlerEmitsFixedCodexPreludeFirstForGPT(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	ctx.Request.Header.Set("Originator", "codex_cli_rs")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"X-Codex-Turn-State":   {"turn-state"},
+			"X-Reasoning-Included": {"true"},
+		},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"codex.rate_limits\",\"plan_type\":\"team\",\"rate_limits\":{\"allowed\":false,\"limit_reached\":true,\"primary\":{\"used_percent\":100,\"window_minutes\":10080,\"reset_at\":1787126358},\"secondary\":null},\"credits\":{\"has_credits\":false,\"unlimited\":false,\"balance\":null}}\n\n" +
+				"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_codex\",\"model\":\"upstream-model\",\"status\":\"in_progress\"}}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_codex\",\"model\":\"upstream-model\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}
+	info := mappedClientResponseInfo()
+	info.OriginModelName = "gpt-test"
+
+	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	publicBody := recorder.Body.String()
+	const fixedData = `{"type":"codex.rate_limits","plan_type":"pro","rate_limits":{"allowed":true,"limit_reached":false,"primary":null,"secondary":null},"credits":null}`
+	require.Equal(t, 1, strings.Count(publicBody, fixedData))
+	require.NotContains(t, publicBody, `"plan_type":"team"`)
+	require.Contains(t, publicBody, "event: response.created")
+	require.Contains(t, publicBody, "event: response.completed")
+	require.True(t, strings.HasPrefix(publicBody, "event: codex.response.metadata\n"))
+	require.Less(t,
+		strings.Index(publicBody, "event: codex.response.metadata"),
+		strings.Index(publicBody, "event: response.created"),
+	)
+	require.Equal(t, "turn-state", recorder.Header().Get("X-Codex-Turn-State"))
+	require.Equal(t, "true", recorder.Header().Get("X-Reasoning-Included"))
+	require.Equal(t, 2, usage.TotalTokens)
+}
+
+func TestOaiResponsesStreamHandlerUsesGPTCodexClientSignals(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	tests := []struct {
+		name       string
+		headerName string
+		headerVal  string
+		wantEvent  bool
+	}{
+		{name: "originator", headerName: "Originator", headerVal: "Codex CLI", wantEvent: true},
+		{name: "user agent", headerName: "User-Agent", headerVal: "codex-cli/1.0", wantEvent: true},
+		{name: "turn metadata", headerName: "X-Codex-Turn-Metadata", headerVal: `{"session_id":"test"}`, wantEvent: true},
+		{name: "beta features", headerName: "X-Codex-Beta-Features", headerVal: "responses", wantEvent: true},
+		{name: "session id alone", headerName: "Session_id", headerVal: "session-test", wantEvent: false},
+		{name: "ordinary client", wantEvent: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, recorder := clientResponseTestContext()
+			ctx.Request.URL.Path = "/v1/responses"
+			if tt.headerName != "" {
+				ctx.Request.Header.Set(tt.headerName, tt.headerVal)
+			}
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_codex\",\"model\":\"upstream-model\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n" +
+						"data: [DONE]\n\n",
+				)),
+			}
+			info := mappedClientResponseInfo()
+			info.OriginModelName = "gpt-test"
+
+			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+			require.Nil(t, relayErr)
+			require.Equal(t, tt.wantEvent, strings.Contains(recorder.Body.String(), "event: codex.response.metadata"))
+		})
+	}
+}
+
+func TestOaiResponsesStreamHandlerSuppressesUpstreamCodexRateLimitsForOrdinaryGPTClient(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"codex.rate_limits\",\"plan_type\":\"team\",\"rate_limits\":{\"primary\":null,\"secondary\":null},\"credits\":null}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_gpt\",\"model\":\"upstream-model\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}
+	info := mappedClientResponseInfo()
+	info.OriginModelName = "gpt-test"
+
+	_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	publicBody := recorder.Body.String()
+	require.NotContains(t, publicBody, "event: codex.response.metadata")
+	require.NotContains(t, publicBody, `"type":"codex.rate_limits"`)
+	require.NotContains(t, publicBody, `"plan_type":"team"`)
+	require.Contains(t, publicBody, "event: response.completed")
+}
+
+func TestOaiResponsesStreamHandlerLeavesNonGPTChannelUnchanged(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	ctx.Request.Header.Set("Originator", "codex_cli_rs")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"codex.rate_limits\",\"plan_type\":\"team\",\"rate_limits\":{\"primary\":null,\"secondary\":null},\"credits\":null}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_other\",\"model\":\"upstream-model\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}
+	info := mappedClientResponseInfo()
+	info.OriginModelName = "claude-test"
+
+	_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	publicBody := recorder.Body.String()
+	require.NotContains(t, publicBody, "event: codex.response.metadata")
+	require.Contains(t, publicBody, `"type":"codex.rate_limits"`)
+	require.Contains(t, publicBody, `"plan_type":"team"`)
+}
+
 func TestOaiResponsesStreamHandlerEmitsFailureForEOFWithoutTerminalEvent(t *testing.T) {
 	oldStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30

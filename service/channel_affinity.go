@@ -577,7 +577,12 @@ func deriveChannelAffinityPromptCacheKey(rule operation_setting.ChannelAffinityR
 }
 
 func GetChannelAffinityPromptCacheKey(c *gin.Context) (string, bool) {
-	if c == nil || c.Request == nil || c.Request.URL == nil || c.Request.URL.Path != "/v1/responses" {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return "", false
+	}
+	switch c.Request.URL.Path {
+	case "/v1/responses", "/v1/chat/completions":
+	default:
 		return "", false
 	}
 	meta, ok := getChannelAffinityMeta(c)

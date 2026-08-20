@@ -337,6 +337,59 @@ func TestChannelAffinityPromptCacheKeyIsStableAndScoped(t *testing.T) {
 	assert.True(t, strings.HasPrefix(first, "yuapi-pck-v1-"))
 }
 
+func TestChannelAffinityPromptCacheKeySupportsChatCompletions(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	originalRules := setting.Rules
+	setting.Rules = []operation_setting.ChannelAffinityRule{
+		{
+			Name:                 "gpt-text-prompt-cache-session",
+			ModelRegex:           []string{"^gpt-.*$"},
+			PathRegex:            []string{"^/v1/responses$", "^/v1/chat/completions$"},
+			KeySources:           []operation_setting.ChannelAffinityKeySource{{Type: "request_header", Key: "Session_id"}},
+			InjectPromptCacheKey: true,
+			IncludeUsingGroup:    true,
+			IncludeModelName:     true,
+			IncludeRuleName:      true,
+		},
+	}
+	t.Cleanup(func() { setting.Rules = originalRules })
+
+	newContext := func(tokenID int) *gin.Context {
+		ctx := newChannelAffinityRequestContext(t, `{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`, tokenID)
+		ctx.Request.URL.Path = "/v1/chat/completions"
+		ctx.Request.Header.Set("Session_id", "raw-chat-session-123")
+		common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "gptpro")
+		return ctx
+	}
+
+	ctx := newContext(8351)
+
+	_, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "gptpro")
+	require.False(t, found)
+
+	key, ok := GetChannelAffinityPromptCacheKey(ctx)
+	require.True(t, ok)
+	assert.True(t, strings.HasPrefix(key, "yuapi-pck-v1-"))
+	assert.NotContains(t, key, "raw-chat-session-123")
+	adminInfo := map[string]interface{}{}
+	AppendChannelAffinityAdminInfo(ctx, adminInfo)
+	assert.NotContains(t, fmt.Sprint(adminInfo), "raw-chat-session-123")
+
+	MarkChannelAffinityRequestSucceeded(ctx)
+	RecordChannelAffinity(ctx, 2451)
+	t.Cleanup(func() { ClearCurrentChannelAffinityCache(ctx) })
+
+	sameSession := newContext(8351)
+	channelID, found := GetPreferredChannelByAffinity(sameSession, "gpt-5", "gptpro")
+	require.True(t, found)
+	assert.Equal(t, 2451, channelID)
+
+	otherToken := newContext(8352)
+	channelID, found = GetPreferredChannelByAffinity(otherToken, "gpt-5", "gptpro")
+	assert.False(t, found)
+	assert.Zero(t, channelID)
+}
+
 func TestChannelAffinityPromptCacheKeyRequiresSafeSourceAndOptIn(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -362,7 +415,7 @@ func TestChannelAffinityPromptCacheKeyRequiresSafeSourceAndOptIn(t *testing.T) {
 			sources: []operation_setting.ChannelAffinityKeySource{{Type: "context_string", Key: operation_setting.ChannelAffinityResponseChainContextKey}},
 		},
 		{
-			name: "unsupported path", path: "/v1/chat/completions", body: `{"model":"gpt-5"}`, tokenID: 8404, enabled: true,
+			name: "unsupported path", path: "/v1/images/generations", body: `{"model":"gpt-5"}`, tokenID: 8404, enabled: true,
 			sources: []operation_setting.ChannelAffinityKeySource{{Type: "request_header", Key: "Session_id"}},
 			headers: map[string]string{"Session_id": "session-path"},
 		},
@@ -408,6 +461,9 @@ func TestDefaultCodexAffinityEnablesPromptCacheKeyInjection(t *testing.T) {
 	require.NotEmpty(t, rules)
 	assert.Equal(t, "codex cli trace", rules[0].Name)
 	assert.True(t, rules[0].InjectPromptCacheKey)
+	assert.True(t, matchAnyRegexCached(rules[0].PathRegex, "/v1/responses"))
+	assert.True(t, matchAnyRegexCached(rules[0].PathRegex, "/v1/chat/completions"))
+	assert.False(t, matchAnyRegexCached(rules[0].PathRegex, "/v1/images/generations"))
 	assert.False(t, operation_setting.ChannelAffinityRule{}.InjectPromptCacheKey)
 }
 

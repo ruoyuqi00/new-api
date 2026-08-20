@@ -63,8 +63,16 @@ export const CHANNEL_AFFINITY_RULE_TEMPLATES = {
   codexCli: {
     name: 'codex cli trace',
     model_regex: ['^gpt-.*$'],
-    path_regex: ['/v1/responses'],
+    path_regex: ['/v1/responses', '/v1/chat/completions'],
     key_sources: [
+      {
+        type: 'context_string',
+        key: 'channel_affinity_previous_response_id',
+      },
+      {
+        type: 'context_string',
+        key: 'channel_affinity_conversation_id',
+      },
       { type: 'gjson', path: 'prompt_cache_key' },
       { type: 'request_header', key: 'Session_id' },
       {
@@ -79,6 +87,7 @@ export const CHANNEL_AFFINITY_RULE_TEMPLATES = {
       },
     ],
     param_override_template: CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE,
+    inject_prompt_cache_key: true,
     value_regex: '',
     ttl_seconds: 0,
     skip_retry_on_failure: true,
@@ -101,3 +110,16 @@ export const CHANNEL_AFFINITY_RULE_TEMPLATES = {
 
 export const cloneChannelAffinityTemplate = (template) =>
   JSON.parse(JSON.stringify(template || {}));
+
+export const mergeChannelAffinityRuleForSave = (base, edited) => {
+  const merged = {
+    ...(base || {}),
+    ...(edited || {}),
+  };
+  for (const key of ['user_agent_include', 'param_override_template']) {
+    if (!Object.prototype.hasOwnProperty.call(edited || {}, key)) {
+      delete merged[key];
+    }
+  }
+  return merged;
+};

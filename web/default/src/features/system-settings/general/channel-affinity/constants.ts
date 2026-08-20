@@ -60,8 +60,16 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
   codexCli: {
     name: 'codex cli trace',
     model_regex: ['^gpt-.*$'],
-    path_regex: ['/v1/responses'],
+    path_regex: ['/v1/responses', '/v1/chat/completions'],
     key_sources: [
+      {
+        type: 'context_string',
+        key: 'channel_affinity_previous_response_id',
+      },
+      {
+        type: 'context_string',
+        key: 'channel_affinity_conversation_id',
+      },
       { type: 'gjson', path: 'prompt_cache_key' },
       { type: 'request_header', key: 'Session_id' },
       {
@@ -78,6 +86,7 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
     param_override_template: buildPassHeadersTemplate(
       CODEX_CLI_HEADER_PASSTHROUGH_HEADERS
     ),
+    inject_prompt_cache_key: true,
     value_regex: '',
     ttl_seconds: 0,
     skip_retry_on_failure: false,
@@ -117,4 +126,11 @@ export function makeUniqueName(
 
 export function cloneTemplate<T>(template: T): T {
   return JSON.parse(JSON.stringify(template))
+}
+
+export function mergeAffinityRuleForSave(
+  base: Partial<AffinityRule> | null | undefined,
+  edited: AffinityRule
+): AffinityRule {
+  return { ...base, ...edited }
 }

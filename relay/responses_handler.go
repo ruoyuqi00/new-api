@@ -18,20 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
-
-func injectResponsesPromptCacheKey(jsonData []byte, promptCacheKey string) ([]byte, error) {
-	if strings.TrimSpace(promptCacheKey) == "" {
-		return jsonData, nil
-	}
-	existing := gjson.GetBytes(jsonData, "prompt_cache_key")
-	if existing.Exists() && strings.TrimSpace(existing.String()) != "" {
-		return jsonData, nil
-	}
-	return sjson.SetBytes(jsonData, "prompt_cache_key", promptCacheKey)
-}
 
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -92,20 +79,20 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	var requestBody io.Reader
-	promptCacheKey, injectPromptCacheKey := service.GetChannelAffinityPromptCacheKey(c)
+	promptCacheKey, injectPromptCacheKeyEnabled := service.GetChannelAffinityPromptCacheKey(c)
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
-		if !injectPromptCacheKey {
+		if !injectPromptCacheKeyEnabled {
 			requestBody = common.NewReplayableBodyReader(storage)
 		} else {
 			jsonData, err := storage.Bytes()
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 			}
-			jsonData, err = injectResponsesPromptCacheKey(jsonData, promptCacheKey)
+			jsonData, err = injectPromptCacheKey(jsonData, promptCacheKey)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
@@ -132,8 +119,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
-		if injectPromptCacheKey {
-			jsonData, err = injectResponsesPromptCacheKey(jsonData, promptCacheKey)
+		if injectPromptCacheKeyEnabled {
+			jsonData, err = injectPromptCacheKey(jsonData, promptCacheKey)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}

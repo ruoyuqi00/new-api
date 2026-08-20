@@ -90,7 +90,7 @@ var channelAffinitySetting = ChannelAffinitySetting{
 		{
 			Name:       "codex cli trace",
 			ModelRegex: []string{"^gpt-.*$"},
-			PathRegex:  []string{"/v1/responses"},
+			PathRegex:  []string{"/v1/responses", "/v1/chat/completions"},
 			KeySources: []ChannelAffinityKeySource{
 				{Type: "context_string", Key: ChannelAffinityResponseChainContextKey},
 				{Type: "context_string", Key: ChannelAffinityConversationContextKey},

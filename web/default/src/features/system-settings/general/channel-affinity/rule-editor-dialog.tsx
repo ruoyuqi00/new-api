@@ -43,7 +43,7 @@ import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 
 import { SettingsSwitchField } from '../../components/settings-form-layout'
-import { RULE_TEMPLATES } from './constants'
+import { RULE_TEMPLATES, mergeAffinityRuleForSave } from './constants'
 import type { AffinityRule, KeySource } from './types'
 
 type KeySourceRow = KeySource & {
@@ -223,7 +223,7 @@ export function RuleEditorDialog(props: Props) {
       }
     }
 
-    const rule: AffinityRule = {
+    const editedRule: AffinityRule = {
       id: props.rule?.id,
       name: values.name.trim(),
       model_regex: modelRegex,
@@ -238,6 +238,11 @@ export function RuleEditorDialog(props: Props) {
       include_rule_name: values.include_rule_name,
       param_override_template: paramTemplate,
     }
+
+    const baseRule =
+      props.rule ??
+      (props.templateKey ? RULE_TEMPLATES[props.templateKey] : null)
+    const rule = mergeAffinityRuleForSave(baseRule, editedRule)
 
     props.onSave(rule)
     props.onOpenChange(false)

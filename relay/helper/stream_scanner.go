@@ -30,6 +30,7 @@ const (
 	DefaultMaxScannerBufferSize = 128 << 20
 	DefaultPingInterval         = 10 * time.Second
 	streamWriteTimeout          = 30 * time.Second
+	eventStreamHeadersCopiedKey = "event_stream_upstream_headers_copied"
 )
 
 func getScannerBufferSize() int {
@@ -151,6 +152,19 @@ func copyCodexSSEHeaders(c *gin.Context, resp *http.Response) {
 	}
 }
 
+func PrepareEventStreamHeaders(c *gin.Context, resp *http.Response) {
+	if c == nil || c.Writer == nil {
+		return
+	}
+	if resp != nil {
+		if _, exists := c.Get(eventStreamHeadersCopiedKey); !exists {
+			c.Set(eventStreamHeadersCopiedKey, true)
+			copyCodexSSEHeaders(c, resp)
+		}
+	}
+	SetEventStreamHeaders(c)
+}
+
 type streamScannerOptions struct {
 	pingTicks    <-chan time.Time
 	writePing    func(*gin.Context) error
@@ -249,8 +263,7 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	defer cleanup()
 
 	scanner.Split(bufio.ScanLines)
-	copyCodexSSEHeaders(c, resp)
-	SetEventStreamHeaders(c)
+	PrepareEventStreamHeaders(c, resp)
 
 	ctx = context.WithValue(ctx, "stop_chan", stopChan)
 
