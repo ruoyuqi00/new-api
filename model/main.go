@@ -271,7 +271,7 @@ func migrateDB() error {
 		return err
 	}
 
-	err := DB.AutoMigrate(
+	autoMigrateModels := []interface{}{
 		&Channel{},
 		&AccountPool{},
 		&ProviderAccount{},
@@ -315,8 +315,14 @@ func migrateDB() error {
 		&YucoreCanvas{},
 		&YucoreCanvasVersion{},
 		&YucoreCanvasAgentRun{},
-		&YucoreMediaTask{},
-	)
+	}
+	// Existing production media assets can exceed MySQL TEXT's 64 KiB limit.
+	// Allow a media-capable worker to start without rewriting that historical
+	// column; all other schema migrations still run normally.
+	if !common.GetEnvOrDefaultBool("SKIP_YUCORE_MEDIA_AUTOMIGRATE", false) {
+		autoMigrateModels = append(autoMigrateModels, &YucoreMediaTask{})
+	}
+	err := DB.AutoMigrate(autoMigrateModels...)
 	if err != nil {
 		return err
 	}
@@ -396,7 +402,12 @@ func migrateDBFast() error {
 		{&YucoreCanvas{}, "YucoreCanvas"},
 		{&YucoreCanvasVersion{}, "YucoreCanvasVersion"},
 		{&YucoreCanvasAgentRun{}, "YucoreCanvasAgentRun"},
-		{&YucoreMediaTask{}, "YucoreMediaTask"},
+	}
+	if !common.GetEnvOrDefaultBool("SKIP_YUCORE_MEDIA_AUTOMIGRATE", false) {
+		migrations = append(migrations, struct {
+			model interface{}
+			name  string
+		}{&YucoreMediaTask{}, "YucoreMediaTask"})
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
