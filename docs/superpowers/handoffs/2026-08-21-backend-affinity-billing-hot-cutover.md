@@ -8,9 +8,9 @@ Date: 2026-08-21 (Asia/Shanghai)
 - Source branch: `codex/backend-integration-20260821`
 - Image: `yuapi:production-20260821-backend-affinity-billing`
 - Image ID: `sha256:10a16604274703044b66d0c21ff05d8033fad0e6cde7ac1e7bd48488ddf8434a`
-- Active container: `newapi-backend-affinity-billing-20260821-rc2`
-- Private binding: `127.0.0.1:13042 -> 3000/tcp`
-- Caddy network target: `newapi-backend-affinity-billing-20260821-rc2:3000`
+- Candidate container (retained, not active): `newapi-backend-affinity-billing-20260821-rc2`
+- Candidate private binding: `127.0.0.1:13042 -> 3000/tcp`
+- Current production target: the retained `d6605a79a` baseline container
 
 The release source contains the accepted production UI lineage from
 `d6605a79a` plus the committed stream recovery, GPT cache affinity, missing
@@ -58,17 +58,23 @@ Relevant files:
 - `Caddyfile.runtime-before`
 - `Caddyfile.to-backend-rc2`
 
-The running Caddy process was gracefully reloaded from:
+The candidate was briefly loaded and then rolled back after the public UI
+fingerprint did not match the known production UI. The running Caddy process
+was subsequently gracefully reloaded from:
 
 ```text
-/config/Caddyfile.to-backend-rc2
+/config/Caddyfile.runtime-before
 ```
 
-The host `/opt/edge/Caddyfile` contains the same candidate configuration, so a
-future Caddy container restart will mount the intended release. Until that
-restart remounts the file, do not reload from the stale in-container
-`/etc/caddy/Caddyfile`; use the validated `/config` file above. The rollback
-file is also available in the container as `/config/Caddyfile.runtime-before`.
+The host path and the in-container Caddy path previously diverged by inode.
+Do not infer the live target from `/opt/edge/Caddyfile`; inspect the running
+Caddy configuration before any future reload. The candidate configuration is
+retained as `/config/Caddyfile.to-backend-rc2` and the rollback configuration as
+`/config/Caddyfile.runtime-before`.
+
+The old baseline is currently receiving production traffic. The candidate is
+healthy but receives no traffic until its embedded UI assets are rebuilt from
+the exact production artifact set and revalidated locally.
 
 ## Verification
 
@@ -88,6 +94,16 @@ After the graceful reload:
 
 No database snapshot was restored, no balance was rewritten, and no previous
 container or image was removed.
+
+## Current rollback state (2026-08-22)
+
+- Caddy runtime target count: old baseline `2`, candidate `0`.
+- Candidate container remains healthy with restart count zero.
+- Public `api.yuaiapi.com` and `global.yuaiapi.com` home responses match the
+  retained old baseline fingerprint.
+- No production database, balance, or user data was changed during rollback.
+- The candidate UI mismatch is treated as a build-artifact recovery issue, not
+  as authorization to deploy a different frontend build.
 
 ## Rollback
 
