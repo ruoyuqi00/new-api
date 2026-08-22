@@ -96,6 +96,23 @@ func TestNormalizeYucoreMediaRequestPreservesConfiguredDurationOrder(t *testing.
 	assert.Equal(t, 5, *normalized.Duration)
 }
 
+func TestNormalizeYucoreMediaRequestDefaultsGrokImagineVideoToFiveSeconds(t *testing.T) {
+	selected := YucoreMediaCatalogModel{
+		Id:          "grok-imagine-video",
+		Kind:        YucoreMediaKindVideo,
+		Modes:       []string{"text-to-video", "image-to-video"},
+		Counts:      []int{1},
+		Durations:   []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+		Resolutions: []string{"480p", "720p", "1080p"},
+	}
+
+	normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, normalized.Duration)
+	assert.Equal(t, 5, *normalized.Duration)
+	assert.Equal(t, "480p", normalized.Resolution)
+}
+
 func TestNormalizeYucoreMediaRequestRejectsUnsupportedOptionalParameters(t *testing.T) {
 	generateAudio := false
 	seed := int64(0)

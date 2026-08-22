@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 const (
@@ -127,6 +128,9 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 		}
 	} else if len(durations) > 0 {
 		value := durations[0]
+		if ratio_setting.IsGrokImagineVideoModel(selected.Id) && yucoreMediaIntAllowed(5, durations) {
+			value = 5
+		}
 		normalized.Duration = &value
 	}
 

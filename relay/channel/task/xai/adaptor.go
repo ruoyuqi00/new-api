@@ -224,7 +224,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 			}
 			taskResult.Url = videoURL
 		}
-	case "failed", "expired", "cancelled":
+	case "failed", "expired", "cancelled", "canceled":
 		taskResult.Status = model.TaskStatusFailure
 		taskResult.Progress = "100%"
 		taskResult.Reason = "xAI video task " + strings.ToLower(result.Status)

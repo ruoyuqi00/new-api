@@ -45,6 +45,16 @@ func TestParseTaskResultMapsXAIStatusesAndVideoURL(t *testing.T) {
 	require.Equal(t, "100%", result.Progress)
 }
 
+func TestParseTaskResultTreatsBothCanceledSpellingsAsFailure(t *testing.T) {
+	for _, status := range []string{"canceled", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"status":"` + status + `"}`))
+			require.NoError(t, err)
+			require.Equal(t, model.TaskStatusFailure, result.Status)
+		})
+	}
+}
+
 func TestParseTaskResultResolvesRelativeVideoURL(t *testing.T) {
 	adaptor := &TaskAdaptor{baseURL: "https://api.example.com"}
 
