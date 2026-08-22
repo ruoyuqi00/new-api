@@ -7,9 +7,9 @@
 - 源码分支：`codex/grok-production-baseline-20260822`
 - 源码提交：`b6bfa6bbb`
 - GitHub 归档：`fork/codex/grok-production-baseline-20260822`
-- 生产镜像：`yuapi:production-20260823-gpt-b6bfa6bbb-ui`
-- 候选容器：`newapi-gpt-b6bfa6bbb`
-- 候选私有端口：`127.0.0.1:13051 -> 3000/tcp`
+- 生产镜像：`yuapi:production-20260823-gpt-b6bfa6bbb`
+- 当前容器：`newapi-gpt-b6bfa6bbb-local-ui`
+- 当前私有端口：`127.0.0.1:13052 -> 3000/tcp`
 
 本次只涉及 GPT 文本 usage 校验、无效 usage 清洗和文本结算边界；图片、视频、音频、品牌 UI、数据库结构、用户余额、渠道价格和 Caddyfile 内容均未修改。
 
@@ -24,7 +24,7 @@
 
 ## 切换方式
 
-- 复用生产镜像中的品牌 UI 资产，避免源码树 UI 覆盖生产品牌
+- 复用用户确认的本地 `3125` 候选 UI 资产（`index.fe9a6b5503.js`、`index.e589261730.css`），避免旧生产归档覆盖用户确认的品牌版本
 - 新容器复用现有生产环境变量和 `/opt/newapi/data:/data` 挂载
 - Caddy 配置未重载，稳定别名通过发布网络完成蓝绿切换
 - 旧容器保持运行，回滚只需将稳定别名接回旧容器，不恢复数据库快照
@@ -39,7 +39,9 @@
 - `api.yuaiapi.com`、`global.yuaiapi.com`、`vip.yuaiapi.com` 切换后均 `10/10` 返回 HTTP 200，随后观察轮均 `5/5`
 - 候选最近观察日志：502、panic/fatal、数据库错误、Redis 错误均为 `0`
 
+错误 UI 候选 `newapi-gpt-b6bfa6bbb` 已停止但镜像仍保留；未删除任何生产回滚容器、镜像或数据。
+
 ## 回滚
 
-不要停止新容器。将稳定别名从 `newapi-gpt-b6bfa6bbb` 接回旧目标
+不要停止新容器。将稳定别名从 `newapi-gpt-b6bfa6bbb-local-ui` 接回旧目标
 `newapi-candidate-20260816-d6605a79a-media-docs-rc2`，确认旧目标健康后，再验证三个公共域名、主页指纹和 `/api/status`。保留新旧镜像、容器、`/data` 和 Caddy 回滚副本，未经单独批准不得清理。
