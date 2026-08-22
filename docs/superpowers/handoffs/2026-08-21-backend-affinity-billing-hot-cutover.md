@@ -4,13 +4,14 @@ Date: 2026-08-21 (Asia/Shanghai)
 
 ## Release identity
 
-- Source commit: `3a7c7519d9738934b80140195b6603520c8477b5`
+- Source commit: `81c6b91d8820fb3cee72715e43ed8c2876981267`
 - Source branch: `codex/backend-integration-20260821`
-- Image: `yuapi:production-20260821-backend-affinity-billing`
-- Image ID: `sha256:10a16604274703044b66d0c21ff05d8033fad0e6cde7ac1e7bd48488ddf8434a`
-- Candidate container (retained, not active): `newapi-backend-affinity-billing-20260821-rc2`
-- Candidate private binding: `127.0.0.1:13042 -> 3000/tcp`
-- Current production target: the retained `d6605a79a` baseline container
+- Image: `yuapi:production-20260822-ui-baseline-81c6b91d8`
+- Image ID: `sha256:93b150f5b0840c654b0fdbe586bbb50a9cf6700909e489a02abd3064209cabaa`
+- Candidate container (active): `newapi-ui-baseline-20260822-rc1`
+- Candidate private binding: `127.0.0.1:13045 -> 3000/tcp`
+- Previous backend candidate (retained, not active): `newapi-backend-affinity-billing-20260821-rc2`
+- Current production target: `newapi-ui-baseline-20260822-rc1`
 
 The release source contains the accepted production UI lineage from
 `d6605a79a` plus the committed stream recovery, GPT cache affinity, missing
@@ -95,26 +96,51 @@ After the graceful reload:
 No database snapshot was restored, no balance was rewritten, and no previous
 container or image was removed.
 
-## Current rollback state (2026-08-22)
+## Current production state (2026-08-22)
 
-- Caddy runtime target count: old baseline `2`, candidate `0`.
-- Candidate container remains healthy with restart count zero.
+- Caddy runtime target count: UI baseline candidate `2`, previous target `0`.
+- UI baseline candidate remains healthy with restart count zero.
 - Public `api.yuaiapi.com` and `global.yuaiapi.com` home responses match the
   retained old baseline fingerprint.
-- No production database, balance, or user data was changed during rollback.
-- The candidate UI mismatch is treated as a build-artifact recovery issue, not
-  as authorization to deploy a different frontend build.
+- No production database, balance, or user data was changed during this UI-only
+  cutover.
+- The candidate UI mismatch was treated as a build-artifact recovery issue. The
+  active image was rebuilt with the recovered production `web/default/dist`
+  artifact set; no frontend source or backend strategy was changed for this
+  cutover.
+
+## UI-baseline cutover (2026-08-22)
+
+The recovered production UI archive was transferred separately from the source
+tree and verified with SHA-256:
+
+- UI archive: `1b0f21708da87215db99d3a088f5ce732c1ec088824b7c636e13cc99309b7b83`
+- Source archive: `81c6b91d8820fb3cee72715e43ed8c2876981267`
+- Pre-cutover runtime Caddy backup: `/opt/newapi/backups/20260822T-ui-baseline/Caddyfile.runtime-before-ui`
+- Cutover Caddy file: `/opt/newapi/backups/20260822T-ui-baseline/Caddyfile.to-ui-baseline`
+
+The candidate was first verified privately on `127.0.0.1:13045`. Its homepage
+SHA-256 exactly matched the retained baseline (`3f7a57592f3be48734bad3b19bec98ded5b1980e699491da7ddb08424e7cdf48`), and the
+old baseline asset fingerprints `index.134936448f.js` and
+`index.16fc389747.css` were served successfully. Caddy was then gracefully
+reloaded. The old containers and images remain available for rollback.
+
+Post-cutover checks recorded 20 consecutive successful `/api/status` requests
+for each of `api.yuaiapi.com`, `global.yuaiapi.com`, and `vip.yuaiapi.com`.
+The active candidate remained healthy with restart count zero, and the public
+homepage continued to return the baseline SHA-256.
 
 ## Rollback
 
 Rollback changes only Caddy runtime routing and the persisted host Caddyfile.
 Do not stop the new container first.
 
-1. Confirm the retained `d6605a79a` container is reachable through
-   `newapi-production-20260814-auth-origin-290db8f25:3000`.
-2. Copy `Caddyfile.runtime-before` over `/opt/edge/Caddyfile`.
-3. Validate `/config/Caddyfile.runtime-before` inside `yuapi-caddy`.
-4. Gracefully reload Caddy from `/config/Caddyfile.runtime-before`.
+1. Confirm the retained pre-cutover target is reachable through
+   `newapi-backend-affinity-billing-20260821-rc2:3000`.
+2. Copy `/opt/newapi/backups/20260822T-ui-baseline/Caddyfile.runtime-before-ui`
+   over `/opt/edge/Caddyfile`.
+3. Validate `/config/Caddyfile.rollback-ui-baseline` inside `yuapi-caddy`.
+4. Gracefully reload Caddy from `/config/Caddyfile.rollback-ui-baseline`.
 5. Verify the three public status endpoints, homepage fingerprint, retained
    container state, and error counters.
 6. Keep both release containers and both images until a later observation gate
