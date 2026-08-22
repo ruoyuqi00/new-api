@@ -717,18 +717,31 @@ func estimateYucoreMediaTaskCost(task *YucoreMediaTask) int {
 	config := getYucoreMediaAdapterConfig()
 	if config.Adapter == YucoreMediaAdapterYuAPIChannel {
 		if price, ok := yucoreMediaModelUnitPriceForGroup(task.ModelId, yucoreMediaTaskBillingGroup(task, config)); ok {
-			units := max(task.Count, 1)
+			units := float64(max(task.Count, 1))
 			if task.Kind == "video" && !YucoreMediaModelUsesPerCallPricing(task.ModelId) {
-				units = yucoreMediaTaskDuration(task)
-				if units <= 0 {
+				duration := yucoreMediaTaskDuration(task)
+				if duration <= 0 {
 					capability := yucoreMediaCapabilityForTask(task, config)
-					units = capability.FixedDurationSeconds
+					duration = capability.FixedDurationSeconds
 				}
-				if units <= 0 {
-					units = 1
+				if duration <= 0 {
+					duration = 1
+				}
+				units = float64(duration)
+				if ratio_setting.IsGrokImagineVideoModel(task.ModelId) {
+					resolution := yucoreMediaStringValue(yucoreMediaMetadataMap(task.Metadata)["resolution"])
+					if resolution == "" {
+						resolution = task.Size
+					}
+					if resolution == "" {
+						resolution = "480p"
+					}
+					if billingRatio, err := ratio_setting.GrokVideoBillingRatio(resolution, duration); err == nil {
+						units = billingRatio
+					}
 				}
 			}
-			return int(math.Ceil(price * common.QuotaPerUnit * float64(units)))
+			return int(math.Ceil(price * common.QuotaPerUnit * units))
 		}
 	}
 	if task.Kind == "video" {

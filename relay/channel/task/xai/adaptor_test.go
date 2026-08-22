@@ -1,8 +1,12 @@
 package xai
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
 	"github.com/QuantumNous/new-api/model"
@@ -60,4 +64,80 @@ func TestGetModelListOnlyContainsImagineMediaModels(t *testing.T) {
 		"grok-imagine-video-1.5",
 		"grok-imagine-video-1.5-preview",
 	}, models)
+}
+
+func TestGrokImagineVideoBillingUsesSecondsAndResolution(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		seconds    string
+		size       string
+		wantSecond float64
+		wantRes    float64
+	}{
+		{name: "default", model: "grok-imagine-video", wantSecond: 5, wantRes: 1},
+		{name: "720p", model: "grok-imagine-video-1.5", seconds: "10", size: "1280x720", wantSecond: 10, wantRes: 0.0594 / 0.0414},
+		{name: "1080p preview", model: "grok-imagine-video-1.5-preview", seconds: "15", size: "1920x1080", wantSecond: 15, wantRes: 0.0774 / 0.0414},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ratios, err := grokImagineVideoBilling(relaycommon.TaskSubmitReq{
+				Model:   tt.model,
+				Seconds: tt.seconds,
+				Size:    tt.size,
+			})
+
+			require.NoError(t, err)
+			require.InDelta(t, tt.wantSecond, ratios["seconds"], 0.000000001)
+			require.InDelta(t, tt.wantRes, ratios["resolution"], 0.000000001)
+		})
+	}
+}
+
+func TestGrokImagineVideoBillingUsesMetadataOverrides(t *testing.T) {
+	ratios, err := grokImagineVideoBilling(relaycommon.TaskSubmitReq{
+		Model:    "grok-imagine-video",
+		Seconds:  "5",
+		Size:     "1280x720",
+		Metadata: map[string]interface{}{"duration": 7, "resolution": "1080p"},
+	})
+
+	require.NoError(t, err)
+	require.InDelta(t, 7, ratios["seconds"], 0.000000001)
+	require.InDelta(t, 0.0774/0.0414, ratios["resolution"], 0.000000001)
+}
+
+func TestGrokImagineVideoBillingRejectsUnsupportedDimensions(t *testing.T) {
+	for _, req := range []relaycommon.TaskSubmitReq{
+		{Model: "grok-imagine-video", Seconds: "16"},
+		{Model: "grok-imagine-video", Seconds: "-1"},
+		{Model: "grok-imagine-video", Size: "1024x1024"},
+		{Model: "grok-imagine-video", Metadata: map[string]interface{}{"resolution": "4k"}},
+	} {
+		_, err := grokImagineVideoBilling(req)
+		require.Error(t, err)
+	}
+}
+
+func TestValidateGrokImagineVideoRejectsBeforeSubmission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{
+		"model":"grok-imagine-video",
+		"prompt":"test",
+		"seconds":16,
+		"size":"1280x720"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "grok-imagine-video",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+	}
+
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(context, info)
+
+	require.NotNil(t, taskErr)
+	require.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	require.True(t, taskErr.LocalError)
 }

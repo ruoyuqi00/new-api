@@ -132,6 +132,52 @@ func TestBuildYucoreMediaCatalogUsesOnlyActiveMediaRoutes(t *testing.T) {
 	assert.Equal(t, YucoreMediaKindVideo, catalog.Groups[0].Models[1].Kind)
 }
 
+func TestBuildYucoreMediaCatalogProjectsGrokImaginePricingAndLimits(t *testing.T) {
+	db := setupYucoreMediaCatalogTest(t)
+	createYucoreMediaCatalogUser(t, db, 9110)
+	ratio_setting.InitRatioSettings()
+
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 40, Type: constant.ChannelTypeXai, Name: "grok-imagine", Key: "key-40", Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "multimodal", Model: "grok-imagine-image", ChannelId: 40, Enabled: true},
+		{Group: "multimodal", Model: "grok-imagine-video", ChannelId: 40, Enabled: true},
+	}).Error)
+
+	catalog, err := BuildYucoreMediaCatalog(9110)
+	require.NoError(t, err)
+	require.NotEmpty(t, catalog.Groups)
+	require.Len(t, catalog.Groups[0].Models, 2)
+
+	models := make(map[string]YucoreMediaCatalogModel)
+	for _, item := range catalog.Groups[0].Models {
+		models[item.Id] = item
+	}
+	assert.Equal(t, "USD", models["grok-imagine-image"].Pricing.Currency)
+	assert.InDelta(t, 0.02619*1.5, models["grok-imagine-image"].Pricing.Amount, 0.000000001)
+	assert.Equal(t, "$0.039285/image", models["grok-imagine-image"].Pricing.Display)
+	assert.Equal(t, []string{"text-to-video", "image-to-video"}, models["grok-imagine-video"].Modes)
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, models["grok-imagine-video"].Durations)
+	assert.Equal(t, []string{"480p", "720p", "1080p"}, models["grok-imagine-video"].Resolutions)
+	assert.Equal(t, "USD", models["grok-imagine-video"].Pricing.Currency)
+	assert.InDelta(t, 0.0414*1.5, models["grok-imagine-video"].Pricing.Amount, 0.000000001)
+	assert.Equal(t, "$0.0621/second", models["grok-imagine-video"].Pricing.Display)
+
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"auto":1,"default":1,"multimodal":0.15}`))
+	model.InvalidatePricingCache()
+	catalog, err = BuildYucoreMediaCatalog(9110)
+	require.NoError(t, err)
+	models = make(map[string]YucoreMediaCatalogModel)
+	for _, item := range catalog.Groups[0].Models {
+		models[item.Id] = item
+	}
+	assert.Equal(t, 0.0039285, models["grok-imagine-image"].Pricing.Amount)
+	assert.Equal(t, "$0.0039285/image", models["grok-imagine-image"].Pricing.Display)
+	assert.Equal(t, 0.00621, models["grok-imagine-video"].Pricing.Amount)
+	assert.Equal(t, "$0.00621/second", models["grok-imagine-video"].Pricing.Display)
+}
+
 func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 	db := setupYucoreMediaCatalogTest(t)
 	createYucoreMediaCatalogUser(t, db, 9104)

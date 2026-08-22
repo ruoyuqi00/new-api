@@ -32,7 +32,8 @@ var TaskPricePatches []string
 // TaskPricePatchApplies reports whether task billing must ignore duration and
 // other request multipliers. Grok Imagine Video is explicitly duration-based.
 func TaskPricePatchApplies(model string) bool {
-	if strings.EqualFold(strings.TrimSpace(model), "grok-imagine-video-1.5-preview") {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "grok-imagine-video", "grok-imagine-video-1.5", "grok-imagine-video-1.5-preview":
 		return false
 	}
 	for _, patchedModel := range TaskPricePatches {

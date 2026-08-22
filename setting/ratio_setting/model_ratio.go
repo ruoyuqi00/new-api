@@ -298,12 +298,12 @@ var defaultModelPrice = map[string]float64{
 	"veo-3.0-fast-generate-001":      0.15,
 	"veo-3.1-generate-preview":       0.4,
 	"veo-3.1-fast-generate-preview":  0.15,
-	// xAI Imagine media: upstream image pricing is per image and video pricing is per second.
-	"grok-imagine-image":             0.06,
-	"grok-imagine-image-quality":     0.06,
-	"grok-imagine-video":             0.096,
-	"grok-imagine-video-1.5":         0.096,
-	"grok-imagine-video-1.5-preview": 0.096,
+	// xAI Imagine media: image pricing is per image and video pricing is per second.
+	"grok-imagine-image":             GrokImageGenerationPrice,
+	"grok-imagine-image-quality":     GrokImageGenerationPrice,
+	"grok-imagine-video":             GrokVideoBasePrice,
+	"grok-imagine-video-1.5":         GrokVideoBasePrice,
+	"grok-imagine-video-1.5-preview": GrokVideoBasePrice,
 }
 
 var defaultAudioRatio = map[string]float64{

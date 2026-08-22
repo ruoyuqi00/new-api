@@ -1132,13 +1132,18 @@ func TestYucoreMediaConfiguredModelIDs(t *testing.T) {
 	})
 
 	configured := YucoreMediaConfiguredModelIDs()
-	require.Len(t, configured, 22)
+	require.Len(t, configured, 26)
 	assert.Contains(t, configured, "grok-imagine-image")
+	assert.Contains(t, configured, "grok-imagine-image-quality")
+	assert.Contains(t, configured, "grok-imagine-video")
+	assert.Contains(t, configured, "grok-imagine-video-1.5")
+	assert.Contains(t, configured, "grok-imagine-video-1.5-preview")
 	assert.Contains(t, configured, "gpt-image-2-adobe")
 	assert.Contains(t, configured, "gpt-image-2-2k")
 	assert.Contains(t, configured, "grok-video")
 	assert.NotContains(t, configured, "seedance-2.0-mini-8s")
 	assert.NotContains(t, configured, "veo-clean")
+	assert.NotContains(t, configured, "grok-imagine-edit")
 
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap["yucore_media.adapter"] = YucoreMediaAdapterUAGProxy
@@ -1394,6 +1399,35 @@ func TestEstimateYucoreMediaTaskCostChargesGrokVideoByDuration(t *testing.T) {
 		Metadata: `{"duration":15}`,
 	})
 	assert.Equal(t, 5_850_000, cost)
+}
+
+func TestEstimateYucoreMediaTaskCostChargesGrokImagineVideoResolution(t *testing.T) {
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	originalGroups := ratio_setting.GroupRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"grok-imagine-video":0.0414}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"media-group":1.2}`))
+
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":             YucoreMediaAdapterYuAPIChannel,
+		"yucore_media.managed_token_group": "media-group",
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroups))
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	cost := estimateYucoreMediaTaskCost(&YucoreMediaTask{
+		Kind:     "video",
+		ModelId:  "grok-imagine-video",
+		Metadata: `{"duration":10,"resolution":"720p"}`,
+	})
+	assert.Equal(t, 356400, cost)
 }
 
 func TestYucoreMediaModelUnitPriceUsesManagedGroupRatio(t *testing.T) {

@@ -2,6 +2,7 @@ package model
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -15,6 +16,7 @@ func TestCangyuanCatalogMatchesAuditedVideoInventory(t *testing.T) {
 	require.NoError(t, err)
 
 	enabled := []string{
+		"grok-imagine-video", "grok-imagine-video-1.5", "grok-imagine-video-1.5-preview",
 		"grok-video", "grok-video-1.5", "happyhouse-1.0", "happyhouse-1.1",
 		"minimax-h3-2k", "omni-fast", "omni-fast-no-water", "omni-v2v",
 		"omni-v2v-no-water", "sd7-seedance-2.0-1080p", "sd7-seedance-2.0-720p",
@@ -48,12 +50,38 @@ func TestCangyuanCatalogMatchesAuditedVideoInventory(t *testing.T) {
 	}
 }
 
+func TestCangyuanCatalogIncludesOnlyVerifiedGrokImagineModels(t *testing.T) {
+	catalog, err := loadCangyuanMediaCatalog()
+	require.NoError(t, err)
+
+	for _, modelID := range []string{"grok-imagine-image", "grok-imagine-image-quality"} {
+		capability, ok := catalog[modelID]
+		require.True(t, ok, modelID)
+		assert.Equal(t, "image", capability.Kind, modelID)
+		assert.Equal(t, YucoreMediaPricingPerCall, capability.PricingUnit, modelID)
+		assert.Equal(t, "/v1/images/generations", capability.CreatePath, modelID)
+	}
+
+	for _, modelID := range []string{"grok-imagine-video", "grok-imagine-video-1.5", "grok-imagine-video-1.5-preview"} {
+		capability, ok := catalog[modelID]
+		require.True(t, ok, modelID)
+		assert.Equal(t, "video", capability.Kind, modelID)
+		assert.Equal(t, YucoreMediaPricingPerSecond, capability.PricingUnit, modelID)
+		assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, capability.Durations, modelID)
+		assert.Equal(t, []string{"480p", "720p", "1080p"}, capability.Resolutions, modelID)
+		assert.Equal(t, "/v1/videos/generations", capability.CreatePath, modelID)
+	}
+
+	assert.NotContains(t, catalog, "grok-imagine-edit")
+}
+
 func TestCangyuanCatalogMatchesAuditedCostsAndCapabilities(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
 
 	type expectedCapability struct {
 		cost               float64
+		pricingUnit        string
 		policy             string
 		fixedDuration      int
 		durations          []int
@@ -72,25 +100,32 @@ func TestCangyuanCatalogMatchesAuditedCostsAndCapabilities(t *testing.T) {
 	grokRatios := []string{"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"}
 	seedanceRatios := []string{"16:9", "9:16", "1:1", "21:9", "3:4", "4:3"}
 	expected := map[string]expectedCapability{
-		"grok-video":             {cost: 0.69, policy: yucoreMediaDurationPolicyDuration, durations: []int{4, 6, 8, 10, 12, 15}, resolutions: []string{"480p", "720p"}, aspectRatios: grokRatios, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 1, Total: 1}, allowed: []string{"duration", "resolution", "aspect_ratio", "reference_image_urls"}},
-		"grok-video-1.5":         {cost: 1.39, policy: yucoreMediaDurationPolicyDuration, durations: []int{4, 6, 8, 10, 12, 15}, resolutions: []string{"480p", "720p"}, aspectRatios: grokRatios, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 7, Total: 7}, allowed: []string{"duration", "resolution", "aspect_ratio", "reference_image_urls"}},
-		"happyhouse-1.0":         {cost: 4.5, policy: yucoreMediaDurationPolicyDuration, durations: range3To15, resolutions: []string{"720p", "1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "3:4", "4:3"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Videos: 1, Total: 9, MinVideoDurationMS: 3000, MaxVideoDurationMS: 10000, MaxTotalVideoDurationMS: 10000, MaxImagesWithVideo: 5}, supportsAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos"}},
-		"happyhouse-1.1":         {cost: 2.9, policy: yucoreMediaDurationPolicyDuration, durations: range3To15, resolutions: []string{"720p", "1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "3:4", "4:3"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Total: 9}, supportsAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls"}},
-		"minimax-h3-2k":          {cost: 3.5, policy: yucoreMediaDurationPolicyDuration, durations: range5To15, resolutions: []string{"2k"}, aspectRatios: seedanceRatios, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Audios: 3, Total: 8, MaxAudioDurationMS: 15000, MaxTotalAudioDurationMS: 15000}, supportsAudio: true, disallowFrameAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_audios", "first_image_url", "last_image_url"}},
-		"omni-fast":              {cost: 0.6624, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Total: 5}, allowed: []string{"aspect_ratio", "reference_image_urls", "first_image_url", "last_image_url"}},
-		"omni-fast-no-water":     {cost: 0.81, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Total: 5}, allowed: []string{"aspect_ratio", "reference_image_urls", "first_image_url", "last_image_url"}},
-		"omni-v2v":               {cost: 0.8856, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Videos: 1, Total: 1}, requiredKinds: []string{"video"}, allowed: []string{"aspect_ratio", "reference_videos"}},
-		"omni-v2v-no-water":      {cost: 1.035, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Videos: 1, Total: 1}, requiredKinds: []string{"video"}, allowed: []string{"aspect_ratio", "reference_videos"}},
-		"sd7-seedance-2.0-1080p": {cost: 4.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 5, Videos: 3, Audios: 3, Total: 11}, supportsAudio: true, allowed: []string{"duration", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios"}},
-		"sd7-seedance-2.0-720p":  {cost: 3.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 5, Videos: 3, Audios: 3, Total: 11}, supportsAudio: true, allowed: []string{"duration", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios"}},
-		"sd8-seedance-2.0":       {cost: 2.9, policy: yucoreMediaDurationPolicyDuration, durations: []int{5, 10, 15}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Videos: 3, Audios: 3, Total: 15}, allowed: []string{"duration", "aspect_ratio", "reference_image_urls", "reference_videos", "reference_audios"}},
-		"seedance-2.0":           {cost: 3.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 5, Videos: 3, Audios: 3, Total: 11}, supportsAudio: true, allowed: []string{"duration", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios"}},
+		"grok-imagine-video":             {cost: 0.0414, pricingUnit: YucoreMediaPricingPerSecond, policy: yucoreMediaDurationPolicySeconds, durations: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, resolutions: []string{"480p", "720p", "1080p"}, aspectRatios: []string{"1:1", "16:9", "9:16", "4:3", "3:4"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 1, Total: 1}, allowed: []string{"duration", "seconds", "resolution", "size", "aspect_ratio", "image", "images"}},
+		"grok-imagine-video-1.5":         {cost: 0.0414, pricingUnit: YucoreMediaPricingPerSecond, policy: yucoreMediaDurationPolicySeconds, durations: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, resolutions: []string{"480p", "720p", "1080p"}, aspectRatios: []string{"1:1", "16:9", "9:16", "4:3", "3:4"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 1, Total: 1}, allowed: []string{"duration", "seconds", "resolution", "size", "aspect_ratio", "image", "images"}},
+		"grok-imagine-video-1.5-preview": {cost: 0.0414, pricingUnit: YucoreMediaPricingPerSecond, policy: yucoreMediaDurationPolicySeconds, durations: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, resolutions: []string{"480p", "720p", "1080p"}, aspectRatios: []string{"1:1", "16:9", "9:16", "4:3", "3:4"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 1, Total: 1}, allowed: []string{"duration", "seconds", "resolution", "size", "aspect_ratio", "image", "images"}},
+		"grok-video":                     {cost: 0.69, policy: yucoreMediaDurationPolicyDuration, durations: []int{4, 6, 8, 10, 12, 15}, resolutions: []string{"480p", "720p"}, aspectRatios: grokRatios, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 1, Total: 1}, allowed: []string{"duration", "resolution", "aspect_ratio", "reference_image_urls"}},
+		"grok-video-1.5":                 {cost: 1.39, policy: yucoreMediaDurationPolicyDuration, durations: []int{4, 6, 8, 10, 12, 15}, resolutions: []string{"480p", "720p"}, aspectRatios: grokRatios, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 7, Total: 7}, allowed: []string{"duration", "resolution", "aspect_ratio", "reference_image_urls"}},
+		"happyhouse-1.0":                 {cost: 4.5, policy: yucoreMediaDurationPolicyDuration, durations: range3To15, resolutions: []string{"720p", "1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "3:4", "4:3"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Videos: 1, Total: 9, MinVideoDurationMS: 3000, MaxVideoDurationMS: 10000, MaxTotalVideoDurationMS: 10000, MaxImagesWithVideo: 5}, supportsAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos"}},
+		"happyhouse-1.1":                 {cost: 2.9, policy: yucoreMediaDurationPolicyDuration, durations: range3To15, resolutions: []string{"720p", "1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "3:4", "4:3"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Total: 9}, supportsAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls"}},
+		"minimax-h3-2k":                  {cost: 3.5, policy: yucoreMediaDurationPolicyDuration, durations: range5To15, resolutions: []string{"2k"}, aspectRatios: seedanceRatios, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Audios: 3, Total: 8, MaxAudioDurationMS: 15000, MaxTotalAudioDurationMS: 15000}, supportsAudio: true, disallowFrameAudio: true, allowed: []string{"duration", "resolution", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_audios", "first_image_url", "last_image_url"}},
+		"omni-fast":                      {cost: 0.6624, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Total: 5}, allowed: []string{"aspect_ratio", "reference_image_urls", "first_image_url", "last_image_url"}},
+		"omni-fast-no-water":             {cost: 0.81, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media", "frames"}, limits: YucoreMediaReferenceLimits{Images: 5, Total: 5}, allowed: []string{"aspect_ratio", "reference_image_urls", "first_image_url", "last_image_url"}},
+		"omni-v2v":                       {cost: 0.8856, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Videos: 1, Total: 1}, requiredKinds: []string{"video"}, allowed: []string{"aspect_ratio", "reference_videos"}},
+		"omni-v2v-no-water":              {cost: 1.035, policy: yucoreMediaDurationPolicyFixed, fixedDuration: 10, durations: []int{10}, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Videos: 1, Total: 1}, requiredKinds: []string{"video"}, allowed: []string{"aspect_ratio", "reference_videos"}},
+		"sd7-seedance-2.0-1080p":         {cost: 4.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"1080p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 5, Videos: 3, Audios: 3, Total: 11}, supportsAudio: true, allowed: []string{"duration", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios"}},
+		"sd7-seedance-2.0-720p":          {cost: 3.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 5, Videos: 3, Audios: 3, Total: 11}, supportsAudio: true, allowed: []string{"duration", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios"}},
+		"sd8-seedance-2.0":               {cost: 2.9, policy: yucoreMediaDurationPolicyDuration, durations: []int{5, 10, 15}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 9, Videos: 3, Audios: 3, Total: 15}, allowed: []string{"duration", "aspect_ratio", "reference_image_urls", "reference_videos", "reference_audios"}},
+		"seedance-2.0":                   {cost: 3.9, policy: yucoreMediaDurationPolicyDuration, durations: range4To15, resolutions: []string{"720p"}, aspectRatios: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, referenceModes: []string{"media"}, limits: YucoreMediaReferenceLimits{Images: 5, Videos: 3, Audios: 3, Total: 11}, supportsAudio: true, allowed: []string{"duration", "aspect_ratio", "generate_audio", "reference_image_urls", "reference_videos", "reference_audios"}},
 	}
 	totalCost := 0.0
 	for modelID, want := range expected {
 		capability := catalog[modelID]
 		assert.Equal(t, YucoreMediaAvailabilityEnabled, capability.Availability, modelID)
-		assert.Equal(t, YucoreMediaPricingPerCall, capability.PricingUnit, modelID)
+		pricingUnit := want.pricingUnit
+		if pricingUnit == "" {
+			pricingUnit = YucoreMediaPricingPerCall
+		}
+		assert.Equal(t, pricingUnit, capability.PricingUnit, modelID)
 		assert.InDelta(t, want.cost, capability.UpstreamCost, 0.0000001, modelID)
 		assert.Equal(t, want.policy, capability.DurationPolicy, modelID)
 		assert.Equal(t, want.fixedDuration, capability.FixedDurationSeconds, modelID)
@@ -104,14 +139,18 @@ func TestCangyuanCatalogMatchesAuditedCostsAndCapabilities(t *testing.T) {
 		assert.Equal(t, want.requiredKinds, capability.RequiredReferenceKinds, modelID)
 		assert.Equal(t, want.disallowFrameAudio, capability.DisallowGeneratedAudioWithFrames, modelID)
 		assert.Equal(t, want.allowed, capability.AllowedParameters, modelID)
-		assert.Equal(t, "/v1/videos", capability.CreatePath, modelID)
+		if strings.HasPrefix(modelID, "grok-imagine-") {
+			assert.Equal(t, "/v1/videos/generations", capability.CreatePath, modelID)
+		} else {
+			assert.Equal(t, "/v1/videos", capability.CreatePath, modelID)
+		}
 		assert.Equal(t, "/v1/videos/{task_id}", capability.StatusPath, modelID)
 		assert.Equal(t, "/v1/videos/{task_id}/content", capability.ContentPath, modelID)
 		assert.Equal(t, 5, capability.PollIntervalSeconds, modelID)
 		assert.Equal(t, 7200, capability.MaxPollDurationSeconds, modelID)
 		totalCost += capability.UpstreamCost
 	}
-	assert.InDelta(t, 31.973, totalCost, 0.0000001)
+	assert.InDelta(t, 32.0972, totalCost, 0.0000001)
 
 	for _, modelID := range []string{
 		"sd4-seedance-2.0", "sd4-seedance-2.0-fast", "sd8-seedance-2.0-fast",

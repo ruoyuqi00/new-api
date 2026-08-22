@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/shopspring/decimal"
 )
 
 const (
@@ -216,19 +217,41 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 
 	pricingUnit := strings.ToLower(strings.TrimSpace(capability.PricingUnit))
 	explicitPricingUnit := pricingUnit != ""
+	isGrokImagine := strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelID)), "grok-imagine-")
 	if !explicitPricingUnit {
 		pricingUnit = "per_call"
 		if kind == YucoreMediaKindVideo && !constant.TaskPricePatchApplies(modelID) {
 			pricingUnit = "per_second"
 		}
 	}
+	if isGrokImagine && kind == YucoreMediaKindImage && pricingUnit == model.YucoreMediaPricingPerCall {
+		pricingUnit = "per_asset"
+	}
 	if price, ok := ratio_setting.GetModelPrice(modelID, false); ok {
-		price *= groupRatio
+		if !isGrokImagine {
+			price *= groupRatio
+			item.Pricing = YucoreMediaCatalogPricing{
+				Unit:     pricingUnit,
+				Amount:   price,
+				Currency: "CNY",
+				Display:  fmt.Sprintf("CNY %g", price),
+			}
+			return item
+		}
+		priceDecimal := decimal.NewFromFloat(price).Mul(decimal.NewFromFloat(groupRatio))
+		price, _ = priceDecimal.Float64()
+		unitLabel := "/request"
+		switch pricingUnit {
+		case "per_asset":
+			unitLabel = "/image"
+		case "per_second", "per_base_seconds":
+			unitLabel = "/second"
+		}
 		item.Pricing = YucoreMediaCatalogPricing{
 			Unit:     pricingUnit,
 			Amount:   price,
-			Currency: "CNY",
-			Display:  fmt.Sprintf("CNY %g", price),
+			Currency: "USD",
+			Display:  fmt.Sprintf("$%s%s", priceDecimal.String(), unitLabel),
 		}
 	} else if configured && explicitPricingUnit {
 		item.Pricing.Unit = pricingUnit

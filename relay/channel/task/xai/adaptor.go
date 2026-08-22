@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -56,6 +58,16 @@ type statusResponse struct {
 	Error  *errorResult `json:"error,omitempty"`
 }
 
+type grokImagineVideoDimensions struct {
+	Duration   int
+	Resolution string
+}
+
+type grokImagineVideoMetadata struct {
+	Duration   *int    `json:"duration,omitempty"`
+	Resolution *string `json:"resolution,omitempty"`
+}
+
 type TaskAdaptor struct {
 	taskcommon.BaseBilling
 	ChannelType int
@@ -70,11 +82,34 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
-	return relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate)
+	if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate); taskErr != nil {
+		return taskErr
+	}
+	if !ratio_setting.IsGrokImagineVideoModel(info.OriginModelName) {
+		return nil
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err == nil {
+		_, err = normalizeGrokImagineVideoDimensions(req)
+	}
+	if err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_grok_video_dimensions", http.StatusBadRequest)
+	}
+	return nil
 }
 
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	req, err := relaycommon.GetTaskRequest(c)
+	if ratio_setting.IsGrokImagineVideoModel(info.OriginModelName) {
+		if err != nil {
+			return nil
+		}
+		ratios, billingErr := grokImagineVideoBilling(req)
+		if billingErr != nil {
+			return nil
+		}
+		return ratios
+	}
 	if err != nil {
 		return map[string]float64{"seconds": 5}
 	}
@@ -222,7 +257,7 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq, in
 	if duration <= 0 {
 		duration = 5
 	}
-	if duration > 15 {
+	if !ratio_setting.IsGrokImagineVideoModel(info.OriginModelName) && duration > 15 {
 		duration = 15
 	}
 	payload := &requestPayload{
@@ -245,7 +280,93 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq, in
 	if payload.Model == "" {
 		payload.Model = info.UpstreamModelName
 	}
+	if ratio_setting.IsGrokImagineVideoModel(info.OriginModelName) {
+		dimensions, err := normalizeGrokImagineVideoDimensions(*req)
+		if err != nil {
+			return nil, err
+		}
+		payload.Duration = dimensions.Duration
+		payload.Resolution = dimensions.Resolution
+	}
 	return payload, nil
+}
+
+func grokImagineVideoBilling(req relaycommon.TaskSubmitReq) (map[string]float64, error) {
+	dimensions, err := normalizeGrokImagineVideoDimensions(req)
+	if err != nil {
+		return nil, err
+	}
+	secondPrice, err := ratio_setting.GrokVideoSecondPrice(dimensions.Resolution)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]float64{
+		"seconds":    float64(dimensions.Duration),
+		"resolution": secondPrice / ratio_setting.GrokVideoBasePrice,
+	}, nil
+}
+
+func normalizeGrokImagineVideoDimensions(req relaycommon.TaskSubmitReq) (grokImagineVideoDimensions, error) {
+	duration := req.Duration
+	if duration == 0 && strings.TrimSpace(req.Seconds) != "" {
+		var err error
+		duration, err = strconv.Atoi(strings.TrimSpace(req.Seconds))
+		if err != nil {
+			return grokImagineVideoDimensions{}, fmt.Errorf("Grok video duration must be an integer between 1 and 15")
+		}
+	}
+	if duration == 0 {
+		duration = 5
+	}
+	resolution, err := strictResolutionFromSize(req.Size)
+	if err != nil {
+		return grokImagineVideoDimensions{}, err
+	}
+	metadata := grokImagineVideoMetadata{}
+	if err := taskcommon.UnmarshalMetadata(maps.Clone(req.Metadata), &metadata); err != nil {
+		return grokImagineVideoDimensions{}, errors.Wrap(err, "unmarshal Grok video billing metadata failed")
+	}
+	if metadata.Duration != nil {
+		duration = *metadata.Duration
+	}
+	if metadata.Resolution != nil {
+		resolution = strings.TrimSpace(*metadata.Resolution)
+	}
+	if _, err := ratio_setting.GrokVideoBillingRatio(resolution, duration); err != nil {
+		return grokImagineVideoDimensions{}, err
+	}
+	return grokImagineVideoDimensions{Duration: duration, Resolution: normalizeResolution(resolution)}, nil
+}
+
+func strictResolutionFromSize(size string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(size))
+	if value == "" || value == "16:9" || value == "9:16" || value == "1:1" || value == "4:3" || value == "3:4" {
+		return "480p", nil
+	}
+	if value == "480" || value == "480p" || value == "720" || value == "720p" || value == "1080" || value == "1080p" {
+		return normalizeResolution(value), nil
+	}
+	parts := strings.Split(value, "x")
+	if len(parts) == 2 {
+		width, widthErr := strconv.Atoi(parts[0])
+		height, heightErr := strconv.Atoi(parts[1])
+		if widthErr == nil && heightErr == nil {
+			for _, resolution := range []int{1080, 720, 480} {
+				if width == resolution || height == resolution {
+					return strconv.Itoa(resolution) + "p", nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("unsupported Grok video resolution %q", size)
+}
+
+func normalizeResolution(resolution string) string {
+	value := strings.ToLower(strings.TrimSpace(resolution))
+	if !strings.HasSuffix(value, "p") {
+		value += "p"
+	}
+	return value
 }
 
 func aspectRatioFromSize(size string) string {
