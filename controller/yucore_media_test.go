@@ -1115,4 +1115,14 @@ func TestServeYucoreMediaTaskAssetRoutesCompletedYuAPIVideoThroughLocalContent(t
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "routed-video-bytes", recorder.Body.String())
 	assert.Equal(t, "/v1/videos/"+publicTaskID+"/content", requestedPath)
+
+	requestedPath = ""
+	thumbnailRecorder := httptest.NewRecorder()
+	thumbnailContext, _ := gin.CreateTestContext(thumbnailRecorder)
+	thumbnailContext.Request = httptest.NewRequest(http.MethodGet, "/api/yucore/media/tasks/yu_routed_video/assets/0?variant=thumbnail", nil)
+	thumbnailContext.Params = gin.Params{{Key: "task_id", Value: task.TaskId}, {Key: "index", Value: "0"}}
+	thumbnailContext.Set("id", task.UserId)
+	ServeYucoreMediaTaskAsset(thumbnailContext)
+	assert.Equal(t, http.StatusOK, thumbnailRecorder.Code)
+	assert.Equal(t, "/v1/videos/"+publicTaskID+"/content", requestedPath)
 }

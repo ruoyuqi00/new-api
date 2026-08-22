@@ -1098,6 +1098,9 @@ func TestYucoreMediaAssetSourceForTaskUsesRoutedVideoProxy(t *testing.T) {
 	}
 
 	assert.Equal(t, "/v1/videos/"+publicTaskID+"/content", YucoreMediaAssetSourceForTask(task, asset))
+	assert.Equal(t, "/v1/videos/"+publicTaskID+"/content", YucoreMediaAssetThumbnailSourceForTask(task, asset))
+	asset.SourceThumbUrl = "https://provider.example/private/thumb.jpg?signature=redacted"
+	assert.Equal(t, asset.SourceThumbUrl, YucoreMediaAssetThumbnailSourceForTask(task, asset))
 	assert.Equal(t, asset.SourceUrl, YucoreMediaAssetSourceForTask(&YucoreMediaTask{
 		Kind:     "video",
 		Metadata: `{"adapter":"openai-compatible","upstream_task_id":"task_public_asset"}`,

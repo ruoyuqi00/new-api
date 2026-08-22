@@ -933,6 +933,13 @@ func YucoreMediaAssetThumbnailSource(asset YucoreMediaAsset) string {
 	return YucoreMediaAssetSource(asset)
 }
 
+func YucoreMediaAssetThumbnailSourceForTask(task *YucoreMediaTask, asset YucoreMediaAsset) string {
+	if task != nil && task.Kind == "video" && yucoreMediaTaskAdapter(task) == YucoreMediaAdapterYuAPIChannel && strings.TrimSpace(asset.SourceThumbUrl) == "" {
+		return YucoreMediaAssetSourceForTask(task, asset)
+	}
+	return YucoreMediaAssetThumbnailSource(asset)
+}
+
 func ResolveYucoreMediaAssetSourceURL(source string) (string, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
