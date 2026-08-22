@@ -2,6 +2,7 @@ package ratio_setting
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -69,9 +70,13 @@ func IsGrokImagineVideoModel(model string) bool {
 func normalizeGrokVideoResolution(resolution string) string {
 	value := strings.ToLower(strings.TrimSpace(resolution))
 	if parts := strings.Split(value, "x"); len(parts) == 2 {
-		for _, candidate := range []string{"1080", "720", "480"} {
-			if parts[0] == candidate || parts[1] == candidate {
-				return candidate + "p"
+		if _, widthErr := strconv.Atoi(parts[0]); widthErr == nil {
+			if _, heightErr := strconv.Atoi(parts[1]); heightErr == nil {
+				for _, candidate := range []string{"1080", "720", "480"} {
+					if parts[0] == candidate || parts[1] == candidate {
+						return candidate + "p"
+					}
+				}
 			}
 		}
 	}

@@ -858,6 +858,8 @@ type TaskSubmitReq struct {
 	Seconds        string                 `json:"seconds,omitempty"`
 	InputReference string                 `json:"input_reference,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	durationSet    bool
+	secondsSet     bool
 }
 
 func (t *TaskSubmitReq) GetPrompt() string {
@@ -866,6 +868,14 @@ func (t *TaskSubmitReq) GetPrompt() string {
 
 func (t *TaskSubmitReq) HasImage() bool {
 	return len(t.Images) > 0 || len(t.ImageURLs) > 0
+}
+
+func (t *TaskSubmitReq) HasDuration() bool {
+	return t != nil && t.durationSet
+}
+
+func (t *TaskSubmitReq) HasSeconds() bool {
+	return t != nil && t.secondsSet
 }
 
 func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
@@ -884,6 +894,7 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 	}
 
 	if len(aux.Duration) > 0 {
+		t.durationSet = true
 		var durationInt int
 		if err := common.Unmarshal(aux.Duration, &durationInt); err == nil {
 			t.Duration = durationInt
@@ -904,6 +915,7 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 	}
 
 	if len(aux.Seconds) > 0 {
+		t.secondsSet = true
 		var secondsInt int
 		if err := common.Unmarshal(aux.Seconds, &secondsInt); err == nil {
 			t.Seconds = strconv.Itoa(secondsInt)

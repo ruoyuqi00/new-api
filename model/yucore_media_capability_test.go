@@ -60,6 +60,8 @@ func TestCangyuanCatalogIncludesOnlyVerifiedGrokImagineModels(t *testing.T) {
 		assert.Equal(t, "image", capability.Kind, modelID)
 		assert.Equal(t, YucoreMediaPricingPerCall, capability.PricingUnit, modelID)
 		assert.Equal(t, "/v1/images/generations", capability.CreatePath, modelID)
+		assert.Empty(t, capability.Resolutions, modelID)
+		assert.Empty(t, capability.AspectRatios, modelID)
 	}
 
 	for _, modelID := range []string{"grok-imagine-video", "grok-imagine-video-1.5", "grok-imagine-video-1.5-preview"} {

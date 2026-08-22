@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/QuantumNous/new-api/model"
@@ -122,12 +124,38 @@ func TestGrokImagineVideoBillingRejectsUnsupportedDimensions(t *testing.T) {
 	for _, req := range []relaycommon.TaskSubmitReq{
 		{Model: "grok-imagine-video", Seconds: "16"},
 		{Model: "grok-imagine-video", Seconds: "-1"},
+		{Model: "grok-imagine-video", Seconds: "0"},
 		{Model: "grok-imagine-video", Size: "1024x1024"},
 		{Model: "grok-imagine-video", Metadata: map[string]interface{}{"resolution": "4k"}},
+		{Model: "grok-imagine-video", Metadata: map[string]interface{}{"resolution": "fooX720"}},
 	} {
 		_, err := grokImagineVideoBilling(req)
 		require.Error(t, err)
 	}
+}
+
+func TestGrokImagineVideoBillingRejectsExplicitDurationZero(t *testing.T) {
+	for _, requestJSON := range []string{
+		`{"model":"grok-imagine-video","duration":0}`,
+		`{"model":"grok-imagine-video","seconds":0}`,
+		`{"model":"grok-imagine-video","duration":5,"seconds":0}`,
+	} {
+		request := relaycommon.TaskSubmitReq{}
+		require.NoError(t, common.Unmarshal([]byte(requestJSON), &request))
+		_, err := grokImagineVideoBilling(request)
+		require.Error(t, err)
+	}
+}
+
+func TestGrokImagineVideoMetadataResolutionIsCanonicalized(t *testing.T) {
+	request := relaycommon.TaskSubmitReq{
+		Model:    "grok-imagine-video",
+		Seconds:  "5",
+		Metadata: map[string]interface{}{"resolution": "1280x720"},
+	}
+	dimensions, err := normalizeGrokImagineVideoDimensions(request)
+	require.NoError(t, err)
+	assert.Equal(t, "720p", dimensions.Resolution)
 }
 
 func TestValidateGrokImagineVideoRejectsBeforeSubmission(t *testing.T) {

@@ -307,12 +307,20 @@ func grokImagineVideoBilling(req relaycommon.TaskSubmitReq) (map[string]float64,
 }
 
 func normalizeGrokImagineVideoDimensions(req relaycommon.TaskSubmitReq) (grokImagineVideoDimensions, error) {
+	if req.HasDuration() && req.Duration < 1 {
+		return grokImagineVideoDimensions{}, fmt.Errorf("Grok video duration must be an integer between 1 and 15")
+	}
 	duration := req.Duration
-	if duration == 0 && strings.TrimSpace(req.Seconds) != "" {
-		var err error
-		duration, err = strconv.Atoi(strings.TrimSpace(req.Seconds))
+	if req.HasSeconds() || strings.TrimSpace(req.Seconds) != "" {
+		seconds, err := strconv.Atoi(strings.TrimSpace(req.Seconds))
 		if err != nil {
 			return grokImagineVideoDimensions{}, fmt.Errorf("Grok video duration must be an integer between 1 and 15")
+		}
+		if seconds < 1 {
+			return grokImagineVideoDimensions{}, fmt.Errorf("Grok video duration must be an integer between 1 and 15")
+		}
+		if duration == 0 {
+			duration = seconds
 		}
 	}
 	if duration == 0 {
@@ -330,7 +338,10 @@ func normalizeGrokImagineVideoDimensions(req relaycommon.TaskSubmitReq) (grokIma
 		duration = *metadata.Duration
 	}
 	if metadata.Resolution != nil {
-		resolution = strings.TrimSpace(*metadata.Resolution)
+		resolution, err = strictResolutionFromSize(*metadata.Resolution)
+		if err != nil {
+			return grokImagineVideoDimensions{}, err
+		}
 	}
 	if _, err := ratio_setting.GrokVideoBillingRatio(resolution, duration); err != nil {
 		return grokImagineVideoDimensions{}, err

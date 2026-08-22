@@ -56,11 +56,13 @@ func TestGrokVideoSecondPriceNormalizesResolutionAliases(t *testing.T) {
 }
 
 func TestGrokVideoBillingRejectsUnsupportedDimensions(t *testing.T) {
-	_, err := GrokVideoSecondPrice("4k")
-	require.ErrorContains(t, err, "unsupported Grok video resolution")
+	for _, resolution := range []string{"4k", "fooX720", "720xbar"} {
+		_, err := GrokVideoSecondPrice(resolution)
+		require.ErrorContains(t, err, "unsupported Grok video resolution")
+	}
 
 	for _, seconds := range []int{0, -1, 16} {
-		_, err = GrokVideoBillingRatio("720p", seconds)
+		_, err := GrokVideoBillingRatio("720p", seconds)
 		require.ErrorContains(t, err, "unsupported Grok video duration")
 	}
 }
