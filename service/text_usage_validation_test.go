@@ -2,9 +2,13 @@ package service
 
 import (
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,6 +64,21 @@ func TestValidGPTTextUsageRejectsMalformedOrAmplifiedUsage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.valid, ValidGPTTextUsage(tt.usage))
+		})
+	}
+}
+
+func TestGPTTextSettlementRecognizesAllSupportedTextEndpoints(t *testing.T) {
+	for _, path := range []string{
+		"/v1/chat/completions",
+		"/v1/completions",
+		"/v1/responses",
+		"/v1/responses/compact",
+	} {
+		t.Run(path, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, path, nil)
+			require.True(t, isGPTTextSettlementRequest(ctx, &relaycommon.RelayInfo{RequestURLPath: path}))
 		})
 	}
 }

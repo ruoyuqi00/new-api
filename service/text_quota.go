@@ -422,7 +422,7 @@ func isAuthoritativeTextUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 	return !snapshot.Enabled || !snapshot.Accepted || snapshot.UsageState == relaycommon.StreamUsageStateExact
 }
 
-func normalizeTextSettlementUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage, authoritative bool) *dto.Usage {
+func normalizeTextSettlementUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage, authoritative bool, gptText bool) *dto.Usage {
 	if usage == nil {
 		usage = &dto.Usage{}
 	} else {
@@ -434,6 +434,13 @@ func normalizeTextSettlementUsage(relayInfo *relaycommon.RelayInfo, usage *dto.U
 			usage.UsageSource = "upstream"
 		}
 		return usage
+	}
+	if gptText && usage.UsageSource != "estimated" {
+		promptTokens := 0
+		if relayInfo != nil {
+			promptTokens = relayInfo.GetEstimatePromptTokens()
+		}
+		return &dto.Usage{PromptTokens: promptTokens, TotalTokens: promptTokens, UsageSource: "estimated"}
 	}
 	if usage.PromptTokens <= 0 && relayInfo != nil {
 		usage.PromptTokens = relayInfo.GetEstimatePromptTokens()
@@ -464,7 +471,8 @@ func isGPTTextSettlementRequest(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	if queryIndex := strings.IndexByte(path, '?'); queryIndex >= 0 {
 		path = path[:queryIndex]
 	}
-	return path == "/v1/responses" || path == "/v1/chat/completions"
+	return path == "/v1/responses" || path == "/v1/responses/compact" ||
+		path == "/v1/chat/completions" || path == "/v1/completions"
 }
 
 func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
@@ -510,7 +518,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			}
 		}
 	}
-	usage = normalizeTextSettlementUsage(relayInfo, usage, authoritativeUsage)
+	usage = normalizeTextSettlementUsage(relayInfo, usage, authoritativeUsage, estimatedGPTTextUsage)
 	if estimatedGPTTextUsage {
 		usage.PromptCacheHitTokens = 0
 		usage.PromptTokensDetails = dto.InputTokenDetails{}

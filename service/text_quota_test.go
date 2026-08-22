@@ -1131,6 +1131,30 @@ func TestGPTTextEstimatedSettlementRecountsPromptWhenInitialEstimateIsMissing(t 
 	require.Equal(t, billing.settled[0], logs[0].Quota)
 }
 
+func TestGPTTextAcceptedSettlementDoesNotChargeWhenEstimateIsUnavailable(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+		RequestURLPath: "/v1/responses", StartTime: time.Now(), Billing: billing,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData:   types.PriceData{ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 1250, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	require.NoError(t, SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{UsageSource: "estimated"}))
+	require.Equal(t, []int{0}, billing.settled)
+}
+
 func TestGPTTextEstimatedSettlementDoesNotExceedFrozenReservation(t *testing.T) {
 	billing := &recordingTaskBillingSettler{preConsumed: 500}
 	relayInfo := &relaycommon.RelayInfo{
@@ -1161,9 +1185,30 @@ func TestGPTTextEstimatedSettlementDoesNotExceedFrozenReservation(t *testing.T) 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 
-	PostTextConsumeQuota(ctx, relayInfo, &dto.Usage{PromptTokens: 10_000, CompletionTokens: 10_000}, nil)
+	PostTextConsumeQuota(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 10_000, CompletionTokens: 10_000, TotalTokens: 20_000, UsageSource: "estimated",
+	}, nil)
 
 	require.Equal(t, []int{500}, billing.settled)
+}
+
+func TestGPTTextSettlementDropsInvalidUpstreamTokenFields(t *testing.T) {
+	billing := &recordingTaskBillingSettler{preConsumed: 500}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 1, TokenId: 1, OriginModelName: "gpt-test", RequestURLPath: "/v1/chat/completions",
+		Billing: billing, PreservePreConsumedQuota: true,
+		PriceData:   types.PriceData{ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 500, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 1},
+	}
+	relayInfo.SetEstimatePromptTokens(400)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	PostTextConsumeQuota(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 10_000_001, CompletionTokens: 1, TotalTokens: 10_000_002,
+	}, nil)
+
+	require.Equal(t, []int{400}, billing.settled)
 }
 
 func TestIncompleteResponsesUsageAlwaysUsesPreConsumedQuotaFloor(t *testing.T) {

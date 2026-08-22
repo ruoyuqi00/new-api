@@ -102,10 +102,17 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		hasStreamSignal = true
 
 		if xAIResp.Usage != nil {
-			containStreamUsage = true
-			usage.PromptTokens = xAIResp.Usage.PromptTokens
-			usage.TotalTokens = xAIResp.Usage.TotalTokens
-			usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
+			candidate := *xAIResp.Usage
+			candidate.CompletionTokens = candidate.TotalTokens - candidate.PromptTokens
+			candidate.CompletionTokenDetails.TextTokens = candidate.CompletionTokens - candidate.CompletionTokenDetails.ReasoningTokens
+			if service.ValidGPTTextUsage(&candidate) {
+				containStreamUsage = true
+				usage = &candidate
+				usage.UsageSource = "upstream"
+			} else {
+				xAIResp.Usage = nil
+				info.PreservePreConsumedQuota = true
+			}
 		}
 
 		openaiResponse := streamResponseXAI2OpenAI(xAIResp, usage)
@@ -147,10 +154,14 @@ func xAIHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response
 	if !xAITextResponseHasSignal(xaiResponse) {
 		return nil, types.NewOpenAIError(fmt.Errorf("empty xAI response"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
 	}
+	usageValid := false
 	if xaiResponse.Usage != nil {
 		xaiResponse.Usage.CompletionTokens = xaiResponse.Usage.TotalTokens - xaiResponse.Usage.PromptTokens
 		xaiResponse.Usage.CompletionTokenDetails.TextTokens = xaiResponse.Usage.CompletionTokens - xaiResponse.Usage.CompletionTokenDetails.ReasoningTokens
-	} else {
+		usageValid = service.ValidGPTTextUsage(xaiResponse.Usage)
+	}
+	if !usageValid {
+		info.PreservePreConsumedQuota = true
 		xaiResponse.Usage = service.ResponseText2Usage(c, xAIResponseText(xaiResponse), info.UpstreamModelName, info.GetEstimatePromptTokens())
 	}
 

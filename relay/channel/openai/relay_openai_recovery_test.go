@@ -149,6 +149,35 @@ func TestOaiStreamHandlerSanitizesAmplifiedTerminalUsage(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), "10000002")
 }
 
+func TestOaiLegacyCompletionsStreamSanitizesAmplifiedTerminalUsage(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/completions"
+	info := mappedClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeCompletions
+	info.RequestURLPath = "/v1/completions"
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"id\":\"cmpl_1\",\"choices\":[{\"text\":\"ok\",\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"cmpl_1\",\"choices\":[],\"usage\":{\"prompt_tokens\":10000001,\"completion_tokens\":1,\"total_tokens\":10000002}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}
+
+	usage, relayErr := OaiStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.NotContains(t, recorder.Body.String(), "10000001")
+	require.True(t, info.PreservePreConsumedQuota)
+}
+
 func TestOaiResponsesToChatStreamRecoversTerminalUsageAfterClientGone(t *testing.T) {
 	oldEnabled := constant.StreamUsageDrainEnabled
 	oldMaxConcurrency := constant.StreamUsageDrainMaxConcurrency

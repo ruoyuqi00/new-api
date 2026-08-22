@@ -131,7 +131,7 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	*model = lastStreamResponse.Model
 
 	usageValid := service.ValidUsage(lastStreamResponse.Usage)
-	if info != nil && info.RelayMode == relayconstant.RelayModeChatCompletions &&
+	if info != nil && isGPTTextRelayMode(info.RelayMode) &&
 		!strings.Contains(strings.ToLower(info.UpstreamModelName), "audio") {
 		usageValid = service.ValidGPTTextUsage(lastStreamResponse.Usage)
 	}
@@ -146,6 +146,10 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	}
 
 	return nil
+}
+
+func isGPTTextRelayMode(relayMode int) bool {
+	return relayMode == relayconstant.RelayModeChatCompletions || relayMode == relayconstant.RelayModeCompletions
 }
 
 func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStreamData string,

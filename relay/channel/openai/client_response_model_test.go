@@ -99,6 +99,29 @@ func TestOpenaiHandlerReplacesAmplifiedUsageWithEstimate(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), "9000000")
 }
 
+func TestOpenaiLegacyCompletionsReplacesAmplifiedUsageWithEstimate(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/completions"
+	info := mappedClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeCompletions
+	info.RequestURLPath = "/v1/completions"
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"cmpl_1","model":"upstream-model","choices":[{"index":0,"text":"ok","finish_reason":"stop"}],"usage":{"prompt_tokens":10000001,"completion_tokens":1,"total_tokens":10000002}}`,
+		)),
+	}
+
+	usage, relayErr := OpenaiHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.NotContains(t, recorder.Body.String(), "10000001")
+	require.True(t, info.PreservePreConsumedQuota)
+}
+
 func TestOaiChatToResponsesHandlerReturnsPublicModelForMappedResponse(t *testing.T) {
 	ctx, recorder := clientResponseTestContext()
 	ctx.Request.URL.Path = "/v1/responses"

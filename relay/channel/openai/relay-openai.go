@@ -130,7 +130,7 @@ func oaiTextResponseHasSignal(resp dto.OpenAITextResponse) bool {
 		return true
 	}
 	for _, choice := range resp.Choices {
-		if choice.Message.StringContent() != "" || choice.Message.GetReasoningContent() != "" || len(choice.Message.ParseToolCalls()) > 0 {
+		if choice.Text != "" || choice.Message.StringContent() != "" || choice.Message.GetReasoningContent() != "" || len(choice.Message.ParseToolCalls()) > 0 {
 			return true
 		}
 		if choice.FinishReason != "" {
@@ -204,22 +204,27 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 
 			lastStreamData = data
-			if info.RelayMode == relayconstant.RelayModeChatCompletions && !isAudioModel {
-				var streamResponse dto.ChatCompletionsStreamResponse
-				if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil && streamResponse.Usage != nil {
-					if service.ValidGPTTextUsage(streamResponse.Usage) {
-						usage = streamResponse.Usage
+			if isGPTTextRelayMode(info.RelayMode) && !isAudioModel {
+				var usageEnvelope struct {
+					Usage *dto.Usage `json:"usage"`
+				}
+				if err := common.UnmarshalJsonStr(data, &usageEnvelope); err == nil && usageEnvelope.Usage != nil {
+					if service.ValidGPTTextUsage(usageEnvelope.Usage) {
+						usage = usageEnvelope.Usage
 						usage.UsageSource = "upstream"
 						containStreamUsage = true
 						info.MarkStreamTerminalUsage()
 					} else {
-						streamResponse.Usage = nil
 						usage = &dto.Usage{}
 						containStreamUsage = false
 						info.StreamTerminalUsageSeen = false
-						if sanitized, marshalErr := common.Marshal(&streamResponse); marshalErr == nil {
-							data = string(sanitized)
-							lastStreamData = data
+						var bodyMap map[string]any
+						if unmarshalErr := common.UnmarshalJsonStr(data, &bodyMap); unmarshalErr == nil {
+							delete(bodyMap, "usage")
+							if sanitized, marshalErr := common.Marshal(bodyMap); marshalErr == nil {
+								data = string(sanitized)
+								lastStreamData = data
+							}
 						}
 						info.PreservePreConsumedQuota = true
 					}
@@ -360,10 +365,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 
 	usageModified := false
 	isAudioModel := strings.Contains(strings.ToLower(info.UpstreamModelName), "audio")
-	if info.RelayMode == relayconstant.RelayModeChatCompletions && !isAudioModel && !service.ValidGPTTextUsage(&simpleResponse.Usage) {
+	if isGPTTextRelayMode(info.RelayMode) && !isAudioModel && !service.ValidGPTTextUsage(&simpleResponse.Usage) {
 		completionTokens := 0
 		for _, choice := range simpleResponse.Choices {
-			completionTokens += service.CountTextToken(choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
+			completionTokens += service.CountTextToken(choice.Text+choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
 		}
 		simpleResponse.Usage = dto.Usage{
 			PromptTokens:     info.GetEstimatePromptTokens(),
