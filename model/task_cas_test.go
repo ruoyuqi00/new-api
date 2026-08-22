@@ -9,11 +9,25 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestInitTaskStoresSelectedXAIKeyForPrivateAssetFetch(t *testing.T) {
+	task := InitTask(constant.TaskPlatform("48"), &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeXai,
+			ApiKey:      "selected-xai-key",
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	})
+
+	assert.Equal(t, "selected-xai-key", task.PrivateData.Key)
+}
 
 func TestMain(m *testing.M) {
 	db, err := gorm.Open(sqlite.Open("file:model_task_tests?mode=memory&cache=shared"), &gorm.Config{})

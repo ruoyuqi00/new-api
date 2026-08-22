@@ -1087,6 +1087,31 @@ func TestYucoreMediaAssetPrivateSourcesRoundTrip(t *testing.T) {
 	assert.Contains(t, string(publicJSON), `"thumb_url":"/api/yucore/media/tasks/yu_private/assets/0?variant=thumbnail"`)
 }
 
+func TestYucoreMediaAssetSourceForTaskUsesRoutedVideoProxy(t *testing.T) {
+	asset := YucoreMediaAsset{
+		SourceUrl: "https://provider.example/private/video.mp4?signature=redacted",
+	}
+	const publicTaskID = "task_12345678901234567890123456789012"
+	task := &YucoreMediaTask{
+		Kind:     "video",
+		Metadata: `{"adapter":"yuapi-channel","upstream_task_id":"` + publicTaskID + `"}`,
+	}
+
+	assert.Equal(t, "/v1/videos/"+publicTaskID+"/content", YucoreMediaAssetSourceForTask(task, asset))
+	assert.Equal(t, asset.SourceUrl, YucoreMediaAssetSourceForTask(&YucoreMediaTask{
+		Kind:     "video",
+		Metadata: `{"adapter":"openai-compatible","upstream_task_id":"task_public_asset"}`,
+	}, asset))
+	assert.Equal(t, asset.SourceUrl, YucoreMediaAssetSourceForTask(&YucoreMediaTask{
+		Kind:     "video",
+		Metadata: `{"adapter":"yuapi-channel","upstream_task_id":"provider-private-id"}`,
+	}, asset))
+	assert.Equal(t, asset.SourceUrl, YucoreMediaAssetSourceForTask(&YucoreMediaTask{
+		Kind:     "video",
+		Metadata: `{"adapter":"yuapi-channel","upstream_task_id":"task_"}`,
+	}, asset))
+}
+
 func TestOpenAICompatibleTaskResultMetadataKeepsNestedURLDistinct(t *testing.T) {
 	task := &YucoreMediaTask{TaskId: "yu_nested_urls", Kind: "video", ModelId: "video-model"}
 	payload := map[string]any{"status": "succeeded", "result": map[string]any{

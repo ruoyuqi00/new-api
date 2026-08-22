@@ -1056,3 +1056,63 @@ func TestServeYucoreMediaTaskAssetUsesManagedYuAPIAuth(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(responseJSON), tokens[0].Key)
 }
+
+func TestServeYucoreMediaTaskAssetRoutesCompletedYuAPIVideoThroughLocalContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const publicTaskID = "task_12345678901234567890123456789012"
+	var requestedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		if r.Header.Get("Authorization") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write([]byte("routed-video-bytes"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{
+		"yucore_media.adapter":             model.YucoreMediaAdapterYuAPIChannel,
+		"yucore_media.base_url":            upstream.URL,
+		"yucore_media.managed_token_group": "managed-media",
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	originalDB := model.DB
+	db, err := gorm.Open(sqlite.Open("file:yucore_media_routed_video_asset?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.YucoreMediaTask{}, &model.Token{}))
+	model.DB = db
+	t.Cleanup(func() { model.DB = originalDB })
+	persistedAssets, err := common.Marshal([]map[string]any{{
+		"id": "yu_routed_video_asset", "kind": "video",
+		"url":        "/api/yucore/media/tasks/yu_routed_video/assets/0",
+		"source_url": "https://private-provider.example/v1/videos/private-id/content", "mime_type": "video/mp4",
+	}})
+	require.NoError(t, err)
+	task := &model.YucoreMediaTask{
+		TaskId: "yu_routed_video", UserId: 77, BillingGroup: "managed-media", Kind: "video", ModelId: "grok-imagine-video",
+		Status: model.YucoreMediaTaskStatusCompleted, Assets: model.YucoreMediaAssets(persistedAssets),
+		Metadata: `{"adapter":"yuapi-channel","upstream_task_id":"` + publicTaskID + `"}`,
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/yucore/media/tasks/yu_routed_video/assets/0", nil)
+	context.Params = gin.Params{{Key: "task_id", Value: task.TaskId}, {Key: "index", Value: "0"}}
+	context.Set("id", task.UserId)
+	ServeYucoreMediaTaskAsset(context)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "routed-video-bytes", recorder.Body.String())
+	assert.Equal(t, "/v1/videos/"+publicTaskID+"/content", requestedPath)
+}

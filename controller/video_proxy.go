@@ -3,10 +3,12 @@ package controller
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -28,6 +30,67 @@ func videoProxyError(c *gin.Context, status int, errType, message string) {
 			"type":    errType,
 		},
 	})
+}
+
+func xAIVideoProxyAuthorization(channel *model.Channel, task *model.Task, videoURL string) (string, error) {
+	if channel == nil || task == nil || channel.Type != constant.ChannelTypeXai {
+		return "", nil
+	}
+	target, err := url.Parse(strings.TrimSpace(videoURL))
+	if err != nil || !target.IsAbs() || target.User != nil {
+		return "", errors.New("xAI video content URL is invalid")
+	}
+	baseURL := strings.TrimSpace(channel.GetBaseURL())
+	if baseURL == "" {
+		baseURL = constant.ChannelBaseURLs[channel.Type]
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil || !base.IsAbs() || base.User != nil {
+		return "", errors.New("xAI channel base URL is invalid")
+	}
+	targetScheme := strings.ToLower(target.Scheme)
+	baseScheme := strings.ToLower(base.Scheme)
+	targetPort := target.Port()
+	if targetPort == "" {
+		if targetScheme == "http" {
+			targetPort = "80"
+		} else if targetScheme == "https" {
+			targetPort = "443"
+		}
+	}
+	basePort := base.Port()
+	if basePort == "" {
+		if baseScheme == "http" {
+			basePort = "80"
+		} else if baseScheme == "https" {
+			basePort = "443"
+		}
+	}
+	basePath := path.Clean(base.Path)
+	if basePath == "." {
+		basePath = "/"
+	}
+	targetPath := path.Clean(target.Path)
+	if targetPath == "." {
+		targetPath = "/"
+	}
+	sameOrigin := (targetScheme == "http" || targetScheme == "https") &&
+		targetScheme == baseScheme && strings.EqualFold(target.Hostname(), base.Hostname()) && targetPort == basePort
+	withinBasePath := basePath == "/" || targetPath == basePath || strings.HasPrefix(targetPath, basePath+"/")
+	if !sameOrigin || !withinBasePath {
+		return "", nil
+	}
+	apiKey := strings.TrimSpace(task.PrivateData.Key)
+	if apiKey == "" {
+		if channel.ChannelInfo.IsMultiKey {
+			return "", errors.New("selected xAI video task key is unavailable")
+		}
+		apiKey = strings.TrimSpace(channel.Key)
+	}
+	if apiKey == "" {
+		return "", errors.New("xAI video task key is unavailable")
+	}
+	return "Bearer " + apiKey, nil
 }
 
 func VideoProxy(c *gin.Context) {
@@ -109,6 +172,17 @@ func VideoProxy(c *gin.Context) {
 	case constant.ChannelTypeOpenAI, constant.ChannelTypeSora:
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
+	case constant.ChannelTypeXai:
+		videoURL = task.GetResultURL()
+		authorization, authErr := xAIVideoProxyAuthorization(channel, task, videoURL)
+		if authErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to authorize xAI video content for task %s: %s", taskID, authErr.Error()))
+			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch video content")
+			return
+		}
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
 	default:
 		// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
 		videoURL = task.GetResultURL()
@@ -141,6 +215,29 @@ func VideoProxy(c *gin.Context) {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to parse URL %s: %s", videoURL, err.Error()))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to create proxy request")
 		return
+	}
+	if channel.Type == constant.ChannelTypeXai {
+		initiallyAuthorized := req.Header.Get("Authorization") != ""
+		baseClient := client
+		scopedClient := *baseClient
+		originalRedirect := baseClient.CheckRedirect
+		scopedClient.CheckRedirect = func(redirected *http.Request, via []*http.Request) error {
+			redirected.Header.Del("Authorization")
+			if initiallyAuthorized {
+				authorization, authErr := xAIVideoProxyAuthorization(channel, task, redirected.URL.String())
+				if authErr != nil {
+					return authErr
+				}
+				if authorization != "" {
+					redirected.Header.Set("Authorization", authorization)
+				}
+			}
+			if originalRedirect != nil {
+				return originalRedirect(redirected, via)
+			}
+			return nil
+		}
+		client = &scopedClient
 	}
 
 	resp, err := client.Do(req)

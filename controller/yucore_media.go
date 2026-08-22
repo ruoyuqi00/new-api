@@ -1703,7 +1703,7 @@ func ServeYucoreMediaTaskAsset(c *gin.Context) {
 		c.String(http.StatusOK, buildYucoreMediaAssetSVG(task, index))
 		return
 	}
-	source := model.YucoreMediaAssetSource(asset)
+	source := model.YucoreMediaAssetSourceForTask(task, asset)
 	isThumbnail := c.Query("variant") == model.YucoreMediaAssetVariantThumbnail
 	if isThumbnail {
 		source = model.YucoreMediaAssetThumbnailSource(asset)

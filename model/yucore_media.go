@@ -909,6 +909,23 @@ func YucoreMediaAssetSource(asset YucoreMediaAsset) string {
 	return ""
 }
 
+func YucoreMediaAssetSourceForTask(task *YucoreMediaTask, asset YucoreMediaAsset) string {
+	if task == nil || task.Kind != "video" || yucoreMediaTaskAdapter(task) != YucoreMediaAdapterYuAPIChannel {
+		return YucoreMediaAssetSource(asset)
+	}
+	upstreamTaskID := yucoreMediaStringValue(yucoreMediaMetadataMap(task.Metadata)["upstream_task_id"])
+	const taskIDPrefix = "task_"
+	if !strings.HasPrefix(upstreamTaskID, taskIDPrefix) || len(upstreamTaskID) != len(taskIDPrefix)+32 {
+		return YucoreMediaAssetSource(asset)
+	}
+	for _, value := range strings.TrimPrefix(upstreamTaskID, taskIDPrefix) {
+		if (value < 'a' || value > 'z') && (value < 'A' || value > 'Z') && (value < '0' || value > '9') {
+			return YucoreMediaAssetSource(asset)
+		}
+	}
+	return "/v1/videos/" + url.PathEscape(upstreamTaskID) + "/content"
+}
+
 func YucoreMediaAssetThumbnailSource(asset YucoreMediaAsset) string {
 	if source := strings.TrimSpace(asset.SourceThumbUrl); source != "" {
 		return source
