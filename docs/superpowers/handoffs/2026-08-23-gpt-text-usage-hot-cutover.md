@@ -34,7 +34,8 @@
 
 - 新候选健康：`running`、`healthy`、重启次数 `0`
 - 旧回滚容器健康：`running`、`healthy`、重启次数 `0`
-- 候选与生产主页 SHA-256：`97102537d7dba340791fa533746b7a66f6275c763e5af647f9c28c1a8b8c5b7f`
+- 候选与旧容器的原始主页字节 SHA-256：`3f7a57592f3be48734bad3b19bec98ded5b1980e699491da7ddb08424e7cdf48`
+- `api`、`global` 公共页面解码后 SHA-256：`97102537d7dba340791fa533746b7a66f6275c763e5af647f9c28c1a8b8c5b7f`
 - `api.yuaiapi.com`、`global.yuaiapi.com`、`vip.yuaiapi.com` 切换后均 `10/10` 返回 HTTP 200，随后观察轮均 `5/5`
 - 候选最近观察日志：502、panic/fatal、数据库错误、Redis 错误均为 `0`
 
