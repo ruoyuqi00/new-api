@@ -163,6 +163,27 @@ curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content" \
 
 影片按次計費與文字 Token 計費、圖片按張計費彼此獨立。不要把文字介面的 `usage`、快取命中或串流中斷規則套用到影片任務。
 
+### Grok Imagine 非同步影片
+
+以下三個模型是獨立的非同步影片模型，按產生秒數計費。表中價格為 USD 基礎單價；系統會在此基礎上只套用一次你所屬分組的倍率。未提供時長時預設為 5 秒，支援整數 1-15 秒。`size` 可使用 `480p`、`720p`、`1080p`，也可使用包含對應高度的尺寸，例如 `1280x720`。
+
+| 模型 | 480p（每秒） | 720p（每秒） | 1080p（每秒） |
+| --- | ---: | ---: | ---: |
+| `grok-imagine-video` | 0.0414 | 0.0594 | 0.0774 |
+| `grok-imagine-video-1.5` | 0.0414 | 0.0594 | 0.0774 |
+| `grok-imagine-video-1.5-preview` | 0.0414 | 0.0594 | 0.0774 |
+
+建立任務後，請保存回應中的任務 ID，並使用查詢介面取得狀態；`queued` 或 `processing` 時只查詢原任務，不要重複建立。時長或解析度不在上述範圍內時，系統會在提交前回傳 `400`，不會送出任務。
+
+```json
+{
+  "model": "grok-imagine-video",
+  "prompt": "海邊公路上的復古跑車，鏡頭平穩跟拍",
+  "seconds": 5,
+  "size": "1280x720"
+}
+```
+
 ## 8. 影片任務協定
 
 ```text
@@ -445,8 +466,10 @@ await writeFile('result.mp4', Buffer.from(await content.arrayBuffer()))
 | `nano-banana2-1k` | 1K | 0.0767 |
 | `nano-banana2-2k` | 2K | 0.1040 |
 | `nano-banana2-4k` | 4K | 0.1560 |
-| `grok-imagine-image` | 標準 | 0.072 |
-| `grok-imagine-image-quality` | 高品質 | 0.072 |
+| `grok-imagine-image` | 標準 | 0.02619 |
+| `grok-imagine-image-quality` | 高品質 | 0.02619 |
+
+表中的 Grok Imagine 圖片價格是每張 USD 基礎價格，系統會在此基礎上只套用一次你所屬分組的倍率。一次請求產生多張圖片時，按實際張數計費。
 
 `grok-4.5` 是文字模型；`grok-imagine-image` 與 `grok-imagine-image-quality` 是圖片模型；`grok-video` 與 `grok-video-1.5` 是非同步影片模型。請始終使用準確模型 ID 與對應介面。
 

@@ -163,6 +163,27 @@ These are the per-generation prices for the `多模态创作` group. Polling, re
 
 Per-video billing is separate from text Token billing and per-image billing. Do not apply text `usage`, cache-hit, or stream-interruption rules to video tasks.
 
+### Grok Imagine asynchronous video
+
+The following three models are independent asynchronous video models billed by generated second. The table lists base prices in USD. Your configured group multiplier is applied once after this base price. The default duration is 5 seconds when omitted, and integer durations from 1 through 15 seconds are supported. `size` may be `480p`, `720p`, or `1080p`, or dimensions containing the corresponding height, such as `1280x720`.
+
+| Model | 480p per second | 720p per second | 1080p per second |
+| --- | ---: | ---: | ---: |
+| `grok-imagine-video` | 0.0414 | 0.0594 | 0.0774 |
+| `grok-imagine-video-1.5` | 0.0414 | 0.0594 | 0.0774 |
+| `grok-imagine-video-1.5-preview` | 0.0414 | 0.0594 | 0.0774 |
+
+Save the task ID returned by creation and use the status endpoint to poll it. During `queued` or `processing`, poll the original task instead of creating another one. A duration or resolution outside the supported range returns `400` before a task is submitted.
+
+```json
+{
+  "model": "grok-imagine-video",
+  "prompt": "A vintage sports car on a coastal road, smooth tracking shot",
+  "seconds": 5,
+  "size": "1280x720"
+}
+```
+
 ## 8. Video Task Protocol
 
 The four common paths are:
@@ -449,8 +470,10 @@ Image generation is synchronous and does not use the video polling workflow:
 | `nano-banana2-1k` | 1K | 0.0767 |
 | `nano-banana2-2k` | 2K | 0.1040 |
 | `nano-banana2-4k` | 4K | 0.1560 |
-| `grok-imagine-image` | Standard | 0.072 |
-| `grok-imagine-image-quality` | High quality | 0.072 |
+| `grok-imagine-image` | Standard | 0.02619 |
+| `grok-imagine-image-quality` | High quality | 0.02619 |
+
+The listed Grok Imagine image amount is a base USD price per image. Your configured group multiplier is applied once after this base price. A request producing multiple images is billed by the actual image count.
 
 `grok-4.5` is a text model. `grok-imagine-image` and `grok-imagine-image-quality` are image models. `grok-video` and `grok-video-1.5` are asynchronous video models. Always use the exact model ID and its corresponding endpoint.
 

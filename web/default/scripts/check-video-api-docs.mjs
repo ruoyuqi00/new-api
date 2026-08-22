@@ -136,6 +136,29 @@ function checkJsonExamples(fileName, content) {
   if (count === 0) fail('INVALID_JSON', fileName, 'no JSON examples')
 }
 
+function checkGrokImagineContract(fileName, content) {
+  const requiredModels = [
+    'grok-imagine-image',
+    'grok-imagine-image-quality',
+    'grok-imagine-video',
+    'grok-imagine-video-1.5',
+    'grok-imagine-video-1.5-preview',
+  ]
+  for (const model of requiredModels) {
+    if (!content.includes(`\`${model}\``)) {
+      fail('GROK_IMAGINE_CONTRACT_MISMATCH', fileName, model)
+    }
+  }
+  for (const price of ['0.02619', '0.0414', '0.0594', '0.0774']) {
+    if (!content.includes(price)) {
+      fail('GROK_IMAGINE_CONTRACT_MISMATCH', fileName, price)
+    }
+  }
+  if (content.includes('grok-imagine-edit')) {
+    fail('GROK_IMAGINE_CONTRACT_MISMATCH', fileName, 'unsupported edit model')
+  }
+}
+
 function checkPrivateContent(fileName, content, privatePatterns) {
   const patterns = [...GENERIC_PRIVATE_PATTERNS, ...privatePatterns]
   for (const [index, pattern] of patterns.entries()) {
@@ -150,6 +173,7 @@ export function checkDocument(fileName, content, privatePatterns = []) {
   checkPrivateContent(fileName, content, privatePatterns)
   const modelPrices = parseCatalog(fileName, content)
   checkJsonExamples(fileName, content)
+  checkGrokImagineContract(fileName, content)
 
   const paths = REQUIRED_PATHS.filter((requiredPath) =>
     content.includes(requiredPath)
@@ -158,7 +182,9 @@ export function checkDocument(fileName, content, privatePatterns = []) {
     fail('PATH_MISMATCH', fileName)
   }
 
-  const statuses = REQUIRED_STATUSES.filter((status) => content.includes(status))
+  const statuses = REQUIRED_STATUSES.filter((status) =>
+    content.includes(status)
+  )
   if (statuses.length !== REQUIRED_STATUSES.length) {
     fail('STATUS_MISMATCH', fileName)
   }

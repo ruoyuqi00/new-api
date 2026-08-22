@@ -46,6 +46,9 @@ POST /v1/images/edits
 
 queued processing completed succeeded success failed canceled cancelled
 
+\`grok-imagine-image\` \`grok-imagine-image-quality\` \`grok-imagine-video\` \`grok-imagine-video-1.5\` \`grok-imagine-video-1.5-preview\`
+0.02619 0.0414 0.0594 0.0774
+
 \`\`\`json
 {"model":"seedance-2.0","duration":4,"generate_audio":false}
 \`\`\`
@@ -54,9 +57,9 @@ queued processing completed succeeded success failed canceled cancelled
 
 describe('video API documentation checker', () => {
   test('accepts a complete public contract', () => {
-    expect(checkDocument('valid.md', buildDocument()).modelPrices).toEqual(
-      [...EXPECTED_VIDEO_PRICES]
-    )
+    expect(checkDocument('valid.md', buildDocument()).modelPrices).toEqual([
+      ...EXPECTED_VIDEO_PRICES,
+    ])
   })
 
   test('rejects a missing model', () => {
@@ -71,9 +74,7 @@ describe('video API documentation checker', () => {
       '| `seedance-2.0` | 5.616 |',
       '| `seedance-2.0` | 5.5 |'
     )
-    expect(() => checkDocument('changed.md', changed)).toThrow(
-      'PRICE_MISMATCH'
-    )
+    expect(() => checkDocument('changed.md', changed)).toThrow('PRICE_MISMATCH')
   })
 
   test('rejects invalid JSON examples', () => {

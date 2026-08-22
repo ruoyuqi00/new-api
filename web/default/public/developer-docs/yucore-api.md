@@ -163,6 +163,27 @@ curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content" \
 
 视频按次计费与文本 Token 计费、图片按张计费彼此独立。不要把文本接口的 `usage` 字段、缓存命中规则或流式中断规则套用到视频任务。
 
+### Grok Imagine 异步视频
+
+以下三个模型是独立的异步视频模型，按生成秒数计费。表中价格为 USD 基础单价；系统会在此基础上只应用一次你所属分组的倍率。未提供时长时默认为 5 秒，支持整数 1-15 秒。`size` 可以使用 `480p`、`720p`、`1080p`，也可以使用包含对应高度的尺寸，例如 `1280x720`。
+
+| 模型 | 480p（每秒） | 720p（每秒） | 1080p（每秒） |
+| --- | ---: | ---: | ---: |
+| `grok-imagine-video` | 0.0414 | 0.0594 | 0.0774 |
+| `grok-imagine-video-1.5` | 0.0414 | 0.0594 | 0.0774 |
+| `grok-imagine-video-1.5-preview` | 0.0414 | 0.0594 | 0.0774 |
+
+创建任务后，请保存响应中的任务 ID，并使用查询接口获取状态；`queued` 或 `processing` 时只查询原任务，不要重复创建。时长或分辨率不在上述范围内时，系统会在提交前返回 `400`，不会送出任务。
+
+```json
+{
+  "model": "grok-imagine-video",
+  "prompt": "海边公路上的复古跑车，镜头平稳跟拍",
+  "seconds": 5,
+  "size": "1280x720"
+}
+```
+
 ## 8. 视频任务协议
 
 四个常用路径如下：
@@ -505,8 +526,10 @@ await writeFile('result.mp4', Buffer.from(await content.arrayBuffer()))
 | `nano-banana2-1k` | 1K | 0.0767 |
 | `nano-banana2-2k` | 2K | 0.1040 |
 | `nano-banana2-4k` | 4K | 0.1560 |
-| `grok-imagine-image` | 标准 | 0.072 |
-| `grok-imagine-image-quality` | 高质量 | 0.072 |
+| `grok-imagine-image` | 标准 | 0.02619 |
+| `grok-imagine-image-quality` | 高质量 | 0.02619 |
+
+表中的 Grok Imagine 图片价格是每张 USD 基础价格，系统会在此基础上只应用一次你所属分组的倍率。一次请求生成多张图片时，按实际张数计费。
 
 `grok-4.5` 是文本模型；`grok-imagine-image` 和 `grok-imagine-image-quality` 是图片模型；`grok-video` 和 `grok-video-1.5` 是异步视频模型。它们不能通过更换提示词互相转换，请始终使用准确模型 ID 和对应接口。
 
