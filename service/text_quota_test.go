@@ -21,6 +21,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGPTTextMalformedUsageIsNeverAuthoritative(t *testing.T) {
+	info := &relaycommon.RelayInfo{RequestURLPath: "/v1/responses"}
+	usage := &dto.Usage{
+		PromptTokens:     math.MaxInt,
+		CompletionTokens: 1,
+		TotalTokens:      math.MaxInt,
+		UsageSource:      "upstream",
+	}
+
+	require.False(t, isAuthoritativeTextUsage(nil, info, usage))
+}
+
+func TestGPTTextUsageValidationDoesNotChangeImageSettlement(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("image_generation_call", true)
+	info := &relaycommon.RelayInfo{RequestURLPath: "/v1/responses"}
+	usage := &dto.Usage{
+		PromptTokens:     10_000_001,
+		CompletionTokens: 1,
+		TotalTokens:      10_000_002,
+		UsageSource:      "upstream",
+	}
+
+	require.True(t, isAuthoritativeTextUsage(ctx, info, usage))
+}
+
 func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -31,7 +57,7 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 	}{
 		{
 			name:       "non-stream success",
-			relayInfo:  &relaycommon.RelayInfo{},
+			relayInfo:  &relaycommon.RelayInfo{RequestURLPath: "/v1/other"},
 			usage:      &dto.Usage{},
 			wantResult: true,
 		},
@@ -44,8 +70,9 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 		{
 			name: "stream completed",
 			relayInfo: &relaycommon.RelayInfo{
-				IsStream:     true,
-				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
+				IsStream:       true,
+				RequestURLPath: "/v1/other",
+				StreamStatus:   streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
 			},
 			usage:      &dto.Usage{},
 			wantResult: true,
@@ -61,6 +88,7 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 			name: "responses stream missing terminal usage",
 			relayInfo: &relaycommon.RelayInfo{
 				IsStream:                      true,
+				RequestURLPath:                "/v1/responses",
 				RelayFormat:                   types.RelayFormatOpenAIResponses,
 				StreamStatus:                  streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
 				StreamTerminalMarkersRequired: true,
@@ -72,21 +100,23 @@ func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 			name: "responses stream exact terminal usage",
 			relayInfo: &relaycommon.RelayInfo{
 				IsStream:                      true,
+				RequestURLPath:                "/v1/responses",
 				RelayFormat:                   types.RelayFormatOpenAIResponses,
 				StreamStatus:                  streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
 				StreamTerminalMarkersRequired: true,
 				StreamTerminalSuccess:         true,
 				StreamTerminalUsageSeen:       true,
 			},
-			usage:      &dto.Usage{PromptTokens: 100},
+			usage:      &dto.Usage{PromptTokens: 100, CompletionTokens: 1, TotalTokens: 101},
 			wantResult: true,
 		},
 		{
 			name: "responses adapter authoritative usage",
 			relayInfo: &relaycommon.RelayInfo{
-				IsStream:     true,
-				RelayFormat:  types.RelayFormatOpenAIResponses,
-				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
+				IsStream:       true,
+				RequestURLPath: "/v1/other",
+				RelayFormat:    types.RelayFormatOpenAIResponses,
+				StreamStatus:   streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonDone, false),
 			},
 			usage:      &dto.Usage{PromptTokens: 100},
 			wantResult: true,
@@ -778,7 +808,7 @@ func TestAmbiguousGPTTextBillingSettlesEstimatedUsage(t *testing.T) {
 				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
 				PriceData:   types.PriceData{ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 1250, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
 			},
-			want:       3200,
+			want:       1250,
 			wantPrompt: 3200,
 		},
 		{
@@ -798,7 +828,7 @@ func TestAmbiguousGPTTextBillingSettlesEstimatedUsage(t *testing.T) {
 					EstimatedTier:            "selected-at-reservation",
 				},
 			},
-			want:       3200,
+			want:       875,
 			wantPrompt: 3200,
 		},
 	}
@@ -831,7 +861,7 @@ func TestAmbiguousGPTTextBillingSettlesEstimatedUsage(t *testing.T) {
 			if tt.info.TieredBillingSnapshot != nil {
 				require.Contains(t, logs[0].Other, `"billing_mode":"tiered_expr"`)
 				require.Contains(t, logs[0].Other, `"estimated_tier":"estimated"`)
-				require.Contains(t, logs[0].Other, `"settled_from_reservation":false`)
+				require.Contains(t, logs[0].Other, `"settled_from_reservation":true`)
 			}
 			require.Contains(t, logs[0].Other, `"settled_from_estimate":true`)
 
@@ -1101,7 +1131,7 @@ func TestGPTTextEstimatedSettlementRecountsPromptWhenInitialEstimateIsMissing(t 
 	require.Equal(t, billing.settled[0], logs[0].Quota)
 }
 
-func TestGPTTextEstimatedSettlementUsesFrozenTieredExpression(t *testing.T) {
+func TestGPTTextEstimatedSettlementDoesNotExceedFrozenReservation(t *testing.T) {
 	billing := &recordingTaskBillingSettler{preConsumed: 500}
 	relayInfo := &relaycommon.RelayInfo{
 		UserId:                        1,
@@ -1133,7 +1163,7 @@ func TestGPTTextEstimatedSettlementUsesFrozenTieredExpression(t *testing.T) {
 
 	PostTextConsumeQuota(ctx, relayInfo, &dto.Usage{PromptTokens: 10_000, CompletionTokens: 10_000}, nil)
 
-	require.Equal(t, []int{10_000_000}, billing.settled)
+	require.Equal(t, []int{500}, billing.settled)
 }
 
 func TestIncompleteResponsesUsageAlwaysUsesPreConsumedQuotaFloor(t *testing.T) {

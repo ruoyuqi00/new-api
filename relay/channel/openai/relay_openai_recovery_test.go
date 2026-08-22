@@ -121,6 +121,34 @@ func TestOaiStreamHandlerRecoversTerminalUsageAfterClientGone(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), strings.Trim(terminal, " "))
 }
 
+func TestOaiStreamHandlerSanitizesAmplifiedTerminalUsage(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	info := mappedClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+				"data: {\"id\":\"chatcmpl_1\",\"choices\":[],\"usage\":{\"prompt_tokens\":10000001,\"completion_tokens\":1,\"total_tokens\":10000002}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}
+
+	usage, relayErr := OaiStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.False(t, info.StreamTerminalUsageSeen)
+	require.NotContains(t, recorder.Body.String(), "10000001")
+	require.NotContains(t, recorder.Body.String(), "10000002")
+}
+
 func TestOaiResponsesToChatStreamRecoversTerminalUsageAfterClientGone(t *testing.T) {
 	oldEnabled := constant.StreamUsageDrainEnabled
 	oldMaxConcurrency := constant.StreamUsageDrainMaxConcurrency

@@ -405,8 +405,11 @@ func SettleAcceptedTextBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	return postTextConsumeQuota(ctx, relayInfo, usage, []string{"accepted upstream stream ended before a confirmed terminal result"})
 }
 
-func isAuthoritativeTextUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
+func isAuthoritativeTextUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
 	if usage == nil || usage.UsageSource == "estimated" {
+		return false
+	}
+	if isGPTTextSettlementRequest(ctx, relayInfo) && !ValidGPTTextUsage(usage) {
 		return false
 	}
 	if relayInfo == nil {
@@ -441,9 +444,19 @@ func normalizeTextSettlementUsage(relayInfo *relaycommon.RelayInfo, usage *dto.U
 }
 
 func isGPTTextSettlementRequest(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if ctx != nil && ctx.GetBool("image_generation_call") {
+		return false
+	}
 	path := ""
 	if relayInfo != nil {
 		path = relayInfo.RequestURLPath
+		modelName := relayInfo.OriginModelName
+		if relayInfo.ChannelMeta != nil {
+			modelName += " " + relayInfo.UpstreamModelName
+		}
+		if strings.Contains(strings.ToLower(modelName), "audio") {
+			return false
+		}
 	}
 	if path == "" && ctx != nil && ctx.Request != nil && ctx.Request.URL != nil {
 		path = ctx.Request.URL.Path
@@ -455,7 +468,7 @@ func isGPTTextSettlementRequest(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 }
 
 func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
-	if !isAuthoritativeTextUsage(relayInfo, usage) {
+	if !isAuthoritativeTextUsage(ctx, relayInfo, usage) {
 		return false
 	}
 	if ctx != nil && ctx.Request != nil && ctx.Request.Context().Err() != nil {
@@ -482,7 +495,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) error {
 	originUsage := usage
-	authoritativeUsage := isAuthoritativeTextUsage(relayInfo, originUsage)
+	authoritativeUsage := isAuthoritativeTextUsage(ctx, relayInfo, originUsage)
 	estimatedGPTTextUsage := !authoritativeUsage && isGPTTextSettlementRequest(ctx, relayInfo)
 	if estimatedGPTTextUsage && relayInfo.GetEstimatePromptTokens() <= 0 &&
 		(originUsage == nil || originUsage.PromptTokens <= 0) && relayInfo.Request != nil {
@@ -558,6 +571,13 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 
 	settledFromReservation := false
+	if estimatedGPTTextUsage && relayInfo.PreservePreConsumedQuota {
+		if frozenQuota := frozenTextReservationQuota(relayInfo); frozenQuota > 0 && summary.Quota > frozenQuota {
+			summary.Quota = frozenQuota
+			settledFromReservation = true
+			logger.LogWarn(ctx, "unconfirmed GPT text usage exceeded reservation; capping settlement at pre-consumed quota")
+		}
+	}
 	if !estimatedGPTTextUsage {
 		if quota, preserved := applyPreConsumedQuotaFloor(relayInfo, summary.Quota); preserved {
 			summary.Quota = quota

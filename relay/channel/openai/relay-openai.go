@@ -204,13 +204,25 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 
 			lastStreamData = data
-			if info.RelayMode == relayconstant.RelayModeChatCompletions {
+			if info.RelayMode == relayconstant.RelayModeChatCompletions && !isAudioModel {
 				var streamResponse dto.ChatCompletionsStreamResponse
-				if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil && service.ValidUsage(streamResponse.Usage) {
-					usage = streamResponse.Usage
-					usage.UsageSource = "upstream"
-					containStreamUsage = true
-					info.MarkStreamTerminalUsage()
+				if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil && streamResponse.Usage != nil {
+					if service.ValidGPTTextUsage(streamResponse.Usage) {
+						usage = streamResponse.Usage
+						usage.UsageSource = "upstream"
+						containStreamUsage = true
+						info.MarkStreamTerminalUsage()
+					} else {
+						streamResponse.Usage = nil
+						usage = &dto.Usage{}
+						containStreamUsage = false
+						info.StreamTerminalUsageSeen = false
+						if sanitized, marshalErr := common.Marshal(&streamResponse); marshalErr == nil {
+							data = string(sanitized)
+							lastStreamData = data
+						}
+						info.PreservePreConsumedQuota = true
+					}
 				}
 			}
 			if err := processTokenData(info.RelayMode, data, &responseTextBuilder, &toolCount); err != nil {
@@ -347,19 +359,19 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 
 	usageModified := false
-	if simpleResponse.Usage.PromptTokens == 0 {
-		completionTokens := simpleResponse.Usage.CompletionTokens
-		if completionTokens == 0 {
-			for _, choice := range simpleResponse.Choices {
-				ctkm := service.CountTextToken(choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
-				completionTokens += ctkm
-			}
+	isAudioModel := strings.Contains(strings.ToLower(info.UpstreamModelName), "audio")
+	if info.RelayMode == relayconstant.RelayModeChatCompletions && !isAudioModel && !service.ValidGPTTextUsage(&simpleResponse.Usage) {
+		completionTokens := 0
+		for _, choice := range simpleResponse.Choices {
+			completionTokens += service.CountTextToken(choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
 		}
 		simpleResponse.Usage = dto.Usage{
 			PromptTokens:     info.GetEstimatePromptTokens(),
 			CompletionTokens: completionTokens,
 			TotalTokens:      info.GetEstimatePromptTokens() + completionTokens,
+			UsageSource:      "estimated",
 		}
+		info.PreservePreConsumedQuota = true
 		usageModified = true
 	}
 

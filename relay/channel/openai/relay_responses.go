@@ -78,16 +78,10 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		c.Set("image_generation_call_size", responsesResponse.GetSize())
 	}
 
-	// 写入新的 response body
-	normalizedBody, _, err := helper.NormalizeClientResponseModelJSON(info, responseBody)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
-	}
-	responseBody = normalizedBody
-	service.IOCopyBytesGracefully(c, resp, responseBody)
-
 	// compute usage
 	usage := dto.Usage{}
+	usageConfirmed := false
+	isImageGeneration := responsesResponse.HasImageGenerationCall()
 	if responsesResponse.Usage != nil {
 		usage.PromptTokens = responsesResponse.Usage.InputTokens
 		usage.CompletionTokens = responsesResponse.Usage.OutputTokens
@@ -96,7 +90,30 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
 			usage.PromptTokensDetails.CacheWriteTokens = responsesResponse.Usage.InputTokensDetails.CacheWriteTokens
 		}
+		if isImageGeneration {
+			usageConfirmed = service.ValidUsage(&usage)
+		} else {
+			usageConfirmed = service.ValidGPTTextUsage(&usage)
+		}
 	}
+	if !usageConfirmed && !isImageGeneration {
+		info.PreservePreConsumedQuota = true
+		usage = *service.ResponseText2Usage(c, service.ExtractOutputTextFromResponses(&responsesResponse), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		if sanitized, setErr := sjson.SetBytes(responseBody, "usage", map[string]int{
+			"input_tokens":  usage.PromptTokens,
+			"output_tokens": usage.CompletionTokens,
+			"total_tokens":  usage.TotalTokens,
+		}); setErr == nil {
+			responseBody = sanitized
+		}
+	} else if !isImageGeneration {
+		usage.UsageSource = "upstream"
+	}
+	normalizedBody, _, err := helper.NormalizeClientResponseModelJSON(info, responseBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	service.IOCopyBytesGracefully(c, resp, normalizedBody)
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
 		return &usage, nil
 	}
@@ -177,6 +194,24 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			if streamResponse.Response.Model != "" {
 				responseModel = streamResponse.Response.Model
 			}
+			if streamResponse.Response.Usage != nil && !streamResponse.Response.HasImageGenerationCall() {
+				candidate := &dto.Usage{
+					PromptTokens:     streamResponse.Response.Usage.InputTokens,
+					CompletionTokens: streamResponse.Response.Usage.OutputTokens,
+					TotalTokens:      streamResponse.Response.Usage.TotalTokens,
+				}
+				if streamResponse.Response.Usage.InputTokensDetails != nil {
+					candidate.PromptTokensDetails = *streamResponse.Response.Usage.InputTokensDetails
+				}
+				if !service.ValidGPTTextUsage(candidate) {
+					streamResponse.Response.Usage = nil
+					info.PreservePreConsumedQuota = true
+					info.StreamTerminalUsageSeen = false
+					if sanitized, marshalErr := common.Marshal(&streamResponse); marshalErr == nil {
+						data = string(sanitized)
+					}
+				}
+			}
 		}
 		originalEventType := streamResponse.Type
 		switch originalEventType {
@@ -190,7 +225,20 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				if streamResponse.Response.Usage.InputTokensDetails != nil {
 					terminalUsage.PromptTokensDetails = *streamResponse.Response.Usage.InputTokensDetails
 				}
-				if !service.ValidUsage(terminalUsage) {
+				usageValid := service.ValidGPTTextUsage(terminalUsage)
+				if streamResponse.Response.HasImageGenerationCall() {
+					usageValid = service.ValidUsage(terminalUsage)
+				}
+				if !usageValid {
+					if !streamResponse.Response.HasImageGenerationCall() {
+						info.PreservePreConsumedQuota = true
+						usage = &dto.Usage{}
+						info.StreamTerminalUsageSeen = false
+						streamResponse.Response.Usage = nil
+						if sanitized, marshalErr := common.Marshal(&streamResponse); marshalErr == nil {
+							data = string(sanitized)
+						}
+					}
 					break
 				}
 				info.StreamTerminalUsageSeen = true

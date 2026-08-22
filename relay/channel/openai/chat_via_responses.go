@@ -51,7 +51,12 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		chatResp.Model = info.ClientResponseModelName()
 	}
 
-	if usage == nil || usage.TotalTokens == 0 {
+	usageValid := service.ValidGPTTextUsage(usage)
+	if responsesResp.HasImageGenerationCall() {
+		usageValid = usage != nil && usage.TotalTokens != 0
+	}
+	if !usageValid {
+		info.PreservePreConsumedQuota = true
 		text := service.ExtractOutputTextFromResponses(&responsesResp)
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		chatResp.Usage = *usage
@@ -157,7 +162,12 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 	if info.IsModelMapped {
 		chatResp.Model = info.ClientResponseModelName()
 	}
-	if usage == nil || usage.TotalTokens == 0 {
+	usageValid := service.ValidGPTTextUsage(usage)
+	if finalResponse.HasImageGenerationCall() {
+		usageValid = usage != nil && usage.TotalTokens != 0
+	}
+	if !usageValid {
+		info.PreservePreConsumedQuota = true
 		text := service.ExtractOutputTextFromResponses(finalResponse)
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		chatResp.Usage = *usage
@@ -195,6 +205,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	state.ID = responseId
 	state.Created = createAt
 	streamErr := (*types.NewAPIError)(nil)
+	imageGeneration := false
 
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo == nil {
 		info.ClaudeConvertInfo = &relaycommon.ClaudeConvertInfo{LastMessagesType: relaycommon.LastMessageTypeNone}
@@ -239,6 +250,19 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			sr.Error(err)
 			return
 		}
+		if streamResp.Response != nil && streamResp.Response.Usage != nil && !streamResp.Response.HasImageGenerationCall() {
+			candidate := relayconvert.UsageFromResponsesUsage(streamResp.Response.Usage)
+			if !service.ValidGPTTextUsage(candidate) {
+				streamResp.Response.Usage = nil
+				info.PreservePreConsumedQuota = true
+			}
+		}
+		if streamResp.Response != nil && streamResp.Response.HasImageGenerationCall() {
+			imageGeneration = true
+		}
+		if streamResp.Item != nil && streamResp.Item.Type == dto.ResponsesOutputTypeImageGenerationCall {
+			imageGeneration = true
+		}
 
 		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" {
 			if streamResp.Response != nil {
@@ -259,7 +283,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			sr.Stop(streamErr)
 			return
 		}
-		if (streamResp.Type == "response.completed" || streamResp.Type == "response.done") && service.ValidUsage(state.Usage) {
+		usageValid := service.ValidGPTTextUsage(state.Usage)
+		if imageGeneration {
+			usageValid = service.ValidUsage(state.Usage)
+		}
+		if (streamResp.Type == "response.completed" || streamResp.Type == "response.done") && usageValid {
 			state.Usage.UsageSource = "upstream"
 			info.MarkStreamTerminalUsage()
 		}
@@ -273,14 +301,22 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 	if streamErr != nil {
 		usage := state.Usage
-		if usage == nil || usage.TotalTokens == 0 {
+		usageValid := service.ValidGPTTextUsage(usage)
+		if imageGeneration {
+			usageValid = usage != nil && usage.TotalTokens != 0
+		}
+		if !usageValid {
 			usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		}
 		return usage, streamErr
 	}
 
 	usage := state.Usage
-	if usage.TotalTokens == 0 {
+	usageValid := service.ValidGPTTextUsage(usage)
+	if imageGeneration {
+		usageValid = usage != nil && usage.TotalTokens != 0
+	}
+	if !usageValid {
 		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		state.Usage = usage
 	}

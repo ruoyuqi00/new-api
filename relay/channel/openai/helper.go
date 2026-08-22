@@ -130,7 +130,12 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	*systemFingerprint = lastStreamResponse.GetSystemFingerprint()
 	*model = lastStreamResponse.Model
 
-	if service.ValidUsage(lastStreamResponse.Usage) {
+	usageValid := service.ValidUsage(lastStreamResponse.Usage)
+	if info != nil && info.RelayMode == relayconstant.RelayModeChatCompletions &&
+		!strings.Contains(strings.ToLower(info.UpstreamModelName), "audio") {
+		usageValid = service.ValidGPTTextUsage(lastStreamResponse.Usage)
+	}
+	if usageValid {
 		*containStreamUsage = true
 		*usage = lastStreamResponse.Usage
 		if !info.ShouldIncludeUsage {

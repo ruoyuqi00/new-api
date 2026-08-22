@@ -60,6 +60,47 @@ func TestOaiResponsesStreamHandlerParsesResponseDoneUsage(t *testing.T) {
 	require.True(t, info.StreamTerminalUsageSeen)
 }
 
+func TestOaiResponsesStreamHandlerRejectsAmplifiedTerminalUsage(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedClientResponseInfo()
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_bad_usage\",\"model\":\"upstream-model\",\"output\":[],\"usage\":{\"input_tokens\":10000001,\"output_tokens\":1,\"total_tokens\":10000002}}}\n\ndata: [DONE]\n\n",
+		)),
+	}
+
+	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.False(t, info.StreamTerminalUsageSeen)
+	require.NotContains(t, recorder.Body.String(), "10000001")
+	require.NotContains(t, recorder.Body.String(), "10000002")
+}
+
+func TestOaiResponsesHandlerLeavesImageUsageUnchanged(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedClientResponseInfo()
+	body := `{"id":"resp_image","model":"upstream-model","output":[{"type":"image_generation_call","id":"img_1","status":"completed","result":"data"}],"usage":{"input_tokens":10000001,"output_tokens":1,"total_tokens":10000002}}`
+	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
+
+	usage, relayErr := OaiResponsesHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, 10_000_001, usage.PromptTokens)
+	require.Contains(t, recorder.Body.String(), `"input_tokens":10000001`)
+	require.False(t, info.PreservePreConsumedQuota)
+}
+
 func TestOaiResponsesStreamHandlerEmitsFixedCodexPreludeFirstForGPT(t *testing.T) {
 	oldStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30

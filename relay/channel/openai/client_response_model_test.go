@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -73,6 +74,29 @@ func TestOpenaiHandlerReturnsPublicModelForMappedResponse(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
 	require.Equal(t, "public-model", body["model"])
+}
+
+func TestOpenaiHandlerReplacesAmplifiedUsageWithEstimate(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	info := mappedClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_1","model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10000001,"completion_tokens":9000000,"total_tokens":19000001}}`,
+		)),
+	}
+
+	usage, relayErr := OpenaiHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.Less(t, usage.CompletionTokens, 100)
+	require.True(t, info.PreservePreConsumedQuota)
+	require.NotContains(t, recorder.Body.String(), "10000001")
+	require.NotContains(t, recorder.Body.String(), "9000000")
 }
 
 func TestOaiChatToResponsesHandlerReturnsPublicModelForMappedResponse(t *testing.T) {
