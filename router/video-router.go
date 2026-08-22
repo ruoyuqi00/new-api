@@ -29,6 +29,11 @@ func SetVideoRouter(router *gin.Engine) {
 	{
 		videoV1Router.POST("/videos", controller.RelayTask)
 		videoV1Router.GET("/videos/:task_id", controller.RelayTaskFetch)
+		// xAI Imagine uses the same task API with an explicit generations suffix.
+		// Keep it on the existing relay path so auth, selection, billing, and
+		// provider error projection remain identical to the other video routes.
+		videoV1Router.POST("/videos/generations", controller.RelayTask)
+		videoV1Router.GET("/videos/generations/:task_id", controller.RelayTaskFetch)
 	}
 
 	klingV1Router := router.Group("/kling/v1")
