@@ -51,7 +51,7 @@ USER_SESSION_REVOKED_RETENTION_DAYS=7
 USER_SESSION_HOURLY_ALERT_THRESHOLD=5000
 ```
 
-The active limit rejects new logins after a user reaches the configured number of unexpired active sessions. The issuance limit counts all sessions created in its window, including revoked sessions. Non-positive or invalid values fall back to defaults. The issuance window is clamped to the revoked-session retention period so cleanup cannot silently weaken issuance accounting.
+The active limit rejects new logins after a user reaches the configured number of unexpired active sessions. The issuance limit counts all sessions created in its window, including revoked sessions. The optional `USER_SESSION_ISSUANCE_EXEMPT_USER_IDS=79` setting is a comma-separated allowlist for narrowly exempting users from that rolling issuance count; it does not bypass the active-session limit or any other authentication control. Invalid user IDs are ignored. Non-positive or invalid numeric values fall back to defaults. The issuance window is clamped to the revoked-session retention period so cleanup cannot silently weaken issuance accounting.
 
 The dashboard exposes session listing, single-session revocation, and revoke-other-sessions controls. Password changes, account security changes, and authentication-version changes invalidate affected server-side sessions.
 

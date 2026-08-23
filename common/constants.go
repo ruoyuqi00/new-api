@@ -91,6 +91,7 @@ var (
 	UserSessionIssuanceWindowSeconds = int64(DefaultUserSessionIssuanceWindowSeconds)
 	UserSessionRevokedRetentionDays  = DefaultUserSessionRevokedRetentionDays
 	UserSessionHourlyAlertThreshold  = DefaultUserSessionHourlyAlertThreshold
+	UserSessionIssuanceExemptUserIDs = map[int]struct{}{}
 )
 
 var OptionMap map[string]string

@@ -14,12 +14,14 @@ func TestInitUserSessionSettingsUsesPositiveFallbacksAndClampsWindow(t *testing.
 	previousActiveLimit := UserSessionActiveLimit
 	previousIssuanceLimit := UserSessionIssuanceLimit
 	previousIssuanceWindow := UserSessionIssuanceWindowSeconds
+	previousExemptUserIDs := UserSessionIssuanceExemptUserIDs
 	previousRevokedRetention := UserSessionRevokedRetentionDays
 	previousAlertThreshold := UserSessionHourlyAlertThreshold
 	t.Cleanup(func() {
 		UserSessionActiveLimit = previousActiveLimit
 		UserSessionIssuanceLimit = previousIssuanceLimit
 		UserSessionIssuanceWindowSeconds = previousIssuanceWindow
+		UserSessionIssuanceExemptUserIDs = previousExemptUserIDs
 		UserSessionRevokedRetentionDays = previousRevokedRetention
 		UserSessionHourlyAlertThreshold = previousAlertThreshold
 	})
@@ -61,6 +63,29 @@ func TestInitUserSessionSettingsUsesPositiveFallbacksAndClampsWindow(t *testing.
 	t.Setenv("USER_SESSION_REVOKED_RETENTION_DAYS", "9223372036854775807")
 	initUserSessionSettings()
 	assert.Equal(t, DefaultUserSessionRevokedRetentionDays, UserSessionRevokedRetentionDays)
+}
+
+func TestInitUserSessionSettingsParsesIssuanceExemptUserIDs(t *testing.T) {
+	previousExemptUserIDs := UserSessionIssuanceExemptUserIDs
+	t.Cleanup(func() {
+		UserSessionIssuanceExemptUserIDs = previousExemptUserIDs
+	})
+
+	t.Setenv("USER_SESSION_ISSUANCE_EXEMPT_USER_IDS", "79, 81,79,invalid,0,-2")
+	initUserSessionSettings()
+
+	assert.True(t, IsUserSessionIssuanceExempt(79))
+	assert.True(t, IsUserSessionIssuanceExempt(81))
+	assert.False(t, IsUserSessionIssuanceExempt(0))
+	assert.False(t, IsUserSessionIssuanceExempt(-2))
+	assert.False(t, IsUserSessionIssuanceExempt(82))
+	assert.Len(t, UserSessionIssuanceExemptUserIDs, 2)
+
+	t.Setenv("USER_SESSION_ISSUANCE_EXEMPT_USER_IDS", "")
+	initUserSessionSettings()
+
+	assert.Empty(t, UserSessionIssuanceExemptUserIDs)
+	assert.False(t, IsUserSessionIssuanceExempt(79))
 }
 
 func TestInitEnvValidatesSessionConfiguration(t *testing.T) {

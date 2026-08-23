@@ -507,6 +507,28 @@ func TestCreateUserSessionWithinLimitsChecksIssuanceBeforeEviction(t *testing.T)
 	assert.Zero(t, replacementCount)
 }
 
+func TestCreateUserSessionWithinActiveLimitSkipsIssuanceCheck(t *testing.T) {
+	setupUserSessionTest(t)
+	const userID = 1016
+	createUserSessionTestUser(t, userID, 1)
+	now := time.Now().Unix()
+	existing := newTestUserSession("active-only-existing", userID, now-1)
+	require.NoError(t, DB.Create(existing).Error)
+
+	replacement := newTestUserSession("active-only-replacement", userID, now)
+	evicted, err := CreateUserSessionWithinActiveLimit(replacement, 1)
+	require.NoError(t, err)
+	require.Len(t, evicted, 1)
+	assert.Equal(t, existing.SID, evicted[0].SID)
+
+	stored, err := GetUserSessionBySID(existing.SID)
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusRevoked, stored.Status)
+	created, err := GetUserSessionBySID(replacement.SID)
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusActive, created.Status)
+}
+
 func TestCreateUserSessionWithinLimitsRestoresActiveInvariant(t *testing.T) {
 	setupUserSessionTest(t)
 	const userID = 1012
@@ -763,6 +785,7 @@ func TestCreateUserSessionWithinLimitsReconcilesReportedErrorAfterCommit(t *test
 		1,
 		100,
 		86400,
+		true,
 		func(transaction func(*gorm.DB) error) error {
 			if err := DB.Transaction(transaction); err != nil {
 				return err
@@ -802,6 +825,7 @@ func TestCreateUserSessionWithinLimitsReconcilesReportedErrorAfterCommitWithoutE
 		3,
 		100,
 		86400,
+		true,
 		func(transaction func(*gorm.DB) error) error {
 			if err := DB.Transaction(transaction); err != nil {
 				return err

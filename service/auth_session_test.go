@@ -56,6 +56,7 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 	previousActiveLimit := common.UserSessionActiveLimit
 	previousIssuanceLimit := common.UserSessionIssuanceLimit
 	previousIssuanceWindow := common.UserSessionIssuanceWindowSeconds
+	previousIssuanceExemptUserIDs := common.UserSessionIssuanceExemptUserIDs
 	previousRevokedRetention := common.UserSessionRevokedRetentionDays
 	previousAlertThreshold := common.UserSessionHourlyAlertThreshold
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -69,6 +70,7 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 	common.UserSessionActiveLimit = common.DefaultUserSessionActiveLimit
 	common.UserSessionIssuanceLimit = common.DefaultUserSessionIssuanceLimit
 	common.UserSessionIssuanceWindowSeconds = int64(common.DefaultUserSessionIssuanceWindowSeconds)
+	common.UserSessionIssuanceExemptUserIDs = map[int]struct{}{}
 	common.UserSessionRevokedRetentionDays = common.DefaultUserSessionRevokedRetentionDays
 	common.UserSessionHourlyAlertThreshold = common.DefaultUserSessionHourlyAlertThreshold
 	t.Cleanup(func() {
@@ -77,6 +79,7 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 		common.UserSessionActiveLimit = previousActiveLimit
 		common.UserSessionIssuanceLimit = previousIssuanceLimit
 		common.UserSessionIssuanceWindowSeconds = previousIssuanceWindow
+		common.UserSessionIssuanceExemptUserIDs = previousIssuanceExemptUserIDs
 		common.UserSessionRevokedRetentionDays = previousRevokedRetention
 		common.UserSessionHourlyAlertThreshold = previousAlertThreshold
 		_ = sqlDB.Close()
@@ -230,6 +233,53 @@ func TestCreateLoginSessionEnforcesIssuanceLimitAcrossAllStatuses(t *testing.T) 
 	var count int64
 	require.NoError(t, model.DB.Model(&model.UserSession{}).Count(&count).Error)
 	assert.Equal(t, int64(4), count)
+}
+
+func TestCreateLoginSessionAllowsConfiguredUserToExceedIssuanceLimit(t *testing.T) {
+	useTestSessionSecret(t)
+	setupAuthSessionTestDB(t)
+	user := &model.User{
+		Id:          79,
+		Username:    "session-exempt-user",
+		Password:    "unused-password-hash",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+		AffCode:     "exempt79",
+		AuthVersion: 1,
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+	common.UserSessionActiveLimit = 1
+	common.UserSessionIssuanceLimit = 1
+	common.UserSessionIssuanceWindowSeconds = 60
+	common.UserSessionIssuanceExemptUserIDs = map[int]struct{}{79: {}}
+
+	first, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "first-agent")
+	require.NoError(t, err)
+	second, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "second-agent")
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first.Session.SID, second.Session.SID)
+	activeCount, err := model.CountActiveUserSessions(user.Id, time.Now().Unix())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), activeCount, "the active-session limit must still apply to exempt users")
+	var issuedCount int64
+	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("user_id = ?", user.Id).Count(&issuedCount).Error)
+	assert.Equal(t, int64(2), issuedCount)
+}
+
+func TestCreateLoginSessionStillRejectsNonExemptUserAtIssuanceLimit(t *testing.T) {
+	useTestSessionSecret(t)
+	user := setupAuthSessionTestDB(t)
+	common.UserSessionActiveLimit = 1
+	common.UserSessionIssuanceLimit = 1
+	common.UserSessionIssuanceWindowSeconds = 60
+	common.UserSessionIssuanceExemptUserIDs = map[int]struct{}{79: {}}
+
+	_, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "first-agent")
+	require.NoError(t, err)
+	_, err = CreateLoginSession(user.Id, "password", "127.0.0.1", "second-agent")
+	assert.ErrorIs(t, err, model.ErrUserSessionIssuanceLimit)
 }
 
 func TestPasswordResetDoesNotClearSessionIssuanceHistory(t *testing.T) {

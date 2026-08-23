@@ -159,6 +159,7 @@ func initUserSessionSettings() {
 	UserSessionIssuanceWindowSeconds = int64(positiveUserSessionEnv("USER_SESSION_ISSUANCE_WINDOW_SECONDS", DefaultUserSessionIssuanceWindowSeconds))
 	UserSessionRevokedRetentionDays = positiveUserSessionEnv("USER_SESSION_REVOKED_RETENTION_DAYS", DefaultUserSessionRevokedRetentionDays)
 	UserSessionHourlyAlertThreshold = positiveUserSessionEnv("USER_SESSION_HOURLY_ALERT_THRESHOLD", DefaultUserSessionHourlyAlertThreshold)
+	UserSessionIssuanceExemptUserIDs = parsePositiveUserSessionIDs(os.Getenv("USER_SESSION_ISSUANCE_EXEMPT_USER_IDS"))
 
 	const secondsPerDay = 24 * 60 * 60
 	if int64(UserSessionRevokedRetentionDays) > math.MaxInt64/secondsPerDay {
@@ -179,6 +180,22 @@ func initUserSessionSettings() {
 			UserSessionIssuanceWindowSeconds,
 		))
 	}
+}
+
+func parsePositiveUserSessionIDs(value string) map[int]struct{} {
+	ids := make(map[int]struct{})
+	for _, rawID := range strings.Split(value, ",") {
+		id, err := strconv.Atoi(strings.TrimSpace(rawID))
+		if err == nil && id > 0 {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
+}
+
+func IsUserSessionIssuanceExempt(userID int) bool {
+	_, ok := UserSessionIssuanceExemptUserIDs[userID]
+	return ok
 }
 
 func positiveUserSessionEnv(name string, fallback int) int {

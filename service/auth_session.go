@@ -89,12 +89,16 @@ func createLoginSession(userID int, expectedAuthVersion int64, loginMethod, ip, 
 	if session.LoginMethod == "" {
 		session.LoginMethod = "unknown"
 	}
-	_, err = model.CreateUserSessionWithinLimits(
-		session,
-		common.UserSessionActiveLimit,
-		common.UserSessionIssuanceLimit,
-		common.UserSessionIssuanceWindowSeconds,
-	)
+	if common.IsUserSessionIssuanceExempt(userID) {
+		_, err = model.CreateUserSessionWithinActiveLimit(session, common.UserSessionActiveLimit)
+	} else {
+		_, err = model.CreateUserSessionWithinLimits(
+			session,
+			common.UserSessionActiveLimit,
+			common.UserSessionIssuanceLimit,
+			common.UserSessionIssuanceWindowSeconds,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}

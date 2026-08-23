@@ -206,6 +206,20 @@ func CreateUserSessionWithinLimits(session *UserSession, activeLimit, issuanceLi
 		activeLimit,
 		issuanceLimit,
 		issuanceWindowSeconds,
+		true,
+		func(transaction func(*gorm.DB) error) error {
+			return DB.Transaction(transaction)
+		},
+	)
+}
+
+func CreateUserSessionWithinActiveLimit(session *UserSession, activeLimit int) ([]UserSession, error) {
+	return createUserSessionWithinLimitsWithTransaction(
+		session,
+		activeLimit,
+		0,
+		0,
+		false,
 		func(transaction func(*gorm.DB) error) error {
 			return DB.Transaction(transaction)
 		},
@@ -216,10 +230,11 @@ func createUserSessionWithinLimitsWithTransaction(
 	session *UserSession,
 	activeLimit, issuanceLimit int,
 	issuanceWindowSeconds int64,
+	enforceIssuanceLimit bool,
 	runTransaction userSessionTransactionRunner,
 ) ([]UserSession, error) {
 	now := time.Now().Unix()
-	if activeLimit <= 0 || issuanceLimit <= 0 || issuanceWindowSeconds <= 0 || runTransaction == nil {
+	if activeLimit <= 0 || runTransaction == nil || (enforceIssuanceLimit && (issuanceLimit <= 0 || issuanceWindowSeconds <= 0)) {
 		return nil, ErrUserSessionInvalid
 	}
 	if err := prepareNewUserSession(session, now); err != nil {
@@ -235,14 +250,16 @@ func createUserSessionWithinLimitsWithTransaction(
 		if err := lockForUpdate(tx).Select("id").Where("id = ?", session.UserID).First(&user).Error; err != nil {
 			return err
 		}
-		var issuanceCount int64
-		if err := tx.Model(&UserSession{}).
-			Where("user_id = ? AND created_at > ?", session.UserID, now-issuanceWindowSeconds).
-			Count(&issuanceCount).Error; err != nil {
-			return err
-		}
-		if issuanceCount >= int64(issuanceLimit) {
-			return ErrUserSessionIssuanceLimit
+		if enforceIssuanceLimit {
+			var issuanceCount int64
+			if err := tx.Model(&UserSession{}).
+				Where("user_id = ? AND created_at > ?", session.UserID, now-issuanceWindowSeconds).
+				Count(&issuanceCount).Error; err != nil {
+				return err
+			}
+			if issuanceCount >= int64(issuanceLimit) {
+				return ErrUserSessionIssuanceLimit
+			}
 		}
 		var replacementSIDCount int64
 		if err := tx.Model(&UserSession{}).Where("sid = ?", session.SID).Count(&replacementSIDCount).Error; err != nil {
