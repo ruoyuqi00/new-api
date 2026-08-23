@@ -37,6 +37,11 @@ interface YucoreWebglEarthProps {
   timeOffsetSeconds?: number
 }
 
+// Version the public texture URL with its content hash so browsers cannot
+// reuse an older image after a production asset refresh.
+const EARTH_TEXTURE_URL =
+  '/yucore-earth-blue-marble.webp?v=cabfd92bfb306aff'
+
 const vertexShaderSource = `
 attribute vec2 a_position;
 varying vec2 v_uv;
@@ -428,6 +433,7 @@ export function YucoreWebglEarth(props: YucoreWebglEarthProps) {
 
     const earthImage = new Image()
     earthImage.decoding = 'async'
+    let textureRetryAttempted = false
     earthImage.addEventListener('load', () => {
       if (disposed) return
       gl.activeTexture(gl.TEXTURE0)
@@ -450,7 +456,12 @@ export function YucoreWebglEarth(props: YucoreWebglEarthProps) {
       gl.uniform1f(textureReadyLocation, 1)
       if (!activeRef.current) render(window.performance.now())
     })
-    earthImage.src = '/yucore-earth-blue-marble.webp'
+    earthImage.addEventListener('error', () => {
+      if (disposed || textureRetryAttempted) return
+      textureRetryAttempted = true
+      earthImage.src = `${EARTH_TEXTURE_URL}&retry=${Date.now()}`
+    })
+    earthImage.src = EARTH_TEXTURE_URL
 
     resize()
     render(0)
