@@ -14,53 +14,53 @@
 
 **Files:**
 - Create: `docs/superpowers/configs/2026-08-25-domestic-model-groups.json`
-- Test: `docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.test.ps1`
+- Test: `docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.ps1`
 
-- [ ] **Step 1: Write the manifest test**
+- [ ] **Step 1: Write the manifest validator**
 
-Load the JSON with PowerShell `ConvertFrom-Json` and assert group names, ratio `0.3`, six models in each group, `-call` suffixes only in the call group, exact upstream names without `-call`, and base URL `https://api.herohao.top/v1`. Assert that serialized manifest content contains neither supplied API key nor an `Authorization` field.
+Load the JSON with PowerShell `ConvertFrom-Json` and use built-in `throw` assertions for group names, ratio `0.3`, six models in each group, `-call` suffixes only in the call group, exact upstream names without `-call`, and base URL `https://api.herohao.top/v1`. Assert that serialized manifest content contains neither supplied API key nor an `Authorization` field.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [ ] **Step 2: Run the validator and verify the missing manifest is reported**
 
 ```powershell
-pester -Path docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.test.ps1
+pwsh -NoProfile -File docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.ps1
 ```
 
-Expected result: fail because the manifest does not exist.
+Expected result: fail because the manifest does not exist; this is a configuration-file validation exception, not a production-code TDD cycle.
 
 - [ ] **Step 3: Create the manifest**
 
 Write the six exact upstream identifiers returned by the authenticated `/v1/models` probes. Keep DeepSeek date-suffixed pricing and Kimi-K3 `verification_state` as `pending` until an official exact-name price source is available. Record verified MiniMax and GLM sources, and keep Qwen region/cache fields pending until the upstream deployment region is confirmed. Include both groups, ratio `0.3`, channel base URL, public names, upstream names, billing mode, and source URLs only.
 
-- [ ] **Step 4: Run the test and verify it passes**
+- [ ] **Step 4: Run the validator and verify it passes**
 
-Run the same Pester command. Expected result: pass with no secret matches.
+Run the same `pwsh` command. Expected result: pass with no secret matches.
 
 - [ ] **Step 5: Commit the manifest and test**
 
 ```powershell
-git add docs/superpowers/configs/2026-08-25-domestic-model-groups.json docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.test.ps1
+git add docs/superpowers/configs/2026-08-25-domestic-model-groups.json docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.ps1
 git commit -m "config: catalog domestic model groups"
 ```
 
 ### Task 2: Prove alias mapping and single group-ratio application
 
 **Files:**
-- Modify: `relay/helper/model_mapped_test.go`
-- Modify: `relay/helper/price_test.go`
-- Modify: `service/text_quota_test.go`
+- Test: `relay/helper/model_mapped_test.go`
+- Test: `relay/helper/price_test.go`
+- Test: `service/text_quota_test.go`
 
-- [ ] **Step 1: Add the failing alias contract test**
+- [ ] **Step 1: Add the alias contract regression test**
 
-Add a table test for each `-call` public name through the existing model-mapping helper. Assert `OriginModelName` remains the alias while outbound request model and `UpstreamModelName` equal the provider name.
+Add a table test for each `-call` public name through the existing model-mapping helper. Assert `OriginModelName` remains the alias while outbound request model and `UpstreamModelName` equal the provider name. This is a verification-only test because the mapping path already exists; no production code is changed unless this regression fails.
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [ ] **Step 2: Run the focused regression test**
 
 ```powershell
 go test ./relay/helper -run 'Domestic|ModelMapping' -count=1
 ```
 
-Expected result: the new alias case fails until the fixture uses the existing mapping contract correctly.
+Expected result: pass on the current YuAPI baseline. A failure is a blocker requiring a separate TDD fix before continuing.
 
 - [ ] **Step 3: Add the pricing contract vectors**
 
@@ -142,4 +142,3 @@ Do not change Caddy, production containers, production database, or production o
 - [ ] **Step 1: Do not merge parent feature commits into this branch**
 
 The user-scoped critical limiter and Ali `top_p` omission fix remain separate follow-up patches. Per-channel transport controls and parent tiered billing changes stay deferred until targeted evidence and a separate design approval exist.
-
