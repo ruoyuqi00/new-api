@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "base_url": "https://api.herohao.top/v1",
+  "groups": {
+    "国模按量": {
+      "ratio": 0.3,
+      "billing_mode": "tiered_expr",
+      "models": [
+        {
+          "public_name": "deepseek-v4-flash-0731",
+          "upstream_name": "deepseek-v4-flash-0731",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "The upstream identifier is visible, but the official price page documents the unsuffixed family name and no verified Beijing peak schedule is available.",
+          "source_url": "https://api-docs.deepseek.com/quick_start/pricing"
+        },
+        {
+          "public_name": "deepseek-v4-pro-0813",
+          "upstream_name": "deepseek-v4-pro-0813",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "The upstream identifier is visible, but the official price page documents the unsuffixed family name and no verified Beijing peak schedule is available.",
+          "source_url": "https://api-docs.deepseek.com/quick_start/pricing"
+        },
+        {
+          "public_name": "glm-5.2",
+          "upstream_name": "glm-5.2",
+          "verification_state": "verified",
+          "enabled": true,
+          "currency": "CNY",
+          "input_per_1m": 8.0,
+          "output_per_1m": 28.0,
+          "cache_read_per_1m": 2.0,
+          "source_url": "https://bigmodel.cn/pricing"
+        },
+        {
+          "public_name": "kimi-k3",
+          "upstream_name": "kimi-k3",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "No official price source for this exact model identifier was verified.",
+          "source_url": null
+        },
+        {
+          "public_name": "MiniMax-M2.7",
+          "upstream_name": "MiniMax-M2.7",
+          "verification_state": "verified",
+          "enabled": true,
+          "currency": "CNY",
+          "input_per_1m": 2.1,
+          "output_per_1m": 8.4,
+          "cache_read_per_1m": 0.42,
+          "cache_write_per_1m": 2.625,
+          "source_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo"
+        },
+        {
+          "public_name": "qwen3.8-max",
+          "upstream_name": "qwen3.8-max",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "Official prices vary by deployment region and cache policy; the upstream account region has not been confirmed.",
+          "source_url": "https://help.aliyun.com/en/model-studio/model-pricing"
+        }
+      ]
+    },
+    "国模按次": {
+      "ratio": 0.3,
+      "billing_mode": "tiered_expr",
+      "models": [
+        {
+          "public_name": "deepseek-v4-flash-0731-call",
+          "upstream_name": "deepseek-v4-flash-0731",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "No official per-call price or verified Beijing peak schedule is available.",
+          "source_url": "https://api-docs.deepseek.com/quick_start/pricing"
+        },
+        {
+          "public_name": "deepseek-v4-pro-0813-call",
+          "upstream_name": "deepseek-v4-pro-0813",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "No official per-call price or verified Beijing peak schedule is available.",
+          "source_url": "https://api-docs.deepseek.com/quick_start/pricing"
+        },
+        {
+          "public_name": "glm-5.2-call",
+          "upstream_name": "glm-5.2",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "The official source is token-priced; no official per-call price has been verified.",
+          "source_url": "https://bigmodel.cn/pricing"
+        },
+        {
+          "public_name": "kimi-k3-call",
+          "upstream_name": "kimi-k3",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "No official per-call price for this exact model identifier was verified.",
+          "source_url": null
+        },
+        {
+          "public_name": "MiniMax-M2.7-call",
+          "upstream_name": "MiniMax-M2.7",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "The official source is token-priced; no official per-call price has been verified.",
+          "source_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo"
+        },
+        {
+          "public_name": "qwen3.8-max-call",
+          "upstream_name": "qwen3.8-max",
+          "verification_state": "pending",
+          "enabled": false,
+          "reason": "No official per-call price and deployment region has been verified.",
+          "source_url": "https://help.aliyun.com/en/model-studio/model-pricing"
+        }
+      ]
+    }
+  },
+  "channels": {
+    "usage": {
+      "group": "国模按量",
+      "key_env": "YUAPI_DOMESTIC_USAGE_API_KEY",
+      "enabled": false
+    },
+    "call": {
+      "group": "国模按次",
+      "key_env": "YUAPI_DOMESTIC_CALL_API_KEY",
+      "enabled": false
+    }
+  },
+  "sources": {
+    "deepseek": "https://api-docs.deepseek.com/quick_start/pricing",
+    "minimax": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+    "qwen": "https://help.aliyun.com/en/model-studio/model-pricing",
+    "glm": "https://bigmodel.cn/pricing"
+  }
+}
