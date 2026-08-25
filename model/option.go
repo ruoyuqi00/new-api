@@ -151,6 +151,8 @@ func InitOptionMap() {
 	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
 	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
 	common.OptionMap["GroupGroupRatio"] = ratio_setting.GroupGroupRatio2JSONString()
+	common.OptionMap["group_ratio_setting.user_group_ratio"] = ratio_setting.UserGroupRatio2JSONString()
+	common.OptionMap["group_ratio_setting.availability_monitoring"] = ratio_setting.AvailabilityMonitoring2JSONString()
 	common.OptionMap["SensitiveInputCheckGroups"] = setting.SensitiveInputCheckGroups2JSONString()
 	common.OptionMap["SensitiveInputRetentionDays"] = strconv.Itoa(setting.SensitiveInputRetentionDays)
 	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()

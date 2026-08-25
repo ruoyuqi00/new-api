@@ -169,7 +169,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor channel.TaskAdaptor, cha
 						}
 						if group != "" {
 							groupRatio := ratio_setting.GetGroupRatio(group)
-							userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
+							userGroupRatio, hasUserGroupRatio := ratio_setting.GetUserGroupRatio(task.UserId, group, group)
 
 							var finalGroupRatio float64
 							if hasUserGroupRatio {

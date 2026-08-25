@@ -309,7 +309,7 @@ func BuildYucoreMediaCatalog(userID int) (*YucoreMediaCatalog, error) {
 		if err != nil {
 			return nil, err
 		}
-		groupRatio := GetUserGroupRatio(user.Group, groupID)
+		groupRatio := GetUserGroupRatioForUser(user.Id, user.Group, groupID)
 		models := make([]YucoreMediaCatalogModel, 0)
 		seenModels := make(map[string]struct{})
 		for _, ability := range abilities {

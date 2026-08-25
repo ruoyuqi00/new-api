@@ -79,3 +79,12 @@ func GetUserGroupRatio(userGroup, group string) float64 {
 	}
 	return ratio_setting.GetGroupRatio(group)
 }
+
+// GetUserGroupRatioForUser applies an individual override before the existing
+// user-group and group defaults without changing group permissions.
+func GetUserGroupRatioForUser(userID int, userGroup, group string) float64 {
+	if ratio, ok := ratio_setting.GetUserGroupRatio(userID, userGroup, group); ok {
+		return ratio
+	}
+	return ratio_setting.GetGroupRatio(group)
+}
