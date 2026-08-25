@@ -30,6 +30,13 @@ const statusClassName = {
   no_data: 'border-muted-foreground/20 bg-muted/30 text-muted-foreground',
 }
 
+const statusLabelKey = {
+  stable: 'Stable',
+  degraded: 'Degraded',
+  unavailable: 'Unavailable',
+  no_data: 'No data',
+} as const
+
 export function GroupAvailabilityMonitor(props: GroupAvailabilityMonitorProps) {
   const { t } = useTranslation()
   if (props.isLoading) {
@@ -86,15 +93,7 @@ export function GroupAvailabilityMonitor(props: GroupAvailabilityMonitorProps) {
                     )}
                   </div>
                   <span className='shrink-0 text-xs font-medium'>
-                    {t(
-                      status === 'stable'
-                        ? 'Stable'
-                        : status === 'degraded'
-                          ? 'Degraded'
-                          : status === 'unavailable'
-                            ? 'Unavailable'
-                            : 'No data'
-                    )}
+                    {t(statusLabelKey[status])}
                   </span>
                 </div>
               </CardHeader>

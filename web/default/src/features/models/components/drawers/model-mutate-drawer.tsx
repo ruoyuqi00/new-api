@@ -197,6 +197,8 @@ export function ModelMutateDrawer({
       UserUsableGroups: '',
       SensitiveInputCheckGroups: '{}',
       GroupGroupRatio: '',
+      UserGroupRatio: '{}',
+      AvailabilityMonitoring: '{}',
       AutoGroups: '',
       DefaultUseAutoGroup: false,
       CreateCacheRatio: '',

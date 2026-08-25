@@ -80,7 +80,7 @@ export function UserGroupRatioEditor(props: UserGroupRatioEditorProps) {
           </div>
           <div className='space-y-1.5'>
             <Label>{t('Target group')}</Label>
-            <Select value={group} onValueChange={setGroup}>
+            <Select value={group} onValueChange={(value) => setGroup(value ?? '')}>
               <SelectTrigger>
                 <SelectValue placeholder={t('Select a group')} />
               </SelectTrigger>

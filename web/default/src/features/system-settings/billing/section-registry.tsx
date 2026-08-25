@@ -47,6 +47,8 @@ const getGroupDefaults = (settings: BillingSettings) => ({
   UserUsableGroups: settings.UserUsableGroups,
   SensitiveInputCheckGroups: settings.SensitiveInputCheckGroups,
   GroupGroupRatio: settings.GroupGroupRatio,
+  UserGroupRatio: settings.UserGroupRatio,
+  AvailabilityMonitoring: settings.AvailabilityMonitoring,
   AutoGroups: settings.AutoGroups,
   DefaultUseAutoGroup: settings.DefaultUseAutoGroup,
   GroupSpecialUsableGroup:
