@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/groupavailability"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 )
@@ -27,6 +28,9 @@ func Init() {
 func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
 	if info == nil {
 		return
+	}
+	if groupavailability.IsTextRequestPath(info.RequestURLPath) {
+		_ = groupavailability.Record(info.UsingGroup, success)
 	}
 	now := time.Now()
 	hasTtft := info.IsStream && info.HasSendResponse()
