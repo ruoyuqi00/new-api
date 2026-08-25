@@ -42,6 +42,21 @@ const newKeys = {
       'Percentage of eligible credited quota awarded to the inviter',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
       "Reward inviters whenever an invited user's eligible balance credit succeeds.",
+    'User-specific group ratios': 'User-specific group ratios',
+    'Configure a ratio for one user without changing their group permissions.':
+      'Configure a ratio for one user without changing their group permissions.',
+    'Group availability monitoring': 'Group availability monitoring',
+    'Show request success availability only; latency and upstream details are never exposed.':
+      'Show request success availability only; latency and upstream details are never exposed.',
+    'JSON map of group identifiers to availability monitoring switches.':
+      'JSON map of group identifiers to availability monitoring switches.',
+    'Nested JSON: user id → target group → ratio.':
+      'Nested JSON: user id → target group → ratio.',
+    'No groups configured.': 'No groups configured.',
+    'Recent request success only': 'Recent request success only',
+    Stable: 'Stable',
+    Degraded: 'Degraded',
+    Unavailable: 'Unavailable',
   },
   zh: {
     'Affiliate Credit Rebate': '邀请充值返利',
@@ -59,6 +74,21 @@ const newKeys = {
       '按被邀请人实际获得的符合条件额度计算并奖励邀请人',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
       '被邀请人的符合条件额度到账后，按比例奖励邀请人。',
+    'User-specific group ratios': '用户专属分组倍率',
+    'Configure a ratio for one user without changing their group permissions.':
+      '无需改变用户分组权限，为单个用户配置专属倍率。',
+    'Group availability monitoring': '分组可用性监控',
+    'Show request success availability only; latency and upstream details are never exposed.':
+      '仅显示请求成功可用性，不暴露延迟或上游详情。',
+    'JSON map of group identifiers to availability monitoring switches.':
+      '使用 JSON 映射配置分组标识与可用性监控开关。',
+    'Nested JSON: user id → target group → ratio.':
+      '嵌套 JSON：用户 ID → 目标分组 → 倍率。',
+    'No groups configured.': '暂无已配置分组。',
+    'Recent request success only': '仅统计近期请求成功情况',
+    Stable: '稳定',
+    Degraded: '降级',
+    Unavailable: '不可用',
   },
   fr: {
     'Affiliate Credit Rebate': "Remise d'affiliation sur les crédits",
@@ -76,6 +106,21 @@ const newKeys = {
       "Pourcentage du quota crédité éligible attribué à l'invitant",
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
       "Récompensez l'invitant après chaque crédit éligible accordé à un filleul.",
+    'User-specific group ratios': 'Ratios de groupe par utilisateur',
+    'Configure a ratio for one user without changing their group permissions.':
+      'Configurez un ratio pour un utilisateur sans modifier ses permissions de groupe.',
+    'Group availability monitoring': 'Surveillance de la disponibilité des groupes',
+    'Show request success availability only; latency and upstream details are never exposed.':
+      "Affiche uniquement la réussite récente des requêtes ; la latence et les détails amont ne sont jamais exposés.",
+    'JSON map of group identifiers to availability monitoring switches.':
+      'Carte JSON des groupes vers leurs interrupteurs de surveillance de disponibilité.',
+    'Nested JSON: user id → target group → ratio.':
+      'JSON imbriqué : identifiant utilisateur → groupe cible → ratio.',
+    'No groups configured.': 'Aucun groupe configuré.',
+    'Recent request success only': 'Succès récents des requêtes uniquement',
+    Stable: 'Stable',
+    Degraded: 'Dégradé',
+    Unavailable: 'Indisponible',
   },
   ja: {
     'Affiliate Credit Rebate': '紹介クレジット還元',
@@ -93,6 +138,21 @@ const newKeys = {
       '対象となる付与クォータのうち紹介者に還元する割合',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
       '紹介したユーザーへの対象残高の付与が完了するたび、紹介者に報酬を付与します。',
+    'User-specific group ratios': 'ユーザー別グループ倍率',
+    'Configure a ratio for one user without changing their group permissions.':
+      'グループ権限を変更せず、ユーザーごとの倍率を設定します。',
+    'Group availability monitoring': 'グループ可用性モニタリング',
+    'Show request success availability only; latency and upstream details are never exposed.':
+      'リクエスト成功の可用性のみを表示し、遅延や上流の詳細は公開しません。',
+    'JSON map of group identifiers to availability monitoring switches.':
+      'グループ識別子と可用性監視スイッチの JSON マップです。',
+    'Nested JSON: user id → target group → ratio.':
+      'ネストされた JSON：ユーザー ID → 対象グループ → 倍率。',
+    'No groups configured.': '設定されたグループはありません。',
+    'Recent request success only': '最近のリクエスト成功のみ',
+    Stable: '安定',
+    Degraded: '低下',
+    Unavailable: '利用不可',
   },
   ru: {
     'Affiliate Credit Rebate': 'Партнёрское вознаграждение за пополнение',
@@ -110,6 +170,21 @@ const newKeys = {
       'Доля подходящей зачисленной квоты, начисляемая пригласившему пользователю',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
       'Начислять вознаграждение после каждого подходящего пополнения приглашённого пользователя.',
+    'User-specific group ratios': 'Персональные коэффициенты групп',
+    'Configure a ratio for one user without changing their group permissions.':
+      'Настройте коэффициент для пользователя без изменения его прав группы.',
+    'Group availability monitoring': 'Мониторинг доступности групп',
+    'Show request success availability only; latency and upstream details are never exposed.':
+      'Показывается только успешность запросов; задержка и сведения об upstream не раскрываются.',
+    'JSON map of group identifiers to availability monitoring switches.':
+      'JSON-карта идентификаторов групп и переключателей мониторинга доступности.',
+    'Nested JSON: user id → target group → ratio.':
+      'Вложенный JSON: ID пользователя → целевая группа → коэффициент.',
+    'No groups configured.': 'Группы не настроены.',
+    'Recent request success only': 'Только успешность последних запросов',
+    Stable: 'Стабильно',
+    Degraded: 'Снижено',
+    Unavailable: 'Недоступно',
   },
   vi: {
     'Affiliate Credit Rebate': 'Hoàn thưởng tín dụng giới thiệu',
@@ -127,6 +202,21 @@ const newKeys = {
       'Tỷ lệ hạn mức đủ điều kiện được thưởng cho người giới thiệu',
     "Reward inviters whenever an invited user's eligible balance credit succeeds.":
       'Thưởng cho người giới thiệu khi hạn mức đủ điều kiện của người được mời được ghi có.',
+    'User-specific group ratios': 'Tỷ lệ nhóm theo người dùng',
+    'Configure a ratio for one user without changing their group permissions.':
+      'Thiết lập tỷ lệ cho một người dùng mà không thay đổi quyền nhóm của họ.',
+    'Group availability monitoring': 'Giám sát khả dụng nhóm',
+    'Show request success availability only; latency and upstream details are never exposed.':
+      'Chỉ hiển thị khả dụng theo lượt gọi thành công; không hiển thị độ trễ hoặc chi tiết upstream.',
+    'JSON map of group identifiers to availability monitoring switches.':
+      'Bản đồ JSON của mã nhóm và công tắc giám sát khả dụng.',
+    'Nested JSON: user id → target group → ratio.':
+      'JSON lồng nhau: ID người dùng → nhóm đích → tỷ lệ.',
+    'No groups configured.': 'Chưa cấu hình nhóm nào.',
+    'Recent request success only': 'Chỉ thành công của các lượt gọi gần đây',
+    Stable: 'Ổn định',
+    Degraded: 'Suy giảm',
+    Unavailable: 'Không khả dụng',
   },
 }
 

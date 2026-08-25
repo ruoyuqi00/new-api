@@ -60,6 +60,8 @@ const defaultModelSettings: ModelSettings = {
   UserUsableGroups: '',
   SensitiveInputCheckGroups: '{}',
   GroupGroupRatio: '',
+  UserGroupRatio: '{}',
+  AvailabilityMonitoring: '{}',
   AutoGroups: '',
   DefaultUseAutoGroup: false,
   'group_ratio_setting.group_special_usable_group': '{}',

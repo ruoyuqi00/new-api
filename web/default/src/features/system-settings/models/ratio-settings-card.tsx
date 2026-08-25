@@ -120,6 +120,8 @@ const createGroupSchema = (t: Translate) =>
     UserUsableGroups: createJsonStringField(t),
     SensitiveInputCheckGroups: createJsonStringField(t),
     GroupGroupRatio: createJsonStringField(t),
+    UserGroupRatio: createJsonStringField(t),
+    AvailabilityMonitoring: createJsonStringField(t),
     AutoGroups: createJsonStringField(t, {
       predicate: (parsed) =>
         Array.isArray(parsed) &&
@@ -197,6 +199,10 @@ export function RatioSettingsCard({
       groupDefaults.SensitiveInputCheckGroups
     ),
     GroupGroupRatio: normalizeJsonString(groupDefaults.GroupGroupRatio),
+    UserGroupRatio: normalizeJsonString(groupDefaults.UserGroupRatio),
+    AvailabilityMonitoring: normalizeJsonString(
+      groupDefaults.AvailabilityMonitoring
+    ),
     AutoGroups: normalizeJsonString(groupDefaults.AutoGroups),
     DefaultUseAutoGroup: groupDefaults.DefaultUseAutoGroup,
     GroupSpecialUsableGroup: normalizeJsonString(
@@ -238,6 +244,10 @@ export function RatioSettingsCard({
         groupDefaults.SensitiveInputCheckGroups
       ),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
+      UserGroupRatio: formatJsonForTextarea(groupDefaults.UserGroupRatio),
+      AvailabilityMonitoring: formatJsonForTextarea(
+        groupDefaults.AvailabilityMonitoring
+      ),
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
       GroupSpecialUsableGroup: formatJsonForTextarea(
         groupDefaults.GroupSpecialUsableGroup
@@ -289,6 +299,10 @@ export function RatioSettingsCard({
         groupDefaults.SensitiveInputCheckGroups
       ),
       GroupGroupRatio: normalizeJsonString(groupDefaults.GroupGroupRatio),
+      UserGroupRatio: normalizeJsonString(groupDefaults.UserGroupRatio),
+      AvailabilityMonitoring: normalizeJsonString(
+        groupDefaults.AvailabilityMonitoring
+      ),
       AutoGroups: normalizeJsonString(groupDefaults.AutoGroups),
       DefaultUseAutoGroup: groupDefaults.DefaultUseAutoGroup,
       GroupSpecialUsableGroup: normalizeJsonString(
@@ -305,6 +319,10 @@ export function RatioSettingsCard({
         groupDefaults.SensitiveInputCheckGroups
       ),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
+      UserGroupRatio: formatJsonForTextarea(groupDefaults.UserGroupRatio),
+      AvailabilityMonitoring: formatJsonForTextarea(
+        groupDefaults.AvailabilityMonitoring
+      ),
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
       GroupSpecialUsableGroup: formatJsonForTextarea(
         groupDefaults.GroupSpecialUsableGroup
@@ -365,6 +383,10 @@ export function RatioSettingsCard({
           values.SensitiveInputCheckGroups
         ),
         GroupGroupRatio: normalizeJsonString(values.GroupGroupRatio),
+        UserGroupRatio: normalizeJsonString(values.UserGroupRatio),
+        AvailabilityMonitoring: normalizeJsonString(
+          values.AvailabilityMonitoring
+        ),
         AutoGroups: normalizeJsonString(values.AutoGroups),
         DefaultUseAutoGroup: values.DefaultUseAutoGroup,
         GroupSpecialUsableGroup: normalizeJsonString(
@@ -376,6 +398,8 @@ export function RatioSettingsCard({
       const apiKeyMap: Record<string, string> = {
         GroupSpecialUsableGroup:
           'group_ratio_setting.group_special_usable_group',
+        UserGroupRatio: 'group_ratio_setting.user_group_ratio',
+        AvailabilityMonitoring: 'group_ratio_setting.availability_monitoring',
       }
 
       const updates = (

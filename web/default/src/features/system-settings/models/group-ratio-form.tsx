@@ -61,7 +61,9 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageActionsPortal } from '../components/settings-page-context'
 import { GroupRatioVisualEditor } from './group-ratio-visual-editor'
+import { GroupAvailabilitySettings } from './group-availability-settings'
 import { GroupSpecialUsableRulesEditor } from './group-special-usable-editor'
+import { UserGroupRatioEditor } from './user-group-ratio-editor'
 
 type GroupFormValues = {
   GroupRatio: string
@@ -69,6 +71,8 @@ type GroupFormValues = {
   UserUsableGroups: string
   SensitiveInputCheckGroups: string
   GroupGroupRatio: string
+  UserGroupRatio: string
+  AvailabilityMonitoring: string
   AutoGroups: string
   DefaultUseAutoGroup: boolean
   GroupSpecialUsableGroup: string
@@ -192,6 +196,20 @@ export const GroupRatioForm = memo(function GroupRatioForm({
               }
             />
 
+            <UserGroupRatioEditor
+              value={form.watch('UserGroupRatio')}
+              catalog={groupCatalog}
+              onChange={(value) => handleFieldChange('UserGroupRatio', value)}
+            />
+
+            <GroupAvailabilitySettings
+              value={form.watch('AvailabilityMonitoring')}
+              catalog={groupCatalog}
+              onChange={(value) =>
+                handleFieldChange('AvailabilityMonitoring', value)
+              }
+            />
+
             <FormField
               control={form.control}
               name='DefaultUseAutoGroup'
@@ -309,6 +327,40 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                     {t(
                       'to override billing when a user in one group uses a token of another group.'
                     )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='UserGroupRatio'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('User-specific group ratios')}</FormLabel>
+                  <FormControl>
+                    <Textarea rows={8} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    {t('Nested JSON: user id → target group → ratio.')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='AvailabilityMonitoring'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Group availability monitoring')}</FormLabel>
+                  <FormControl>
+                    <Textarea rows={6} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    {t('JSON map of group identifiers to availability monitoring switches.')}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
