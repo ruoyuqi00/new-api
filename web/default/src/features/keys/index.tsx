@@ -16,18 +16,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 
+import { getGroupAvailability } from './api'
 import { ApiEndpointNotice } from './components/api-endpoint-notice'
 import { ApiKeysDialogs } from './components/api-keys-dialogs'
 import { ApiKeysPrimaryButtons } from './components/api-keys-primary-buttons'
 import { ApiKeysProvider } from './components/api-keys-provider'
 import { ApiKeysTable } from './components/api-keys-table'
+import { GroupAvailabilityMonitor } from './components/group-availability-monitor'
 
 export function ApiKeys() {
   const { t } = useTranslation()
+  const availabilityQuery = useQuery({
+    queryKey: ['group-availability'],
+    queryFn: getGroupAvailability,
+    staleTime: 30_000,
+  })
   return (
     <ApiKeysProvider>
       <SectionPageLayout fixedContent>
@@ -37,6 +45,12 @@ export function ApiKeys() {
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='flex h-full min-h-0 flex-col gap-3'>
+            <GroupAvailabilityMonitor
+              items={availabilityQuery.data?.data ?? []}
+              isLoading={availabilityQuery.isLoading}
+              isFetching={availabilityQuery.isFetching}
+              onRefresh={() => void availabilityQuery.refetch()}
+            />
             <ApiEndpointNotice />
             <div className='min-h-0 flex-1'>
               <ApiKeysTable />

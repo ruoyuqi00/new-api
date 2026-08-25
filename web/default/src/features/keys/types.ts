@@ -59,6 +59,22 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
+export interface GroupAvailabilityItem {
+  group: string
+  description: string
+  request_count: number
+  success_count: number
+  success_rate: number
+  status: 'stable' | 'degraded' | 'unavailable' | 'no_data' | string
+  observed_at: number
+}
+
+export interface GroupAvailabilityResponse {
+  success: boolean
+  message?: string
+  data?: GroupAvailabilityItem[]
+}
+
 export interface GetApiKeysParams {
   p?: number
   size?: number

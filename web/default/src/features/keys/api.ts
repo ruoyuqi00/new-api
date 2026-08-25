@@ -25,6 +25,7 @@ import type {
   GetApiKeysResponse,
   SearchApiKeysParams,
   ApiKeyFormData,
+  GroupAvailabilityResponse,
 } from './types'
 
 // ============================================================================
@@ -114,5 +115,10 @@ export async function fetchTokenKeysBatch(ids: number[]): Promise<{
   data?: { keys: Record<number, string> }
 }> {
   const res = await api.post('/api/token/batch/keys', { ids })
+  return res.data
+}
+
+export async function getGroupAvailability(): Promise<GroupAvailabilityResponse> {
+  const res = await api.get('/api/user/self/group-availability')
   return res.data
 }
