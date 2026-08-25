@@ -188,13 +188,16 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
       })
-      setPricingMode(
-        editData.billingMode === 'tiered_expr'
-          ? 'tiered_expr'
-          : editData.price
-            ? 'per-request'
-            : 'per-token'
-      )
+      let nextPricingMode: PricingMode = editData.price
+        ? 'per-request'
+        : 'per-token'
+      if (
+        editData.billingMode === 'tiered_expr' ||
+        editData.billingMode === 'per_call_expr'
+      ) {
+        nextPricingMode = editData.billingMode
+      }
+      setPricingMode(nextPricingMode)
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
     } else {
@@ -335,8 +338,15 @@ export const ModelPricingEditorPanel = forwardRef<
   const handleModeChange = (value: string) => {
     const nextMode = value as PricingMode
     setPricingMode(nextMode)
-    if (nextMode === 'tiered_expr' && !billingExpr) {
-      setBillingExpr('tier("base", p * 0 + c * 0)')
+    if (
+      (nextMode === 'tiered_expr' || nextMode === 'per_call_expr') &&
+      !billingExpr
+    ) {
+      setBillingExpr(
+        nextMode === 'per_call_expr'
+          ? 'tier("base", 0)'
+          : 'tier("base", p * 0 + c * 0)'
+      )
     }
   }
 
@@ -453,7 +463,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioCompletionRatio: values.audioCompletionRatio || '',
       }
 
-      if (pricingMode === 'tiered_expr') {
+      if (pricingMode === 'tiered_expr' || pricingMode === 'per_call_expr') {
         data.billingExpr = billingExpr
         data.requestRuleExpr = requestRuleExpr
       }
@@ -544,7 +554,7 @@ export const ModelPricingEditorPanel = forwardRef<
                   onValueChange={handleModeChange}
                   className='gap-4'
                 >
-                  <TabsList className='grid w-full grid-cols-3'>
+                  <TabsList className='grid w-full grid-cols-2 sm:grid-cols-4'>
                     <TabsTrigger value='per-token'>
                       {t('Per-token')}
                     </TabsTrigger>
@@ -553,6 +563,9 @@ export const ModelPricingEditorPanel = forwardRef<
                     </TabsTrigger>
                     <TabsTrigger value='tiered_expr'>
                       {t('Expression')}
+                    </TabsTrigger>
+                    <TabsTrigger value='per_call_expr'>
+                      {t('Per-call expression')}
                     </TabsTrigger>
                   </TabsList>
 
@@ -640,6 +653,19 @@ export const ModelPricingEditorPanel = forwardRef<
                   </TabsContent>
 
                   <TabsContent value='tiered_expr' className='pt-0'>
+                    <FieldGroup className='gap-5'>
+                      <TieredPricingEditor
+                        key={editorReloadToken}
+                        modelName={watchedValues.name}
+                        billingExpr={billingExpr}
+                        requestRuleExpr={requestRuleExpr}
+                        onBillingExprChange={setBillingExpr}
+                        onRequestRuleExprChange={setRequestRuleExpr}
+                      />
+                    </FieldGroup>
+                  </TabsContent>
+
+                  <TabsContent value='per_call_expr' className='pt-0'>
                     <FieldGroup className='gap-5'>
                       <TieredPricingEditor
                         key={editorReloadToken}

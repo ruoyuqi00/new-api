@@ -95,12 +95,13 @@ const ModelDetailSideSheet = ({
                 t={t}
               />
             </div>
-            {modelData.billing_mode === 'tiered_expr' && modelData.billing_expr && (
+            {['tiered_expr', 'per_call_expr'].includes(modelData.billing_mode) && modelData.billing_expr && (
               <>
                 <Divider margin={16} />
                 <div style={{ padding: '0 24px' }}>
                   <DynamicPricingBreakdown
                     billingExpr={modelData.billing_expr}
+                    billingMode={modelData.billing_mode}
                     t={t}
                   />
                 </div>

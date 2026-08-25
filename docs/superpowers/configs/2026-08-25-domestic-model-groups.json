@@ -1,6 +1,13 @@
 {
   "version": 1,
   "base_url": "https://api.herohao.top/v1",
+  "pricing_contract": {
+    "expression_currency": "USD",
+    "official_source_currency": "CNY",
+    "usd_exchange_rate": null,
+    "conversion_policy": "Convert verified CNY source prices with the locally configured USDExchangeRate frozen at apply time; never fetch prices at runtime.",
+    "per_call_prices": "pending_until_official_source"
+  },
   "groups": {
     "国模按量": {
       "ratio": 0.3,
@@ -65,7 +72,7 @@
     },
     "国模按次": {
       "ratio": 0.3,
-      "billing_mode": "tiered_expr",
+      "billing_mode": "per_call_expr",
       "models": [
         {
           "public_name": "deepseek-v4-flash-0731-call",

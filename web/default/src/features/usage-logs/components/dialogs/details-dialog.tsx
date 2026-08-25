@@ -160,6 +160,8 @@ function BillingBreakdown(props: {
   const isPerCall = isPerCallBilling(other.model_price)
   const isClaude = other.claude === true
   const isTieredExpr = other.billing_mode === 'tiered_expr'
+  const isPerCallExpr = other.billing_mode === 'per_call_expr'
+  const isExpressionBilling = isTieredExpr || isPerCallExpr
   const tieredSummary = getTieredBillingSummary(other)
 
   const rows: Array<{ label: string; value: string }> = []
@@ -167,10 +169,10 @@ function BillingBreakdown(props: {
   const fmtPrice = (usd: number) => formatBillingCurrencyFromUSD(usd, priceOpts)
   const baseInputUSD = other.model_ratio != null ? other.model_ratio * 2.0 : 0
 
-  if (isTieredExpr) {
+  if (isExpressionBilling) {
     rows.push({
       label: t('Billing Mode'),
-      value: t('Dynamic Pricing'),
+      value: isPerCallExpr ? t('Per-call') : t('Dynamic Pricing'),
     })
     if (tieredSummary) {
       if (tieredSummary.tier.label) {
@@ -183,6 +185,12 @@ function BillingBreakdown(props: {
         rows.push({
           label: t(entry.shortLabel),
           value: `${fmtPrice(entry.price)}/M`,
+        })
+      }
+      if (isPerCallExpr && tieredSummary.tier.fixedPrice != null) {
+        rows.push({
+          label: t('Model Price'),
+          value: fmtPrice(Number(tieredSummary.tier.fixedPrice)),
         })
       }
     } else {
@@ -225,7 +233,7 @@ function BillingBreakdown(props: {
     })
   }
 
-  if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
+  if (!isExpressionBilling && isClaude && hasAnyCacheTokens(other)) {
     if (other.cache_ratio != null && other.cache_ratio !== 1) {
       rows.push({
         label: t('Cache Read'),
@@ -261,7 +269,7 @@ function BillingBreakdown(props: {
     }
   }
 
-  if (!isTieredExpr) {
+  if (!isExpressionBilling) {
     if (other.audio_ratio != null && other.audio_ratio !== 1) {
       rows.push({
         label: t('Audio input'),
@@ -432,9 +440,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
 
   const isViolation = isViolationFeeLog(other)
   const violationDisplay =
-    isViolation && other
-      ? getViolationFeeDisplay(other, props.log.quota)
-      : null
+    isViolation && other ? getViolationFeeDisplay(other, props.log.quota) : null
   const isLocalSensitiveViolation =
     other?.violation_fee_reason === 'local_sensitive_word'
   const showSensitiveInputEvidence = props.isAdmin && isLocalSensitiveViolation
@@ -446,7 +452,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const isTieredBilling =
     isConsume &&
     !isViolation &&
-    other?.billing_mode === 'tiered_expr' &&
+    (other?.billing_mode === 'tiered_expr' ||
+      other?.billing_mode === 'per_call_expr') &&
     !!other?.expr_b64
   const hasAudioTokens = other?.ws || other?.audio
   const showTiming = isTimingLogType(props.log.type)

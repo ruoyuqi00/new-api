@@ -1038,3 +1038,30 @@ func BenchmarkRatioBilling_Parallel(b *testing.B) {
 		}
 	})
 }
+
+func TestPerCallExpressionSettlementUsesFixedPriceAndReportsMode(t *testing.T) {
+	expr := `len <= 128000 ? tier("short", 0.05) : tier("long", 0.1)`
+	info := &relaycommon.RelayInfo{
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               "per_call_expr",
+			ExprString:                expr,
+			ExprHash:                  billingexpr.ExprHashString(expr),
+			GroupRatio:                0.3,
+			EstimatedQuotaBeforeGroup: 25_000,
+			EstimatedQuotaAfterGroup:  7_500,
+			QuotaPerUnit:              testQuotaPerUnit,
+		},
+	}
+
+	ok, quota, result := TryTieredSettle(info, billingexpr.TokenParams{Len: 128_001, C: 999_999})
+	require.True(t, ok)
+	require.Equal(t, 15_000, quota)
+	require.NotNil(t, result)
+	require.Equal(t, "long", result.MatchedTier)
+	_, shortOutputQuota, _ := TryTieredSettle(info, billingexpr.TokenParams{Len: 128_001, C: 1})
+	require.Equal(t, quota, shortOutputQuota)
+
+	other := map[string]interface{}{}
+	InjectTieredBillingInfo(other, info, result)
+	require.Equal(t, "per_call_expr", other["billing_mode"])
+}

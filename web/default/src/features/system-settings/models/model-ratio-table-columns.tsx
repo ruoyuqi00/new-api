@@ -82,7 +82,8 @@ export function buildModelRatioColumns({
       cell: ({ row }) => (
         <div className='flex min-w-0 items-center gap-2 font-medium'>
           <span className='min-w-0 truncate'>{row.getValue('name')}</span>
-          {row.original.billingMode === 'tiered_expr' && (
+          {(row.original.billingMode === 'tiered_expr' ||
+            row.original.billingMode === 'per_call_expr') && (
             <StatusBadge
               label={t('Tiered')}
               variant='info'

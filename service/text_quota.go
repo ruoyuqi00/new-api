@@ -369,7 +369,7 @@ func frozenTextReservationQuota(relayInfo *relaycommon.RelayInfo) int {
 	if relayInfo == nil {
 		return 0
 	}
-	if snapshot := relayInfo.TieredBillingSnapshot; snapshot != nil && snapshot.BillingMode == "tiered_expr" {
+	if snapshot := relayInfo.TieredBillingSnapshot; snapshot != nil && billingexpr.IsExpressionBillingMode(snapshot.BillingMode) {
 		if snapshot.EstimatedQuotaAfterGroup > 0 {
 			return snapshot.EstimatedQuotaAfterGroup
 		}
@@ -505,6 +505,8 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	originUsage := usage
 	authoritativeUsage := isAuthoritativeTextUsage(ctx, relayInfo, originUsage)
 	estimatedGPTTextUsage := !authoritativeUsage && isGPTTextSettlementRequest(ctx, relayInfo)
+	perCallExpression := relayInfo.TieredBillingSnapshot != nil &&
+		relayInfo.TieredBillingSnapshot.BillingMode == billingexpr.BillingModePerCallExpr
 	if estimatedGPTTextUsage && relayInfo.GetEstimatePromptTokens() <= 0 &&
 		(originUsage == nil || originUsage.PromptTokens <= 0) && relayInfo.Request != nil {
 		if requestMeta := relayInfo.Request.GetTokenCountMeta(); requestMeta != nil {
@@ -572,13 +574,18 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			tieredBillingApplied = true
 			tieredResult = tieredRes
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
-			if estimatedGPTTextUsage && summary.TotalTokens == 0 {
+			if estimatedGPTTextUsage && summary.TotalTokens == 0 && !perCallExpression {
 				summary.Quota = 0
 			}
 		}
 	}
 
 	settledFromReservation := false
+	if perCallExpression && !authoritativeUsage && summary.TotalTokens == 0 {
+		summary.Quota = frozenTextReservationQuota(relayInfo)
+		tieredResult = nil
+		settledFromReservation = true
+	}
 	if estimatedGPTTextUsage && relayInfo.PreservePreConsumedQuota {
 		if frozenQuota := frozenTextReservationQuota(relayInfo); frozenQuota > 0 && summary.Quota > frozenQuota {
 			summary.Quota = frozenQuota
@@ -618,7 +625,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		}
 	}
 
-	if summary.TotalTokens == 0 && !summary.ImageGenerationOnlyBilling && !retainedSubmission {
+	if summary.TotalTokens == 0 && !summary.ImageGenerationOnlyBilling && !perCallExpression && !retainedSubmission {
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
 	} else {

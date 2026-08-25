@@ -2225,6 +2225,8 @@ function parseTierBody(bodyStr) {
   for (const [varName, field] of Object.entries(BILLING_VAR_KEY_TO_FIELD)) {
     tier[field] = coeffs[varName] || 0;
   }
+  const fixedPrice = Number(bodyStr.trim());
+  tier.fixedPrice = Number.isFinite(fixedPrice) ? fixedPrice : null;
   return tier;
 }
 
@@ -2291,8 +2293,10 @@ export function renderTieredModelPrice(opts) {
   const {
     prompt_tokens: inputTokens = 0,
     completion_tokens: completionTokens = 0,
+    billing_mode: billingMode,
     expr_b64: exprB64,
     matched_tier: matchedTier,
+    estimated_tier: estimatedTier,
     group_ratio: groupRatio,
     cache_tokens: cacheTokens = 0,
     cache_creation_tokens: cacheCreationTokens = 0,
@@ -2306,10 +2310,11 @@ export function renderTieredModelPrice(opts) {
     return i18next.t('阶梯计费（表达式解析失败）');
   }
 
+  const resolvedTier = matchedTier || estimatedTier;
   const tier =
       tiers.find((t) => {
         const l1 = normalizeLabel(t.label);
-        const l2 = normalizeLabel(matchedTier);
+        const l2 = normalizeLabel(resolvedTier);
         return l1 === l2 && l1 !== '';
       });
 
@@ -2327,7 +2332,14 @@ export function renderTieredModelPrice(opts) {
       .map((v) => [v.field, v.label]);
 
   const lines = [
-    buildBillingText('命中档位：{{tier}}', { tier: matchedTier || tier.label }),
+    buildBillingText('命中档位：{{tier}}', { tier: resolvedTier || tier.label }),
+    ...(billingMode === 'per_call_expr' && tier.fixedPrice !== null
+      ? [buildBillingPriceText('模型价格：{{symbol}}{{price}} / 次', {
+          symbol,
+          usdAmount: tier.fixedPrice,
+          rate,
+        })]
+      : []),
     ...priceLines
         .filter(([field]) => tier[field] > 0)
         .map(([field, label]) =>
@@ -2341,7 +2353,9 @@ export function renderTieredModelPrice(opts) {
 export function renderTieredModelPriceSimple(opts) {
   const {
     expr_b64: exprB64,
+    billing_mode: billingMode,
     matched_tier: matchedTier,
+    estimated_tier: estimatedTier,
     group_ratio: groupRatio,
     user_group_ratio,
     cache_tokens: cacheTokens = 0,
@@ -2354,10 +2368,11 @@ export function renderTieredModelPriceSimple(opts) {
   let exprStr = '';
   try { exprStr = decodeFromBase64(exprB64); } catch { /* ignore */ }
   const tiers = parseTiersFromExpr(exprStr);
+  const resolvedTier = matchedTier || estimatedTier;
   const tier =
       tiers.find((t) => {
         const l1 = normalizeLabel(t.label);
-        const l2 = normalizeLabel(matchedTier);
+        const l2 = normalizeLabel(resolvedTier);
         return l1 === l2 && l1 !== '';
       });
 
@@ -2377,6 +2392,15 @@ export function renderTieredModelPriceSimple(opts) {
             : i18next.t('阶梯计费（未匹配到对应阶梯）'),
       });
     } else if (isPriceDisplayMode(displayMode)) {
+      if (billingMode === 'per_call_expr' && tier.fixedPrice !== null) {
+        segments.push({
+          tone: 'secondary',
+          text: i18next.t('模型价格：{{symbol}}{{price}} / 次', {
+            symbol: getCurrencyConfig().symbol,
+            price: (tier.fixedPrice * getCurrencyConfig().rate).toFixed(6),
+          }),
+        });
+      }
       const hasAnyCacheTokens = cacheTokens > 0 || cacheCreationTokens > 0
           || cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
       const priceSegments = BILLING_PRICING_VARS

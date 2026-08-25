@@ -12,7 +12,7 @@ The expression is the billing contract between the administrator and the system.
 
 2. **Variables are opt-in** — `p` (prompt) and `c` (completion) are the base. Cache (`cr`, `cc`, `cc1h`), image (`img`), and audio (`ai`, `ao`) variables are optional. If omitted, those tokens are included in `p`/`c` and priced at their rate. The system automatically detects which variables the expression uses (via AST introspection) and adjusts token normalization accordingly.
 
-3. **Prices are real prices** — Expression coefficients are actual $/1M tokens prices as published by providers. No ratio conversion, no `/2` convention. `p * 2.5` means $2.50 per 1M prompt tokens.
+3. **Prices are real prices** — In `tiered_expr`, coefficients are actual $/1M token prices as published by providers. In `per_call_expr`, the result is an actual fixed USD price per accepted request. No ratio conversion or `/2` convention is embedded in either expression.
 
 4. **Upstream-agnostic** — The expression doesn't need to know whether the upstream API is OpenAI-format (prompt_tokens includes cache) or Claude-format (input_tokens excludes cache). The system normalizes token counts before evaluation based on the upstream response format.
 
@@ -143,7 +143,7 @@ The editor outputs a billing expression string and an optional request rule expr
 **File**: `setting/billing_setting/tiered_billing.go`
 
 Two option maps stored in the `options` DB table:
-- `ModelBillingMode`: `{ "model-name": "tiered_expr" }` — activates tiered billing for a model
+- `ModelBillingMode`: `{ "model-name": "tiered_expr" }` or `{ "model-call": "per_call_expr" }` — activates an expression billing mode for a model
 - `ModelBillingExpr`: `{ "model-name": "tier(\"base\", p * 2.5 + c * 15)" }` — the expression
 
 On save, the expression is validated:
@@ -154,11 +154,11 @@ On save, the expression is validated:
 
 **File**: `relay/helper/price.go` → `modelPriceHelperTiered()`
 
-When a request arrives and the model uses `tiered_expr` billing:
+When a request arrives and the model uses expression billing:
 1. Loads expression from `billing_setting.GetBillingExpr()`
 2. Builds `RequestInput` (headers + body) for `param()` / `header()` functions
 3. Runs expression with estimated tokens: `RunExprWithRequest(expr, {P, C}, requestInput)`
-4. Converts output to quota: `rawCost / 1,000,000 * QuotaPerUnit`
+4. Converts output to quota according to the frozen mode: `tiered_expr` divides by 1,000,000; `per_call_expr` treats the result as a fixed per-request price
 5. Creates `BillingSnapshot` (frozen state for settlement) and stores on `RelayInfo`
 
 ### 4. Settlement (Actual Billing)
@@ -180,11 +180,11 @@ After the upstream response returns with actual token usage:
 
 ### 5. Log Display
 
-**Files**: `service/log_info_generate.go`, `web/src/helpers/render.jsx`
+**Files**: `service/log_info_generate.go`, `web/classic/src/helpers/render.jsx`, `web/default/src/features/usage-logs/lib/format.ts`
 
-Backend: `InjectTieredBillingInfo()` adds `billing_mode`, `expr_b64` (base64 expression), and `matched_tier` to the log's `other` JSON.
+Backend: `InjectTieredBillingInfo()` adds `billing_mode`, `expr_b64` (base64 expression), and `matched_tier` when authoritative usage is available. Unconfirmed expression settlements also record `estimated_tier`, `usage_unconfirmed`, and whether the frozen reservation was used.
 
-Frontend: Detects `billing_mode === "tiered_expr"`, decodes `expr_b64`, parses tiers via shared `parseTiersFromExpr()`, and renders pricing breakdown.
+Frontend: Detects both expression modes, decodes `expr_b64`, parses tiers via shared `parseTiersFromExpr()`, and renders the matching token-price or fixed per-call breakdown. Unconfirmed settlements use the frozen `estimated_tier` when no authoritative `matched_tier` exists.
 
 ---
 
@@ -214,11 +214,19 @@ This ensures that heavy cache usage doesn't cause the tier condition to incorrec
 
 ### Quota Conversion
 
-Expression coefficients are $/1M tokens. Conversion to internal quota:
+`tiered_expr` coefficients are $/1M tokens. Conversion to internal quota:
 
 ```
 quota = exprOutput / 1,000,000 * QuotaPerUnit * groupRatio
 ```
+
+`per_call_expr` outputs a fixed USD price per accepted request:
+
+```
+quota = exprOutput * QuotaPerUnit * groupRatio
+```
+
+`per_call_expr` may use `len` for context tiers and request/time probes, but it must not reference token pricing variables (`p`, `c`, cache, image, or audio variables). This restriction is enforced by backend validation.
 
 This matches the per-call billing pattern: `quota = modelPrice * QuotaPerUnit * groupRatio`.
 

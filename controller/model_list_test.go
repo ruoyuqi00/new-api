@@ -307,6 +307,42 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	require.Empty(t, missingExprPricing.BillingExpr)
 }
 
+func TestListModelsIncludesPerCallExpressionModel(t *testing.T) {
+	withSelfUseModeDisabled(t)
+	withTieredBillingConfig(t, map[string]string{
+		"zz-domestic-call-model": "per_call_expr",
+	}, map[string]string{
+		"zz-domestic-call-model": `len <= 128000 ? tier("short", 0.05) : tier("long", 0.1)`,
+	})
+
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.User{
+		Id:       1004,
+		Username: "per-call-model-list-user",
+		Password: "password",
+		Group:    "国模按次",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "国模按次", Model: "zz-domestic-call-model", ChannelId: 1, Enabled: true,
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	ctx.Set("id", 1004)
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	ids := decodeListModelsResponse(t, recorder)
+	require.Contains(t, ids, "zz-domestic-call-model")
+	pricing, ok := pricingByModelName(model.GetPricing())["zz-domestic-call-model"]
+	require.True(t, ok)
+	require.Equal(t, 1, pricing.QuotaType)
+	require.Equal(t, "per_call_expr", pricing.BillingMode)
+	require.NotEmpty(t, pricing.BillingExpr)
+}
+
 func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	withTieredBillingConfig(t, map[string]string{

@@ -77,6 +77,7 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
 export const getModeLabel = (mode?: string) => {
   if (mode === 'per-request') return 'Per-request'
   if (mode === 'tiered_expr') return 'Expression'
+  if (mode === 'per_call_expr') return 'Per-call expression'
   return 'Per-token'
 }
 
@@ -84,7 +85,7 @@ export const getModeVariant = (
   mode?: string
 ): 'warning' | 'info' | 'success' => {
   if (mode === 'per-request') return 'warning'
-  if (mode === 'tiered_expr') return 'info'
+  if (mode === 'tiered_expr' || mode === 'per_call_expr') return 'info'
   return 'success'
 }
 
@@ -103,7 +104,10 @@ export const getPriceSummary = (
   row: ModelPricingSnapshot,
   t: (key: string) => string
 ) => {
-  if (row.billingMode === 'tiered_expr') {
+  if (
+    row.billingMode === 'tiered_expr' ||
+    row.billingMode === 'per_call_expr'
+  ) {
     return getExpressionSummary(row, t)
   }
   if (row.billingMode === 'per-request') {
@@ -131,7 +135,10 @@ export const getPriceDetail = (
   row: ModelPricingSnapshot,
   t: (key: string) => string
 ) => {
-  if (row.billingMode === 'tiered_expr') {
+  if (
+    row.billingMode === 'tiered_expr' ||
+    row.billingMode === 'per_call_expr'
+  ) {
     return row.requestRuleExpr
       ? t('Includes request rules')
       : t('Expression based')
@@ -223,7 +230,7 @@ export const buildModelSnapshots = ({
     ...Object.keys(billingExprMap),
   ])
 
-  return Array.from(modelNames).map((name) => {
+  return [...modelNames].map((name) => {
     const price = priceMap[name]?.toString() || ''
     const ratio = ratioMap[name]?.toString() || ''
     const cache = cacheMap[name]?.toString() || ''
@@ -234,13 +241,13 @@ export const buildModelSnapshots = ({
     const audioCompletion = audioCompletionMap[name]?.toString() || ''
 
     const modeForModel = billingModeMap[name]
-    if (modeForModel === 'tiered_expr') {
+    if (modeForModel === 'tiered_expr' || modeForModel === 'per_call_expr') {
       const fullExpr = billingExprMap[name] || ''
       const { billingExpr: pureExpr, requestRuleExpr } =
         splitBillingExprAndRequestRules(fullExpr)
       return {
         name,
-        billingMode: 'tiered_expr',
+        billingMode: modeForModel,
         billingExpr: pureExpr,
         requestRuleExpr,
         price,

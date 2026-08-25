@@ -49,13 +49,13 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getPerfMetrics } from '@/features/performance-metrics/api'
-import { YucorePageShell } from '@/features/yucore-brand'
 import {
   formatLatency,
   formatThroughput,
   formatUptimePct,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
+import { YucorePageShell } from '@/features/yucore-brand'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
@@ -532,10 +532,10 @@ function ModelHeader(props: { model: PricingModel }) {
   const modelIconKey = model.icon || model.vendor_icon
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 20) : null
   const description = model.description || model.vendor_description || null
+  const isDynamic = isDynamicPricingModel(model)
+  const isPerCallExpression = model.billing_mode === 'per_call_expr'
   const isSpecialExpression =
-    model.billing_mode === 'tiered_expr' &&
-    Boolean(model.billing_expr) &&
-    getDynamicPricingTiers(model).length === 0
+    isDynamic && getDynamicPricingTiers(model).length === 0
 
   return (
     <header className='pb-4'>
@@ -559,11 +559,11 @@ function ModelHeader(props: { model: PricingModel }) {
         )}
         <span className='text-muted-foreground/30'>·</span>
         <span className='text-muted-foreground/70'>
-          {model.quota_type === QUOTA_TYPE_VALUES.TOKEN
+          {model.quota_type === QUOTA_TYPE_VALUES.TOKEN && !isPerCallExpression
             ? t('Token-based')
             : t('Per Request')}
         </span>
-        {model.billing_mode === 'tiered_expr' && model.billing_expr && (
+        {isDynamic && (
           <>
             <span className='text-muted-foreground/30'>·</span>
             <span className='rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-300'>
@@ -595,7 +595,9 @@ function PriceSection(props: {
   showRechargePrice: boolean
 }) {
   const { t } = useTranslation()
-  const isTokenBased = isTokenBasedModel(props.model)
+  const isTokenBased =
+    props.model.billing_mode !== 'per_call_expr' &&
+    isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
   const baseGroupKey = '_base'
   const baseGroupRatioMap = { [baseGroupKey]: 1 }
@@ -646,6 +648,35 @@ function PriceSection(props: {
   ]
 
   if (dynamicSummary) {
+    if (
+      dynamicSummary.isPerCall &&
+      dynamicSummary.fixedPriceEntries.length > 0
+    ) {
+      return (
+        <section>
+          <SectionTitle>{t('Base Price')}</SectionTitle>
+          <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+            {dynamicSummary.fixedPriceEntries.map((entry) => (
+              <div
+                key={entry.key}
+                className='bg-muted/20 rounded-lg border p-3'
+              >
+                <div className='text-muted-foreground text-xs'>
+                  {entry.label || t('Default')}
+                </div>
+                <div className='text-foreground mt-1 font-mono text-base font-semibold tabular-nums'>
+                  {entry.formatted}
+                  <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
+                    / {t('request')}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )
+    }
+
     if (dynamicSummary.isSpecialExpression) {
       return (
         <section>
@@ -840,13 +871,13 @@ function getDynamicPriceFields(
   tiers: DynamicPricingTier[],
   options: DynamicPriceOptions
 ) {
-  return Array.from(
-    new Map(
+  return [
+    ...new Map(
       tiers
         .flatMap((tier) => getDynamicPriceEntries(tier, options))
         .map((entry) => [entry.field, entry])
-    ).values()
-  )
+    ).values(),
+  ]
 }
 
 function getDynamicFormattedPricesByTier(
@@ -888,24 +919,31 @@ function GroupPricingSection(props: {
     [props.model, props.usableGroup]
   )
 
-  const isTokenBased = isTokenBasedModel(props.model)
+  const isTokenBased =
+    props.model.billing_mode !== 'per_call_expr' &&
+    isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
 
   const extraPriceTypes = useMemo(() => {
     const types: { label: string; type: PriceType }[] = []
-    if (props.model.cache_ratio != null)
+    if (props.model.cache_ratio != null) {
       types.push({ label: t('Cache'), type: 'cache' })
-    if (props.model.create_cache_ratio != null)
+    }
+    if (props.model.create_cache_ratio != null) {
       types.push({ label: t('Cache Write'), type: 'create_cache' })
-    if (props.model.image_ratio != null)
+    }
+    if (props.model.image_ratio != null) {
       types.push({ label: t('Image'), type: 'image' })
-    if (props.model.audio_ratio != null)
+    }
+    if (props.model.audio_ratio != null) {
       types.push({ label: t('Audio In'), type: 'audio_input' })
+    }
     if (
       props.model.audio_ratio != null &&
       props.model.audio_completion_ratio != null
-    )
+    ) {
       types.push({ label: t('Audio Out'), type: 'audio_output' })
+    }
     return types
   }, [props.model, t])
 
@@ -951,6 +989,69 @@ function GroupPricingSection(props: {
                 {props.model.billing_expr}
               </code>
             </div>
+          </div>
+        </section>
+      )
+    }
+
+    if (props.model.billing_mode === 'per_call_expr') {
+      const summariesByGroup = new Map(
+        availableGroups.map((group) => [
+          group,
+          getDynamicPricingSummary(props.model, {
+            tokenUnit: props.tokenUnit,
+            showRechargePrice,
+            priceRate: props.priceRate,
+            usdExchangeRate: props.usdExchangeRate,
+            groupRatioMultiplier: props.groupRatio[group] || 1,
+          }),
+        ])
+      )
+
+      return (
+        <section>
+          <SectionTitle>{t('Pricing by Group')}</SectionTitle>
+          <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
+          <div className='space-y-3'>
+            {availableGroups.map((group) => {
+              const ratio = props.groupRatio[group] || 1
+              const fixedEntries =
+                summariesByGroup.get(group)?.fixedPriceEntries ?? []
+
+              return (
+                <div key={group} className='overflow-hidden rounded-lg border'>
+                  <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
+                    <GroupBadge group={group} size='sm' />
+                    <span className='text-muted-foreground font-mono text-xs'>
+                      {ratio}x
+                    </span>
+                  </div>
+                  <StaticDataTable
+                    className='rounded-none border-0'
+                    tableClassName='text-sm'
+                    headerRowClassName='hover:bg-transparent'
+                    data={fixedEntries}
+                    getRowKey={(entry) => `${group}-${entry.key}`}
+                    columns={[
+                      {
+                        id: 'tier',
+                        header: t('Tier'),
+                        className: thClass,
+                        cellClassName: 'text-muted-foreground py-2.5',
+                        cell: (entry) => entry.label || t('Default'),
+                      },
+                      {
+                        id: 'price',
+                        header: t('Price'),
+                        className: `${thClass} text-right`,
+                        cellClassName: 'py-2.5 text-right font-mono',
+                        cell: (entry) => `${entry.formatted} / ${t('request')}`,
+                      },
+                    ]}
+                  />
+                </div>
+              )
+            })}
           </div>
         </section>
       )
@@ -1157,9 +1258,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
   const { t } = useTranslation()
   const showRechargePrice = props.showRechargePrice ?? false
 
-  const isDynamic =
-    props.model.billing_mode === 'tiered_expr' &&
-    Boolean(props.model.billing_expr)
+  const isDynamic = isDynamicPricingModel(props.model)
 
   return (
     <div className='@container/details space-y-4'>
@@ -1194,7 +1293,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               tokenUnit={props.tokenUnit}
               showRechargePrice={showRechargePrice}
             />
-            {isDynamic && (
+            {isDynamic && props.model.billing_mode === 'tiered_expr' && (
               <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
             )}
             <GroupPricingSection
@@ -1301,14 +1400,16 @@ export function ModelDetails() {
               <Skeleton className='h-4 w-full max-w-md' />
             </div>
             <div className='mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4'>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className='h-16 w-full' />
+              {['quick-1', 'quick-2', 'quick-3', 'quick-4'].map((key) => (
+                <Skeleton key={key} className='h-16 w-full' />
               ))}
             </div>
             <div className='mt-6 space-y-3'>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className='h-24 w-full' />
-              ))}
+              {['section-1', 'section-2', 'section-3', 'section-4'].map(
+                (key) => (
+                  <Skeleton key={key} className='h-24 w-full' />
+                )
+              )}
             </div>
           </div>
         </YucorePageShell>

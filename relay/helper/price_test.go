@@ -307,3 +307,73 @@ func TestMappedModelBillingUsesPublicModelAcrossBillingModes(t *testing.T) {
 	require.Equal(t, "public-tiered", tieredInfo.TieredBillingSnapshot.ModelName)
 	require.Equal(t, "public", tieredInfo.TieredBillingSnapshot.EstimatedTier)
 }
+
+func TestDomesticTieredPricingUsesGroupRatioOnceAndCallTierIgnoresOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
+	savedConfig := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		savedConfig[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatios))
+		require.NoError(t, config.GlobalConfig.LoadFromDB(savedConfig))
+	})
+
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"国模按量":0.3,"国模按次":0.3}`))
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode": `{"MiniMax-M2.7":"tiered_expr","MiniMax-M2.7-call":"per_call_expr"}`,
+		"billing_setting.billing_expr": `{"MiniMax-M2.7":"tier(\"base\", p * 2.1 + c * 8.4 + cr * 0.42 + cc * 2.625)","MiniMax-M2.7-call":"len <= 128000 ? tier(\"short\", 0.05) : tier(\"long\", 0.1)"}`,
+	}))
+
+	newContext := func(path string) *gin.Context {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest(http.MethodPost, path, nil)
+		ctx.Request.Header.Set("Content-Type", "application/json")
+		return ctx
+	}
+
+	usageInfo := &relaycommon.RelayInfo{
+		OriginModelName: "MiniMax-M2.7",
+		UserGroup:       "default",
+		UsingGroup:      "国模按量",
+	}
+	usagePrice, err := ModelPriceHelper(newContext("/v1/chat/completions"), usageInfo, 1_000_000, &types.TokenCountMeta{MaxTokens: 1_000_000})
+	require.NoError(t, err)
+	expectedUsageQuota, err := common.QuotaFromFloatStrict((2.1 + 8.4) * common.QuotaPerUnit * 0.3)
+	require.NoError(t, err)
+	require.Equal(t, expectedUsageQuota, usagePrice.QuotaToPreConsume)
+
+	callInfo := &relaycommon.RelayInfo{
+		OriginModelName: "MiniMax-M2.7-call",
+		UserGroup:       "default",
+		UsingGroup:      "国模按次",
+	}
+	shortCall, err := ModelPriceHelper(newContext("/v1/chat/completions"), callInfo, 64_000, &types.TokenCountMeta{MaxTokens: 1_000_000})
+	require.NoError(t, err)
+	expectedShortQuota, err := common.QuotaFromFloatStrict(0.05 * common.QuotaPerUnit * 0.3)
+	require.NoError(t, err)
+	require.Equal(t, expectedShortQuota, shortCall.QuotaToPreConsume)
+	require.NotNil(t, callInfo.TieredBillingSnapshot)
+	require.Equal(t, "per_call_expr", callInfo.TieredBillingSnapshot.BillingMode)
+
+	longCall, err := ModelPriceHelper(newContext("/v1/chat/completions"), &relaycommon.RelayInfo{
+		OriginModelName: "MiniMax-M2.7-call",
+		UserGroup:       "default",
+		UsingGroup:      "国模按次",
+	}, 64_000, &types.TokenCountMeta{MaxTokens: 1})
+	require.NoError(t, err)
+	require.Equal(t, shortCall.QuotaToPreConsume, longCall.QuotaToPreConsume)
+
+	longContext, err := ModelPriceHelper(newContext("/v1/chat/completions"), &relaycommon.RelayInfo{
+		OriginModelName: "MiniMax-M2.7-call",
+		UserGroup:       "default",
+		UsingGroup:      "国模按次",
+	}, 128_001, &types.TokenCountMeta{})
+	require.NoError(t, err)
+	expectedLongQuota, err := common.QuotaFromFloatStrict(0.1 * common.QuotaPerUnit * 0.3)
+	require.NoError(t, err)
+	require.Equal(t, expectedLongQuota, longContext.QuotaToPreConsume)
+}

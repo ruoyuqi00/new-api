@@ -62,7 +62,6 @@ function formatConditionSummary(conditions, t) {
     .join(' && ');
 }
 
-
 function describeCondition(cond, t) {
   if (cond.source === SOURCE_TIME) {
     const fn = t(TIME_FUNC_LABELS[cond.timeFunc] || cond.timeFunc);
@@ -86,7 +85,7 @@ function describeGroup(group, t) {
   return parts.join(' && ');
 }
 
-export default function DynamicPricingBreakdown({ billingExpr, t }) {
+export default function DynamicPricingBreakdown({ billingExpr, billingMode = 'tiered_expr', t }) {
   const { symbol, rate } = getCurrencyConfig();
   const { billingExpr: baseExpr, requestRuleExpr: ruleExpr } =
     splitBillingExprAndRequestRules(billingExpr || '');
@@ -128,13 +127,19 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
         </div>
       ),
     },
-    ...priceFields
+    ...(billingMode === 'per_call_expr'
+      ? [{
+          title: `${t('模型价格')} (${symbol}/${t('次')})`,
+          dataIndex: 'fixedPrice',
+          render: (v) => v !== null ? <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text> : '-',
+        }]
+      : priceFields
       .filter(([field]) => hasTiers && tiers.some((tier) => tier[field] > 0))
       .map(([field, label]) => ({
         title: `${t(label)} (${symbol}/1M tokens)`,
         dataIndex: field,
         render: (v) => v > 0 ? <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text> : '-',
-      })),
+      }))),
   ];
 
   const tierData = hasTiers
@@ -142,6 +147,7 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
         key: `tier-${i}`,
         label: tier.label,
         condSummary: formatConditionSummary(tier.conditions, t),
+        fixedPrice: tier.fixedPrice,
         ...Object.fromEntries(priceFields.map(([field]) => [field, tier[field] || 0])),
       }))
     : [];

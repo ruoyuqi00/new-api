@@ -22,6 +22,12 @@ function Assert-True($condition, $name) {
 Assert-Equal $doc.base_url 'https://api.herohao.top/v1' 'base_url'
 Assert-Equal $doc.groups.'国模按量'.ratio 0.3 'usage group ratio'
 Assert-Equal $doc.groups.'国模按次'.ratio 0.3 'call group ratio'
+Assert-Equal $doc.groups.'国模按量'.billing_mode 'tiered_expr' 'usage billing mode'
+Assert-Equal $doc.groups.'国模按次'.billing_mode 'per_call_expr' 'call billing mode'
+Assert-Equal $doc.pricing_contract.expression_currency 'USD' 'expression currency'
+Assert-Equal $doc.pricing_contract.official_source_currency 'CNY' 'source currency'
+Assert-True ($null -eq $doc.pricing_contract.usd_exchange_rate) 'exchange rate must be supplied at apply time'
+Assert-True ($doc.pricing_contract.conversion_policy -match 'never fetch') 'runtime price fetch is disabled'
 
 $usageModels = @($doc.groups.'国模按量'.models)
 $callModels = @($doc.groups.'国模按次'.models)

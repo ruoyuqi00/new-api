@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -96,7 +96,9 @@ export function usePricingColumns(
       accessorKey: 'quota_type',
       header: t('Type'),
       cell: ({ row }) => {
-        const isTokenBased = row.original.quota_type === QUOTA_TYPE_VALUES.TOKEN
+        const isTokenBased =
+          row.original.billing_mode !== 'per_call_expr' &&
+          row.original.quota_type === QUOTA_TYPE_VALUES.TOKEN
         return (
           <StatusBadge
             label={isTokenBased ? t('Token') : t('Request')}
@@ -128,6 +130,37 @@ export function usePricingColumns(
         })
 
         if (dynamicSummary) {
+          if (
+            dynamicSummary.isPerCall &&
+            dynamicSummary.fixedPriceEntries.length > 0
+          ) {
+            return (
+              <div className='max-w-full min-w-0'>
+                <span className='font-mono text-sm tabular-nums'>
+                  {dynamicSummary.fixedPriceEntries
+                    .slice(0, 2)
+                    .map((entry, index) => (
+                      <span key={entry.key}>
+                        {index > 0 && (
+                          <span className='text-muted-foreground/40 mx-1'>
+                            /
+                          </span>
+                        )}
+                        {stripTrailingZeros(entry.formatted)}
+                      </span>
+                    ))}
+                </span>
+                <div className='text-muted-foreground/50 text-[10px]'>
+                  / {t('request')}
+                  {dynamicSummary.tierCount > 1 &&
+                    ` · ${t('{{count}} tiers', {
+                      count: dynamicSummary.tierCount,
+                    })}`}
+                </div>
+              </div>
+            )
+          }
+
           if (dynamicSummary.isSpecialExpression) {
             return (
               <div className='max-w-full min-w-0'>

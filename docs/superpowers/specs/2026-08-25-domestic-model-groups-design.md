@@ -50,11 +50,14 @@ The implementation must not create either production channel until the administr
 
 ## Pricing architecture
 
-Both groups use the existing `tiered_expr` billing mode. This avoids a second text billing engine and keeps pre-consumption, authoritative settlement, frozen billing snapshots, usage normalization, and audit logging on the existing path.
+The usage group keeps the existing `tiered_expr` mode. The call group uses the isolated `per_call_expr` mode because `tiered_expr` outputs are defined as token-price numerators and are divided by one million during quota conversion. Both modes share the existing expression evaluator, pre-consumption, frozen billing snapshots, authoritative settlement, group-ratio, and audit paths; `per_call_expr` changes only the expression-output unit for explicitly configured call aliases.
 
 The group ratio is exactly `0.3` for both groups. Expressions contain provider prices only; group ratio is applied once by the existing quota conversion:
 
-`quota = expression_output / 1,000,000 * QuotaPerUnit * group_ratio`
+- `tiered_expr`: `quota = expression_output / 1,000,000 * QuotaPerUnit * group_ratio`
+- `per_call_expr`: `quota = fixed_call_price * QuotaPerUnit * group_ratio`
+
+The billing expression contract is USD-based. The verified provider tables currently use CNY. A local apply must convert each verified CNY coefficient using the configured `USDExchangeRate`, record the rate in the apply snapshot, and freeze that converted expression. The runtime must not fetch or infer prices from provider web pages. `usd_exchange_rate` remains unset in the manifest until the local configuration is read; all per-call prices remain pending until an official per-call source is verified.
 
 ### Usage group
 
@@ -62,7 +65,7 @@ The six provider-facing models use expressions with explicit input (`p`), output
 
 ### Call group
 
-The six aliases use expressions that return a fixed CNY/USD-normalized per-request amount selected by `len` context tiers. The expressions intentionally do not reference `p`, `c`, `cr`, or cache-write variables, so output-token volume cannot turn a single call into a token-priced request. Settlement still uses the existing frozen reservation when a provider does not return authoritative terminal usage.
+The six aliases use `per_call_expr` expressions that return a fixed USD-normalized per-request amount selected by `len` context tiers. Runtime validation rejects `p`, `c`, `cr`, cache-write, image, and audio pricing variables in this mode, so output-token volume cannot turn a single call into a token-priced request. Settlement still uses the existing frozen reservation when a provider does not return authoritative terminal usage.
 
 ### Price verification states
 
@@ -111,4 +114,3 @@ The test fixture uses synthetic responses and redacts credentials. It must not c
 ## Rollback and production gate
 
 Before any production write, record an `/api/pricing` JSON snapshot and a hash of the snapshot, plus a secret-free channel/ability/group export. Apply group, pricing, ability, and channel changes in one transaction or an equivalent compensating transaction. The rollback bundle restores those snapshots and removes only the newly created domestic-model records. Production traffic and Caddy remain untouched until the user explicitly approves a local candidate and the post-cutover health/price checks.
-

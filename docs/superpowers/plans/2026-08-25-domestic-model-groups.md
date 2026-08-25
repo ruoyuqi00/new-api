@@ -4,9 +4,9 @@
 
 **Goal:** Prepare and locally validate two YuAPI domestic-model groups using the existing alias, tiered billing, group-ratio, affinity, and audit paths without changing production.
 
-**Architecture:** Keep model prices and group settings in the existing options, abilities, and channel configuration system. Store a secret-free catalog manifest for exact public aliases, provider names, source URLs, and verification states. Configure the local candidate through existing admin endpoints; do not add a second billing engine or a new UI.
+**Architecture:** Keep model prices and group settings in the existing options, abilities, and channel configuration system. Store a secret-free catalog manifest for exact public aliases, provider names, source URLs, and verification states. Keep usage pricing on `tiered_expr`; add an isolated `per_call_expr` conversion mode for the `-call` aliases while reusing the existing expression evaluator, reservation, settlement, logging, and group-ratio path.
 
-**Tech Stack:** Go 1.22, Gin/GORM, existing `tiered_expr` billing, existing OpenAI-compatible relay, PowerShell local verification, Bun frontend checks only if source changes require them.
+**Tech Stack:** Go 1.22, Gin/GORM, existing expression billing and OpenAI-compatible relay, PowerShell local verification, Bun frontend checks only if source changes require them.
 
 ---
 
@@ -16,11 +16,11 @@
 - Create: `docs/superpowers/configs/2026-08-25-domestic-model-groups.json`
 - Test: `docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.ps1`
 
-- [ ] **Step 1: Write the manifest validator**
+- [x] **Step 1: Write the manifest validator**
 
 Load the JSON with PowerShell `ConvertFrom-Json` and use built-in `throw` assertions for group names, ratio `0.3`, six models in each group, `-call` suffixes only in the call group, exact upstream names without `-call`, and base URL `https://api.herohao.top/v1`. Assert that serialized manifest content contains neither supplied API key nor an `Authorization` field.
 
-- [ ] **Step 2: Run the validator and verify the missing manifest is reported**
+- [x] **Step 2: Run the validator and verify the missing manifest is reported**
 
 ```powershell
 pwsh -NoProfile -File docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.ps1
@@ -28,15 +28,15 @@ pwsh -NoProfile -File docs/superpowers/configs/2026-08-25-domestic-model-groups.
 
 Expected result: fail because the manifest does not exist; this is a configuration-file validation exception, not a production-code TDD cycle.
 
-- [ ] **Step 3: Create the manifest**
+- [x] **Step 3: Create the manifest**
 
 Write the six exact upstream identifiers returned by the authenticated `/v1/models` probes. Keep DeepSeek date-suffixed pricing and Kimi-K3 `verification_state` as `pending` until an official exact-name price source is available. Record verified MiniMax and GLM sources, and keep Qwen region/cache fields pending until the upstream deployment region is confirmed. Include both groups, ratio `0.3`, channel base URL, public names, upstream names, billing mode, and source URLs only.
 
-- [ ] **Step 4: Run the validator and verify it passes**
+- [x] **Step 4: Run the validator and verify it passes**
 
 Run the same `pwsh` command. Expected result: pass with no secret matches.
 
-- [ ] **Step 5: Commit the manifest and test**
+- [x] **Step 5: Commit the manifest and test**
 
 ```powershell
 git add docs/superpowers/configs/2026-08-25-domestic-model-groups.json docs/superpowers/configs/2026-08-25-domestic-model-groups.schema.ps1
@@ -50,11 +50,11 @@ git commit -m "config: catalog domestic model groups"
 - Test: `relay/helper/price_test.go`
 - Test: `service/text_quota_test.go`
 
-- [ ] **Step 1: Add the alias contract regression test**
+- [x] **Step 1: Add the alias contract regression test**
 
 Add a table test for each `-call` public name through the existing model-mapping helper. Assert `OriginModelName` remains the alias while outbound request model and `UpstreamModelName` equal the provider name. This is a verification-only test because the mapping path already exists; no production code is changed unless this regression fails.
 
-- [ ] **Step 2: Run the focused regression test**
+- [x] **Step 2: Run the focused regression test**
 
 ```powershell
 go test ./relay/helper -run 'Domestic|ModelMapping' -count=1
@@ -62,17 +62,17 @@ go test ./relay/helper -run 'Domestic|ModelMapping' -count=1
 
 Expected result: pass on the current YuAPI baseline. A failure is a blocker requiring a separate TDD fix before continuing.
 
-- [ ] **Step 3: Add the pricing contract vectors**
+- [x] **Step 3: Add the pricing contract vectors**
 
-Use synthetic usage vectors for one-million-token input/output, cache-read tokens, and context boundaries. Assert conversion as `expression output * QuotaPerUnit / 1,000,000 * 0.3` and assert expression coefficients are not pre-multiplied by `0.3`. Include a fixed-price `len`-tier expression for the call group and assert output-token changes do not change its result within a context tier.
+Use synthetic usage vectors for one-million-token input/output, cache-read tokens, and context boundaries. Assert `tiered_expr` conversion as `expression output * QuotaPerUnit / 1,000,000 * 0.3`, `per_call_expr` conversion as `fixed call price * QuotaPerUnit * 0.3`, and assert coefficients are not pre-multiplied by `0.3`. Include a fixed-price `len`-tier expression for the call group and assert output-token changes do not change its result within a context tier.
 
-- [ ] **Step 4: Run focused tests and verify they pass**
+- [x] **Step 4: Run focused tests and verify they pass**
 
 ```powershell
 go test ./relay/helper ./service -run 'Domestic|Tiered|ModelMapping' -count=1
 ```
 
-- [ ] **Step 5: Commit the contract tests**
+- [x] **Step 5: Commit the contract tests**
 
 ```powershell
 git add relay/helper/model_mapped_test.go relay/helper/price_test.go service/text_quota_test.go
@@ -133,6 +133,10 @@ Run frontend typecheck only if source files under `web/default` changed.
 - [ ] **Step 5: Keep production blocked**
 
 Do not change Caddy, production containers, production database, or production option values. Present the local URL, pricing snapshot hashes, enabled/pending list, and regression output for user approval before any production import.
+
+Current gate: the feature and secret-free manifest are ready, but local option/channel application remains blocked until the user confirms the local candidate. No production channel or option was created by this branch.
+
+Price gate: the manifest records official CNY source values, but no USD exchange rate or official per-call price was guessed. A local apply must read the configured `USDExchangeRate`, convert verified usage expressions once, persist the conversion snapshot, and leave all pending aliases disabled.
 
 ### Task 5: Track parent hardening separately
 

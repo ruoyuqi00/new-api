@@ -31,6 +31,7 @@ const newKeys = {
     'Affiliate Rebate Percentage': 'Affiliate Rebate Percentage',
     'Earn {{percentage}} on eligible referral credits.':
       'Earn {{percentage}} on eligible referral credits.',
+    'Per-call expression': 'Per-call expression',
     'Percentage must be greater than zero when enabled':
       'Percentage must be greater than zero when enabled',
     'Percentage must be at least 0.01 when enabled':
@@ -47,6 +48,7 @@ const newKeys = {
     'Affiliate Rebate Percentage': '邀请返利比例',
     'Earn {{percentage}} on eligible referral credits.':
       '被邀请人获得符合条件的额度时，您可获得 {{percentage}} 返利。',
+    'Per-call expression': '按次表达式',
     'Percentage must be greater than zero when enabled':
       '启用时返利比例必须大于 0',
     'Percentage must be at least 0.01 when enabled':
@@ -63,6 +65,7 @@ const newKeys = {
     'Affiliate Rebate Percentage': "Pourcentage de remise d'affiliation",
     'Earn {{percentage}} on eligible referral credits.':
       'Gagnez {{percentage}} sur les crédits éligibles de vos filleuls.',
+    'Per-call expression': 'Expression par appel',
     'Percentage must be greater than zero when enabled':
       'Le pourcentage doit être supérieur à zéro lorsque la fonction est activée',
     'Percentage must be at least 0.01 when enabled':
@@ -79,6 +82,7 @@ const newKeys = {
     'Affiliate Rebate Percentage': '紹介還元率',
     'Earn {{percentage}} on eligible referral credits.':
       '紹介したユーザーの対象クレジットから {{percentage}} を獲得できます。',
+    'Per-call expression': '呼び出し単位の式',
     'Percentage must be greater than zero when enabled':
       '有効にする場合、割合は 0 より大きくする必要があります',
     'Percentage must be at least 0.01 when enabled':
@@ -95,6 +99,7 @@ const newKeys = {
     'Affiliate Rebate Percentage': 'Процент партнёрского вознаграждения',
     'Earn {{percentage}} on eligible referral credits.':
       'Получайте {{percentage}} от подходящих пополнений приглашённых пользователей.',
+    'Per-call expression': 'Выражение за вызов',
     'Percentage must be greater than zero when enabled':
       'При включении процент должен быть больше нуля',
     'Percentage must be at least 0.01 when enabled':
@@ -111,6 +116,7 @@ const newKeys = {
     'Affiliate Rebate Percentage': 'Tỷ lệ hoàn thưởng giới thiệu',
     'Earn {{percentage}} on eligible referral credits.':
       'Nhận {{percentage}} từ các khoản tín dụng giới thiệu đủ điều kiện.',
+    'Per-call expression': 'Biểu thức theo lượt gọi',
     'Percentage must be greater than zero when enabled':
       'Tỷ lệ phần trăm phải lớn hơn 0 khi bật',
     'Percentage must be at least 0.01 when enabled':

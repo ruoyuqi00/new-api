@@ -1155,6 +1155,58 @@ func TestGPTTextAcceptedSettlementDoesNotChargeWhenEstimateIsUnavailable(t *test
 	require.Equal(t, []int{0}, billing.settled)
 }
 
+func TestPerCallExpressionSettlesFrozenPriceWithoutTokenUsage(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+
+	expr := `len <= 128000 ? tier("short", 0.05) : tier("long", 0.1)`
+	billing := &recordingTaskBillingSettler{preConsumed: 7_500}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "国模按次", OriginModelName: "MiniMax-M2.7-call",
+		RequestURLPath: "/v1/chat/completions",
+		StartTime:      time.Now(),
+		Billing:        billing,
+		ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			QuotaToPreConsume: 7_500,
+			GroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 0.3},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               billingexpr.BillingModePerCallExpr,
+			ExprString:                expr,
+			ExprHash:                  billingexpr.ExprHashString(expr),
+			GroupRatio:                0.3,
+			EstimatedQuotaBeforeGroup: 25_000,
+			EstimatedQuotaAfterGroup:  7_500,
+			EstimatedTier:             "short",
+			QuotaPerUnit:              500_000,
+		},
+	}
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	err := postTextConsumeQuota(ctx, relayInfo, &dto.Usage{}, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, []int{7_500}, billing.settled)
+	var user model.User
+	require.NoError(t, model.DB.First(&user, relayInfo.UserId).Error)
+	require.Equal(t, 7_500, user.UsedQuota)
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, relayInfo.ChannelId).Error)
+	require.Equal(t, int64(7_500), channel.UsedQuota)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 7_500, logs[0].Quota)
+	require.Contains(t, logs[0].Other, `"billing_mode":"per_call_expr"`)
+	require.Contains(t, logs[0].Other, `"estimated_tier":"short"`)
+	require.Contains(t, logs[0].Other, `"usage_unconfirmed":true`)
+	require.Contains(t, logs[0].Other, `"settled_from_reservation":true`)
+}
+
 func TestGPTTextEstimatedSettlementDoesNotExceedFrozenReservation(t *testing.T) {
 	billing := &recordingTaskBillingSettler{preConsumed: 500}
 	relayInfo := &relaycommon.RelayInfo{

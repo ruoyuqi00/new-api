@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -983,6 +984,27 @@ func TestLen_ZeroDefaultsToZero(t *testing.T) {
 	if trace.MatchedTier != "standard" {
 		t.Errorf("tier = %q, want standard (len=0 <= 200000)", trace.MatchedTier)
 	}
+}
+
+func TestComputePerCallExpressionQuotaUsesFixedPrice(t *testing.T) {
+	expr := `len <= 128000 ? tier("short", 0.05) : tier("long", 0.1)`
+	snapshot := &billingexpr.BillingSnapshot{
+		BillingMode:  "per_call_expr",
+		ExprString:   expr,
+		ExprHash:     billingexpr.ExprHashString(expr),
+		GroupRatio:   0.3,
+		QuotaPerUnit: 500_000,
+	}
+
+	short, err := billingexpr.ComputeTieredQuota(snapshot, billingexpr.TokenParams{Len: 128_000, C: 1_000_000})
+	require.NoError(t, err)
+	require.Equal(t, 7_500, short.ActualQuotaAfterGroup)
+	require.Equal(t, "short", short.MatchedTier)
+
+	long, err := billingexpr.ComputeTieredQuota(snapshot, billingexpr.TokenParams{Len: 128_001})
+	require.NoError(t, err)
+	require.Equal(t, 15_000, long.ActualQuotaAfterGroup)
+	require.Equal(t, "long", long.MatchedTier)
 }
 
 // ---------------------------------------------------------------------------

@@ -645,10 +645,14 @@ export const calculateModelPrice = ({
     }
   }
 
-  // 2. 动态计费（tiered_expr）
-  if (record.billing_mode === 'tiered_expr' && record.billing_expr) {
+  // 2. 表达式计费（按 token 或按次）
+  if (
+    ['tiered_expr', 'per_call_expr'].includes(record.billing_mode) &&
+    record.billing_expr
+  ) {
     return {
       isDynamicPricing: true,
+      billingMode: record.billing_mode,
       billingExpr: record.billing_expr,
       usedGroup,
       usedGroupRatio,

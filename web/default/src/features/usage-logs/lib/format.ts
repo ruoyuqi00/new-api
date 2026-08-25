@@ -261,8 +261,8 @@ export function resolveMatchedTier(
 
 /**
  * Tiered pricing summary derived from an `other` log payload using the
- * billing-expression library. Returns null when the entry is not a tiered
- * billing log or the expression failed to parse.
+ * billing-expression library. Returns null when the entry is not an
+ * expression billing log or the expression failed to parse.
  */
 export interface TieredBillingSummary {
   tiers: ParsedTier[]
@@ -290,11 +290,20 @@ export function hasAnyCacheTokens(
 export function getTieredBillingSummary(
   other: LogOtherData | null
 ): TieredBillingSummary | null {
-  if (!other || other.billing_mode !== 'tiered_expr') return null
+  if (
+    !other ||
+    (other.billing_mode !== 'tiered_expr' &&
+      other.billing_mode !== 'per_call_expr')
+  ) {
+    return null
+  }
   const exprStr = decodeBillingExprB64(other.expr_b64)
   if (!exprStr) return null
   const tiers = parseTiersFromExpr(exprStr)
-  const tier = resolveMatchedTier(tiers, other.matched_tier)
+  const tier = resolveMatchedTier(
+    tiers,
+    other.matched_tier || other.estimated_tier
+  )
   if (!tier) return null
 
   const cacheTokensPresent = hasAnyCacheTokens(other)

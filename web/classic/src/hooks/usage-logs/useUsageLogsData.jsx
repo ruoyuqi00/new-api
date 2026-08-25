@@ -426,7 +426,7 @@ export const useLogsData = () => {
         });
       }
       if (logs[i].type === 2) {
-        if (other?.billing_mode !== 'tiered_expr') {
+        if (!['tiered_expr', 'per_call_expr'].includes(other?.billing_mode)) {
           expandDataLocal.push({
             key: t('日志详情'),
             value: other?.claude
@@ -469,7 +469,7 @@ export const useLogsData = () => {
           Boolean(other?.violation_fee_marker);
 
         let content = '';
-        if (!isViolationFeeLog && other?.billing_mode !== 'tiered_expr') {
+        if (!isViolationFeeLog && !['tiered_expr', 'per_call_expr'].includes(other?.billing_mode)) {
           const logOpts = {
             ...other,
             prompt_tokens: logs[i].prompt_tokens,
@@ -497,7 +497,7 @@ export const useLogsData = () => {
             value: other.reasoning_effort,
           });
         }
-        if (other?.billing_mode === 'tiered_expr' && other?.expr_b64) {
+        if (['tiered_expr', 'per_call_expr'].includes(other?.billing_mode) && other?.expr_b64) {
           expandDataLocal.push({
             key: t('计费过程'),
             value: renderTieredModelPrice({

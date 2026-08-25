@@ -20,7 +20,11 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import type { UsageLog } from '../data/schema'
-import { formatModelName, getViolationFeeDisplay } from './format'
+import {
+  formatModelName,
+  getTieredBillingSummary,
+  getViolationFeeDisplay,
+} from './format'
 
 function usageLog(overrides: Partial<UsageLog>): UsageLog {
   return {
@@ -143,5 +147,36 @@ describe('getViolationFeeDisplay', () => {
       amountKey: 'Fee',
       amount: 1200,
     })
+  })
+})
+
+describe('getTieredBillingSummary', () => {
+  test('parses a per-call expression using its matched context tier', () => {
+    const expression = 'len <= 128000 ? tier("short", 0.05) : tier("long", 0.1)'
+
+    const result = getTieredBillingSummary({
+      billing_mode: 'per_call_expr',
+      expr_b64: Buffer.from(expression).toString('base64'),
+      matched_tier: 'long',
+    })
+
+    assert.equal(result?.tier.label, 'long')
+    assert.equal(result?.tier.fixedPrice, 0.1)
+    assert.deepEqual(result?.priceEntries, [])
+  })
+
+  test('uses the frozen estimated tier when terminal usage is unavailable', () => {
+    const expression = 'len <= 128000 ? tier("short", 0.05) : tier("long", 0.1)'
+
+    const result = getTieredBillingSummary({
+      billing_mode: 'per_call_expr',
+      expr_b64: Buffer.from(expression).toString('base64'),
+      estimated_tier: 'short',
+      usage_unconfirmed: true,
+      settled_from_reservation: true,
+    })
+
+    assert.equal(result?.tier.label, 'short')
+    assert.equal(result?.tier.fixedPrice, 0.05)
   })
 })

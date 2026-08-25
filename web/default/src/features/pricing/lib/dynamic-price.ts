@@ -57,12 +57,25 @@ export type DynamicPricingSummary = {
   entries: DynamicPriceEntry[]
   primaryEntries: DynamicPriceEntry[]
   secondaryEntries: DynamicPriceEntry[]
+  isPerCall: boolean
+  fixedPriceEntries: DynamicFixedPriceEntry[]
+}
+
+export type DynamicFixedPriceEntry = {
+  key: string
+  label: string
+  value: number
+  formatted: string
 }
 
 const PRIMARY_DYNAMIC_FIELDS = new Set(['inputPrice', 'outputPrice'])
 
 export function isDynamicPricingModel(model: PricingModel): boolean {
-  return model.billing_mode === 'tiered_expr' && Boolean(model.billing_expr)
+  return (
+    (model.billing_mode === 'tiered_expr' ||
+      model.billing_mode === 'per_call_expr') &&
+    Boolean(model.billing_expr)
+  )
 }
 
 export function getDynamicDisplayGroupRatio(model: PricingModel): number {
@@ -106,6 +119,25 @@ export function formatDynamicUnitPrice(
     options.showRechargePrice ?? false,
     priceRate,
     usdExchangeRate
+  )
+
+  return formatBillingCurrencyFromUSD(displayPrice, {
+    digitsLarge: 4,
+    digitsSmall: 6,
+    abbreviate: false,
+  })
+}
+
+export function formatDynamicCallPrice(
+  valuePerRequest: number,
+  options: DynamicPriceOptions
+): string {
+  const priceUSD = valuePerRequest * (options.groupRatioMultiplier ?? 1)
+  const displayPrice = applyRechargeRate(
+    priceUSD,
+    options.showRechargePrice ?? false,
+    options.priceRate ?? 1,
+    options.usdExchangeRate ?? 1
   )
 
   return formatBillingCurrencyFromUSD(displayPrice, {
@@ -171,6 +203,21 @@ export function getDynamicPricingSummary(
   const tier = tiers[0] || null
   const entries = getDynamicPriceEntries(tier, options)
   const rawExpression = model.billing_expr || ''
+  const isPerCall = model.billing_mode === 'per_call_expr'
+  const fixedPriceEntries = isPerCall
+    ? tiers.flatMap((currentTier, index) => {
+        const value = Number(currentTier.fixedPrice)
+        if (!Number.isFinite(value) || value < 0) return []
+        return [
+          {
+            key: `${currentTier.label || 'tier'}-${index}`,
+            label: currentTier.label,
+            value: value * (options.groupRatioMultiplier ?? 1),
+            formatted: formatDynamicCallPrice(value, options),
+          },
+        ]
+      })
+    : []
 
   return {
     tiers,
@@ -186,5 +233,7 @@ export function getDynamicPricingSummary(
     secondaryEntries: entries.filter(
       (entry) => !PRIMARY_DYNAMIC_FIELDS.has(entry.field)
     ),
+    isPerCall,
+    fixedPriceEntries,
   }
 }

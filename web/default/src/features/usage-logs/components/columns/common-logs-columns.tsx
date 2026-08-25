@@ -154,9 +154,19 @@ function buildDetailSegments(
     return showUnit ? `${text}/M` : text
   }
   const isTieredExpr = other.billing_mode === 'tiered_expr'
+  const isPerCallExpr = other.billing_mode === 'per_call_expr'
   const tieredSummary = getTieredBillingSummary(other)
-  if (isTieredExpr) {
+  if (isTieredExpr || isPerCallExpr) {
     if (tieredSummary) {
+      if (isPerCallExpr && tieredSummary.tier.fixedPrice != null) {
+        const tierLabel = tieredSummary.tier.label || t('Default')
+        segments.push({
+          text: `${tierLabel} · ${formatPriceCompact(
+            Number(tieredSummary.tier.fixedPrice)
+          )}/${t('request')}`,
+        })
+        return segments
+      }
       const baseEntries = tieredSummary.priceEntries
         .filter((entry) => ['inputPrice', 'outputPrice'].includes(entry.field))
         .map((entry) => formatPriceCompact(entry.price))

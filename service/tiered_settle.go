@@ -103,7 +103,7 @@ func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.B
 		return nil, nil
 	}
 	snapshot := relayInfo.TieredBillingSnapshot
-	if snapshot == nil || snapshot.BillingMode != "tiered_expr" {
+	if snapshot == nil || !billingexpr.IsExpressionBillingMode(snapshot.BillingMode) {
 		return nil, nil
 	}
 
@@ -151,7 +151,7 @@ func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon
 	return nil
 }
 
-// TryTieredSettle checks if the request uses tiered_expr billing and, if so,
+// TryTieredSettle checks if the request uses expression billing and, if so,
 // computes the actual quota using the frozen BillingSnapshot. Returns:
 //   - ok=true, quota, result  when tiered billing applies
 //   - ok=false, 0, nil        when it doesn't (caller should fall through to existing logic)
@@ -175,7 +175,7 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 // to the caller and never replaced with the maximum frozen reservation.
 func TryTieredEstimatedSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenParams) (ok bool, quota int, result *billingexpr.TieredResult, err error) {
 	snap := relayInfo.TieredBillingSnapshot
-	if snap == nil || snap.BillingMode != "tiered_expr" {
+	if snap == nil || !billingexpr.IsExpressionBillingMode(snap.BillingMode) {
 		return false, 0, nil, nil
 	}
 

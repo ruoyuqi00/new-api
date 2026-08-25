@@ -463,7 +463,7 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
 
   const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
 
-  if (other?.billing_mode === 'tiered_expr') {
+  if (['tiered_expr', 'per_call_expr'].includes(other?.billing_mode)) {
     return { segments: renderTieredModelPriceSimple(summaryOpts) };
   }
 

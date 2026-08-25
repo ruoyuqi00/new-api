@@ -71,7 +71,7 @@ const ModelPricingTable = ({
         group: group,
         ratio: groupRatioValue,
         billingType:
-          modelData?.billing_mode === 'tiered_expr'
+          ['tiered_expr', 'per_call_expr'].includes(modelData?.billing_mode)
             ? t('动态计费')
             : modelData?.quota_type === 0
               ? t('按量计费')
@@ -96,7 +96,7 @@ const ModelPricingTable = ({
       },
     ];
 
-    const isDynamic = modelData?.billing_mode === 'tiered_expr';
+    const isDynamic = ['tiered_expr', 'per_call_expr'].includes(modelData?.billing_mode);
 
     // 动态计费时始终显示倍率列，否则根据设置
     if (showRatio || isDynamic) {

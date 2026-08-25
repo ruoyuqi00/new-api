@@ -56,6 +56,9 @@ const EMPTY_MODEL = {
 
 const NUMERIC_INPUT_REGEX = /^(\d+(\.\d*)?|\.\d*)?$/;
 
+const isExpressionBillingMode = (mode) =>
+  mode === 'tiered_expr' || mode === 'per_call_expr';
+
 export const hasValue = (value) =>
   value !== '' && value !== null && value !== undefined && value !== false;
 
@@ -123,14 +126,14 @@ const normalizeCompletionRatioMeta = (rawMeta) => {
 
 const buildModelState = (name, sourceMaps) => {
   const billingMode = sourceMaps.ModelBillingMode?.[name];
-  if (billingMode === 'tiered_expr') {
+  if (isExpressionBillingMode(billingMode)) {
     const fullBillingExpr = sourceMaps.ModelBillingExpr?.[name] || '';
     const { billingExpr, requestRuleExpr } =
       splitBillingExprAndRequestRules(fullBillingExpr);
     return {
       ...EMPTY_MODEL,
       name,
-      billingMode: 'tiered_expr',
+      billingMode,
       billingExpr,
       requestRuleExpr,
       rawRatios: { ...EMPTY_MODEL.rawRatios },
@@ -224,14 +227,14 @@ const buildModelState = (name, sourceMaps) => {
 };
 
 export const isBasePricingUnset = (model) =>
-  model.billingMode !== 'tiered_expr' &&
+  !isExpressionBillingMode(model.billingMode) &&
   !hasValue(model.fixedPrice) && !hasValue(model.inputPrice);
 
 export const getModelWarnings = (model, t) => {
   if (!model) {
     return [];
   }
-  if (model.billingMode === 'tiered_expr') {
+  if (isExpressionBillingMode(model.billingMode)) {
     return [];
   }
   const warnings = [];
@@ -290,10 +293,10 @@ export const getModelWarnings = (model, t) => {
 
 export const buildSummaryText = (model, t) => {
   const requestRuleSuffix =
-    model.billingMode === 'tiered_expr' && model.requestRuleExpr
+    isExpressionBillingMode(model.billingMode) && model.requestRuleExpr
     ? `，${t('请求规则')}`
     : '';
-  if (model.billingMode === 'tiered_expr') {
+  if (isExpressionBillingMode(model.billingMode)) {
     const expr = model.billingExpr;
     if (!expr) return `${t('表达式计费')}${requestRuleSuffix}`;
     const tierCount = (expr.match(/tier\(/g) || []).length;
@@ -459,12 +462,12 @@ export const buildPreviewRows = (model, t) => {
     model.requestRuleExpr,
   );
 
-  if (model.billingMode === 'tiered_expr') {
+  if (isExpressionBillingMode(model.billingMode)) {
     const rows = [
       {
         key: 'BillingMode',
         label: 'ModelBillingMode',
-        value: 'tiered_expr',
+        value: model.billingMode,
       },
     ];
     if (finalBillingExpr) {
@@ -876,8 +879,10 @@ export function useModelPricingEditorState({
     if (!selectedModel) return;
     upsertModel(selectedModel.name, (model) => {
       const next = { ...model, billingMode: value };
-      if (value === 'tiered_expr' && !model.billingExpr) {
-        next.billingExpr = 'tier("base", p * 0 + c * 0)';
+      if (isExpressionBillingMode(value) && !model.billingExpr) {
+        next.billingExpr = value === 'per_call_expr'
+          ? 'tier("base", 0)'
+          : 'tier("base", p * 0 + c * 0)';
       }
       return next;
     });
@@ -1040,13 +1045,13 @@ export function useModelPricingEditorState({
       };
 
       for (const model of models) {
-        if (model.billingMode === 'tiered_expr') {
+        if (isExpressionBillingMode(model.billingMode)) {
           const finalBillingExpr = combineBillingExpr(
             model.billingExpr,
             model.requestRuleExpr,
           );
           if (finalBillingExpr) {
-            tieredOutput['billing_setting.billing_mode'][model.name] = 'tiered_expr';
+            tieredOutput['billing_setting.billing_mode'][model.name] = model.billingMode;
             tieredOutput['billing_setting.billing_expr'][model.name] = finalBillingExpr;
           }
         }
@@ -1063,7 +1068,7 @@ export function useModelPricingEditorState({
             }
           });
         } catch (e) {
-          if (model.billingMode !== 'tiered_expr') {
+          if (!isExpressionBillingMode(model.billingMode)) {
             throw e;
           }
         }

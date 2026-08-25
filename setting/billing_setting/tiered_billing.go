@@ -9,11 +9,36 @@ import (
 )
 
 const (
-	BillingModeRatio      = "ratio"
-	BillingModeTieredExpr = "tiered_expr"
-	BillingModeField      = "billing_mode"
-	BillingExprField      = "billing_expr"
+	BillingModeRatio       = "ratio"
+	BillingModeTieredExpr  = billingexpr.BillingModeTieredExpr
+	BillingModePerCallExpr = billingexpr.BillingModePerCallExpr
+	BillingModeField       = "billing_mode"
+	BillingExprField       = "billing_expr"
 )
+
+func IsExpressionBillingMode(mode string) bool {
+	return billingexpr.IsExpressionBillingMode(mode)
+}
+
+func ValidateExpressionMode(mode, exprStr string) error {
+	if !IsExpressionBillingMode(mode) {
+		return fmt.Errorf("unsupported expression billing mode %q", mode)
+	}
+	if _, err := billingexpr.CompileFromCache(exprStr); err != nil {
+		return err
+	}
+	if mode != BillingModePerCallExpr {
+		return nil
+	}
+
+	usedVars := billingexpr.UsedVars(exprStr)
+	for _, variable := range []string{"p", "c", "cr", "cc", "cc1h", "img", "img_o", "ai", "ao"} {
+		if usedVars[variable] {
+			return fmt.Errorf("per_call_expr cannot reference token pricing variable %q; use len for context tiers", variable)
+		}
+	}
+	return nil
+}
 
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr

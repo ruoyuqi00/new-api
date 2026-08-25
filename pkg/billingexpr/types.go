@@ -5,6 +5,15 @@ import (
 	"fmt"
 )
 
+const (
+	BillingModeTieredExpr  = "tiered_expr"
+	BillingModePerCallExpr = "per_call_expr"
+)
+
+func IsExpressionBillingMode(mode string) bool {
+	return mode == BillingModeTieredExpr || mode == BillingModePerCallExpr
+}
+
 type RequestInput struct {
 	Headers map[string]string
 	Body    []byte

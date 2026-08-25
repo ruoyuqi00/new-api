@@ -221,8 +221,8 @@ type RelayInfo struct {
 	// TaskQuotaClamp records quota saturation metadata for async task billing logs.
 	TaskQuotaClamp *common.QuotaClamp
 
-	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
-	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
+	// TieredBillingSnapshot is a frozen snapshot of expression billing rules
+	// captured at pre-consume time.
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
 

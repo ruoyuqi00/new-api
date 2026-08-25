@@ -331,10 +331,13 @@ func updatePricing() {
 			audioCompletionRatio := ratio_setting.GetAudioCompletionRatio(model)
 			pricing.AudioCompletionRatio = &audioCompletionRatio
 		}
-		if billingMode := billing_setting.GetBillingMode(model); billingMode == "tiered_expr" {
+		if billingMode := billing_setting.GetBillingMode(model); billing_setting.IsExpressionBillingMode(billingMode) {
 			if expr, ok := billing_setting.GetBillingExpr(model); ok && strings.TrimSpace(expr) != "" {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
+				if billingMode == billing_setting.BillingModePerCallExpr {
+					pricing.QuotaType = 1
+				}
 			}
 		}
 		pricingMap = append(pricingMap, pricing)

@@ -139,8 +139,11 @@ export default function ModelPricingEditor({
   });
 
   const getExprModeLabel = useCallback((model) => {
-    if (model?.billingMode !== 'tiered_expr') {
+    if (!['tiered_expr', 'per_call_expr'].includes(model?.billingMode)) {
       return '';
+    }
+    if (model.billingMode === 'per_call_expr') {
+      return `${t('按次计费')} / ${t('表达式计费')}`;
     }
     return (model.billingExpr || '').includes('tier(')
       ? t('阶梯计费')
@@ -191,14 +194,14 @@ export default function ModelPricingEditor({
             color={
               record.billingMode === 'per-request'
                 ? 'teal'
-                : record.billingMode === 'tiered_expr'
+                : ['tiered_expr', 'per_call_expr'].includes(record.billingMode)
                   ? 'amber'
                   : 'violet'
             }
           >
             {record.billingMode === 'per-request'
               ? t('按次计费')
-              : record.billingMode === 'tiered_expr'
+              : ['tiered_expr', 'per_call_expr'].includes(record.billingMode)
                 ? getExprModeLabel(record)
                 : t('按量计费')}
           </Tag>
@@ -380,14 +383,14 @@ export default function ModelPricingEditor({
                   color={
                     selectedModel.billingMode === 'per-request'
                       ? 'teal'
-                      : selectedModel.billingMode === 'tiered_expr'
+                      : ['tiered_expr', 'per_call_expr'].includes(selectedModel.billingMode)
                         ? 'amber'
                         : 'blue'
                   }
                 >
                   {selectedModel.billingMode === 'per-request'
                     ? t('按次计费')
-                    : selectedModel.billingMode === 'tiered_expr'
+                    : ['tiered_expr', 'per_call_expr'].includes(selectedModel.billingMode)
                       ? getExprModeLabel(selectedModel)
                       : t('按量计费')}
                 </Tag>
@@ -415,6 +418,9 @@ export default function ModelPricingEditor({
                     <Radio value='per-token'>{t('按量计费')}</Radio>
                     <Radio value='per-request'>{t('按次计费')}</Radio>
                     <Radio value='tiered_expr'>{t('表达式/阶梯计费')}</Radio>
+                    <Radio value='per_call_expr'>
+                      {t('按次计费')} / {t('表达式计费')}
+                    </Radio>
                   </RadioGroup>
                   <div className='mt-2 text-xs text-gray-500'>
                     {t(
@@ -449,7 +455,7 @@ export default function ModelPricingEditor({
                     onChange={(value) => handleNumericFieldChange('fixedPrice', value)}
                     extraText={t('适合 MJ / 任务类等按次收费模型。')}
                   />
-                ) : selectedModel.billingMode === 'tiered_expr' ? (
+                ) : ['tiered_expr', 'per_call_expr'].includes(selectedModel.billingMode) ? (
                   <TieredPricingEditor
                     model={selectedModel}
                     onExprChange={handleBillingExprChange}
