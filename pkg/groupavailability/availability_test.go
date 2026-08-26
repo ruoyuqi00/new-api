@@ -103,6 +103,8 @@ func TestIsTextRequestPathExcludesMediaAndTasks(t *testing.T) {
 	assert.True(t, IsTextRequestPath("/v1/responses"))
 	assert.True(t, IsTextRequestPath("/v1/responses/compact"))
 	assert.True(t, IsTextRequestPath("/v1/completions"))
+	assert.True(t, IsTextRequestPath("/v1/messages"))
+	assert.True(t, IsTextRequestPath("/v1/messages?beta=true"))
 	assert.False(t, IsTextRequestPath("/v1/images/generations"))
 	assert.False(t, IsTextRequestPath("/v1/videos"))
 	assert.False(t, IsTextRequestPath("/api/yucore/media/tasks"))

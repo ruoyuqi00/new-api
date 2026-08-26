@@ -64,7 +64,7 @@ export function GroupAvailabilityMonitor(props: GroupAvailabilityMonitorProps) {
             </h2>
           </div>
           <p className='text-muted-foreground mt-1 text-xs'>
-            {t('Availability uses up to 300 recent GPT text requests')}
+            {t('Availability uses up to 300 recent GPT or Claude text requests')}
           </p>
         </div>
         <Button
@@ -146,7 +146,7 @@ export function GroupAvailabilityMonitor(props: GroupAvailabilityMonitorProps) {
                   />
                 </div>
                 <p className='text-muted-foreground text-xs'>
-                  {t('Recent {{count}} of 300 GPT text requests', {
+                  {t('Recent {{count}} of 300 GPT or Claude text requests', {
                     count: item.request_count,
                   })}
                 </p>

@@ -116,7 +116,7 @@ func redisKey(group string) string {
 func IsTextRequestPath(path string) bool {
 	path = strings.TrimSuffix(strings.SplitN(path, "?", 2)[0], "/")
 	switch path {
-	case "/v1/chat/completions", "/v1/responses", "/v1/responses/compact", "/v1/completions":
+	case "/v1/chat/completions", "/v1/responses", "/v1/responses/compact", "/v1/completions", "/v1/messages":
 		return true
 	default:
 		return false
