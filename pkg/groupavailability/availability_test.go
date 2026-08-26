@@ -33,7 +33,7 @@ func TestRecordAndQueryKeepsOnlyRecentAvailabilitySamples(t *testing.T) {
 	assert.Equal(t, int64(3), summary.RequestCount)
 	assert.Equal(t, int64(2), summary.SuccessCount)
 	assert.InDelta(t, 66.67, summary.SuccessRate, 0.01)
-	assert.Equal(t, AvailabilityUnavailable, summary.Status)
+	assert.Equal(t, AvailabilityObserving, summary.Status)
 
 	for i := 0; i < 301; i++ {
 		require.NoError(t, Record("china", true))
@@ -47,6 +47,28 @@ func TestRecordAndQueryKeepsOnlyRecentAvailabilitySamples(t *testing.T) {
 	keys, err := common.RDB.Keys(t.Context(), "group-availability:v1:*").Result()
 	require.NoError(t, err)
 	assert.Len(t, keys, 1)
+}
+
+func TestAvailabilityStatusRequiresTwentySamplesAndUsesTolerantThresholds(t *testing.T) {
+	tests := []struct {
+		name         string
+		requestCount int64
+		successRate  float64
+		want         string
+	}{
+		{name: "no data", requestCount: 0, successRate: 0, want: AvailabilityNoData},
+		{name: "observing before twenty", requestCount: 19, successRate: 0, want: AvailabilityObserving},
+		{name: "stable at ninety", requestCount: 20, successRate: 90, want: AvailabilityStable},
+		{name: "degraded below ninety", requestCount: 20, successRate: 89.99, want: AvailabilityDegraded},
+		{name: "degraded at sixty", requestCount: 20, successRate: 60, want: AvailabilityDegraded},
+		{name: "unavailable below sixty", requestCount: 20, successRate: 59.99, want: AvailabilityUnavailable},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, statusFor(test.requestCount, test.successRate))
+		})
+	}
 }
 
 func TestDisabledGroupDoesNotRecordAndRedisFailureIsNoData(t *testing.T) {

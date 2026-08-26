@@ -15,10 +15,12 @@ import (
 
 const (
 	maxSamples              = 300
+	minimumStatusSamples    = 20
 	sampleTTL               = 2 * time.Hour
 	AvailabilityStable      = "stable"
 	AvailabilityDegraded    = "degraded"
 	AvailabilityUnavailable = "unavailable"
+	AvailabilityObserving   = "observing"
 	AvailabilityNoData      = "no_data"
 )
 
@@ -86,15 +88,21 @@ func Query(group string) (Summary, error) {
 	}
 	summary.SuccessRate = float64(summary.SuccessCount) / float64(summary.RequestCount) * 100
 	summary.SuccessRate = float64(int(summary.SuccessRate*100+0.5)) / 100
-	summary.Status = statusFor(summary.SuccessRate)
+	summary.Status = statusFor(summary.RequestCount, summary.SuccessRate)
 	return summary, nil
 }
 
-func statusFor(successRate float64) string {
-	if successRate >= 99 {
+func statusFor(requestCount int64, successRate float64) string {
+	if requestCount == 0 {
+		return AvailabilityNoData
+	}
+	if requestCount < minimumStatusSamples {
+		return AvailabilityObserving
+	}
+	if successRate >= 90 {
 		return AvailabilityStable
 	}
-	if successRate >= 95 {
+	if successRate >= 60 {
 		return AvailabilityDegraded
 	}
 	return AvailabilityUnavailable

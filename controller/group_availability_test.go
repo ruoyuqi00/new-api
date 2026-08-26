@@ -71,7 +71,7 @@ func TestGetUserGroupAvailabilityFiltersByPermissionAndMonitorSwitch(t *testing.
 	assert.Equal(t, int64(1), response.Data[0].RequestCount)
 	assert.Equal(t, int64(1), response.Data[0].SuccessCount)
 	assert.Equal(t, 100.0, response.Data[0].SuccessRate)
-	assert.Equal(t, groupavailability.AvailabilityStable, response.Data[0].Status)
+	assert.Equal(t, groupavailability.AvailabilityObserving, response.Data[0].Status)
 
 	var raw map[string]any
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &raw))
