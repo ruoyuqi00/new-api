@@ -21,7 +21,8 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 
 import { updateSystemOption } from '../api'
-import type { UpdateOptionRequest } from '../types'
+import type { SystemOptionsResponse, UpdateOptionRequest } from '../types'
+import { applySystemOptionUpdates } from './system-option-cache'
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
@@ -51,7 +52,11 @@ export function useUpdateOption() {
       return data
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      queryClient.setQueryData<SystemOptionsResponse | undefined>(
+        ['system-options'],
+        (current) => applySystemOptionUpdates(current, [variables])
+      )
+      void queryClient.invalidateQueries({ queryKey: ['system-options'] })
 
       if (STATUS_RELATED_KEYS.has(variables.key)) {
         queryClient.invalidateQueries({ queryKey: ['status'] })
