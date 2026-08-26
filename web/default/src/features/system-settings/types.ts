@@ -265,8 +265,8 @@ export type ModelSettings = {
   UserUsableGroups: string
   SensitiveInputCheckGroups: string
   GroupGroupRatio: string
-  UserGroupRatio: string
-  AvailabilityMonitoring: string
+  'group_ratio_setting.user_group_ratio': string
+  'group_ratio_setting.availability_monitoring': string
   AutoGroups: string
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
@@ -334,8 +334,8 @@ export type BillingSettings = {
   UserUsableGroups: string
   SensitiveInputCheckGroups: string
   GroupGroupRatio: string
-  UserGroupRatio: string
-  AvailabilityMonitoring: string
+  'group_ratio_setting.user_group_ratio': string
+  'group_ratio_setting.availability_monitoring': string
   AutoGroups: string
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
