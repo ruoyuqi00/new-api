@@ -613,7 +613,8 @@ func TestAcceptedStreamErrorSettlementIsEstimatedAndSingleShot(t *testing.T) {
 	billing := &streamRecoveryBillingRecorder{preConsumed: 1250}
 	info := &relaycommon.RelayInfo{
 		UserId: 801, TokenId: 803, OriginModelName: "gpt-test", UsingGroup: "default",
-		StartTime: time.Now(), IsStream: true, Billing: billing, FinalPreConsumedQuota: 1250,
+		StartTime: time.Now(), IsStream: true, RelayFormat: types.RelayFormatOpenAI,
+		RelayMode: relayconstant.RelayModeChatCompletions, Billing: billing, FinalPreConsumedQuota: 1250,
 		PriceData: types.PriceData{
 			ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 1250,
 			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
@@ -624,7 +625,8 @@ func TestAcceptedStreamErrorSettlementIsEstimatedAndSingleShot(t *testing.T) {
 	info.EnableStreamRecovery()
 	info.MarkStreamAccepted()
 	t.Cleanup(info.FinishStreamRecovery)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	relayErr := types.NewError(errors.New("malformed accepted stream"), types.ErrorCodeBadResponse)
 
@@ -638,6 +640,9 @@ func TestAcceptedStreamErrorSettlementIsEstimatedAndSingleShot(t *testing.T) {
 	require.Equal(t, 400, logs[0].PromptTokens)
 	require.Zero(t, logs[0].CompletionTokens)
 	require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
+	require.Contains(t, recorder.Body.String(), `"finish_reason":"length"`)
+	require.Contains(t, recorder.Body.String(), `"prompt_tokens":400`)
+	require.Contains(t, recorder.Body.String(), "[DONE]")
 }
 
 func TestResponsesAndClaudeAcceptedMalformedStreamsSettleEstimatedUsage(t *testing.T) {

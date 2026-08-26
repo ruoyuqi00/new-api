@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/relayconvert"
@@ -319,11 +320,23 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	if !usageValid {
 		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		state.Usage = usage
+		usage.UsageSource = "estimated"
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo != nil {
 		info.ClaudeConvertInfo.Usage = usage
 	}
+	if !imageGeneration && !info.StreamTerminalUsageSeen && info.RelayFormat == types.RelayFormatOpenAI && !info.IsStreamDetached() {
+		savedRelayMode := info.RelayMode
+		info.RelayMode = relayconstant.RelayModeChatCompletions
+		err := EmitEstimatedGPTStreamTerminal(c, info, usage, state.ID, state.Created, info.ClientResponseModelName(), "", 0)
+		info.RelayMode = savedRelayMode
+		if err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+		return usage, nil
+	}
+
 	for _, chunk := range relayconvert.FinalizeResponsesToChatStream(state) {
 		if !sendChatChunk(chunk) {
 			return nil, streamErr

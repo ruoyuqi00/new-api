@@ -128,7 +128,8 @@ func TestOaiStreamHandlerRejectsErrorEnvelopeWithoutMessage(t *testing.T) {
 
 	require.NotNil(t, relayErr)
 	require.Equal(t, types.ErrorCodeBadResponse, relayErr.GetErrorCode())
-	require.Empty(t, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"finish_reason":"length"`)
+	require.Contains(t, recorder.Body.String(), "[DONE]")
 	require.NotContains(t, relayErr.ToPublicOpenAIError("req-code-only").Message, "private-body")
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -47,6 +48,7 @@ func TestOaiResponsesStreamHandlerParsesResponseDoneUsage(t *testing.T) {
 	}
 
 	info := mappedClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeResponses
 	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 	require.Nil(t, relayErr)
@@ -260,14 +262,16 @@ func TestOaiResponsesStreamHandlerEmitsFailureForEOFWithoutTerminalEvent(t *test
 	}
 
 	info := mappedClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeResponses
 	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 	require.Nil(t, relayErr)
 	require.NotNil(t, usage)
-	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.failed"))
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.incomplete"))
 	require.Contains(t, recorder.Body.String(), `"sequence_number":6`)
 	require.Contains(t, recorder.Body.String(), `"code":"upstream_stream_incomplete"`)
 	require.Contains(t, recorder.Body.String(), "The stream ended before completion. Please retry later.")
+	require.Contains(t, recorder.Body.String(), `"input_tokens":`)
 	require.True(t, info.PreservePreConsumedQuota)
 }
 
@@ -287,18 +291,15 @@ func TestOaiResponsesStreamHandlerSanitizesUpstreamTerminalFailure(t *testing.T)
 			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
 
 			info := mappedClientResponseInfo()
+			info.RelayMode = relayconstant.RelayModeResponses
 			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 			require.Nil(t, relayErr)
 			publicBody := recorder.Body.String()
-			require.Equal(t, 1, strings.Count(publicBody, "event: "+eventType))
-			require.Contains(t, publicBody, `"code":"upstream_response_failed"`)
-			require.Contains(t, publicBody, "The response failed before completion. Please retry later.")
-			if eventType == "error" {
-				require.Contains(t, publicBody, `"type":"error","code":"upstream_response_failed"`)
-				require.Contains(t, publicBody, `"param":null`)
-				require.NotContains(t, publicBody, `"error":{`)
-			}
+			require.Equal(t, 1, strings.Count(publicBody, "event: response.incomplete"))
+			require.Contains(t, publicBody, `"code":"upstream_stream_incomplete"`)
+			require.Contains(t, publicBody, "The stream ended before completion. Please retry later.")
+			require.Contains(t, publicBody, `"input_tokens":`)
 			for _, secret := range []string{
 				"secret-upstream.example",
 				"10.20.30.40",
@@ -397,7 +398,7 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 		{
 			name:            "completed without usage",
 			body:            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"completed\"}}\n\n",
-			terminalEvent:   "event: response.completed",
+			terminalEvent:   "event: response.incomplete",
 			failureEventCnt: 0,
 			terminalSuccess: true,
 			wantPreserve:    true,
@@ -413,8 +414,8 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 		{
 			name:            "failed",
 			body:            "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"upstream failed\"}}}\n\n",
-			terminalEvent:   "event: response.failed",
-			failureEventCnt: 1,
+			terminalEvent:   "event: response.incomplete",
+			failureEventCnt: 0,
 			wantPreserve:    true,
 		},
 	}
@@ -429,6 +430,7 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 			}
 
 			info := mappedClientResponseInfo()
+			info.RelayMode = relayconstant.RelayModeResponses
 			usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 			require.Nil(t, relayErr)

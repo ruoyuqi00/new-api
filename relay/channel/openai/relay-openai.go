@@ -171,6 +171,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	model := info.UpstreamModelName
 	var responseId string
+	var publishedResponseID string
 	var createAt int64 = 0
 	var systemFingerprint string
 	var containStreamUsage bool
@@ -190,6 +191,11 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
+			} else if publishedResponseID == "" && info.RelayFormat == types.RelayFormatOpenAI {
+				var publishedChunk dto.ChatCompletionsStreamResponse
+				if common.UnmarshalJsonStr(lastStreamData, &publishedChunk) == nil {
+					publishedResponseID = publishedChunk.Id
+				}
 			}
 		}
 		if upstreamError := parseOaiStreamError(data); upstreamError != nil {
@@ -251,6 +257,16 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			usage.CompletionTokens += toolCount * 7
 		}
 		applyUsagePostProcessing(info, usage, nil)
+		if !containStreamUsage && info.IsStream && !info.StreamEstimatedTerminalSent {
+			createdAt := int64(0)
+			var lastResponse dto.ChatCompletionsStreamResponse
+			if lastStreamData != "" && common.UnmarshalJsonStr(lastStreamData, &lastResponse) == nil {
+				createdAt = lastResponse.Created
+			}
+			if err := EmitEstimatedGPTStreamTerminal(c, info, usage, publishedResponseID, createdAt, info.ClientResponseModelName(), systemFingerprint, 0); err != nil {
+				logger.LogError(c, "failed to emit estimated GPT stream terminal: "+err.Error())
+			}
+		}
 		return usage, streamError
 	}
 
@@ -290,8 +306,19 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	if info.RelayFormat == types.RelayFormatOpenAI && !info.IsStreamDetached() {
+		if !containStreamUsage && info.RelayMode == relayconstant.RelayModeChatCompletions && publishedResponseID == "" {
+			var terminalChunk dto.ChatCompletionsStreamResponse
+			if common.UnmarshalJsonStr(lastStreamData, &terminalChunk) == nil && len(terminalChunk.Choices) == 0 && terminalChunk.Usage == nil {
+				shouldSendLastResp = false
+			}
+		}
 		if shouldSendLastResp {
-			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
+			if err := sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err == nil && publishedResponseID == "" {
+				var publishedChunk dto.ChatCompletionsStreamResponse
+				if common.UnmarshalJsonStr(lastStreamData, &publishedChunk) == nil {
+					publishedResponseID = publishedChunk.Id
+				}
+			}
 		}
 	}
 
@@ -302,7 +329,11 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 
-	if !info.IsStreamDetached() {
+	if !containStreamUsage && !info.IsStreamDetached() && info.RelayFormat == types.RelayFormatOpenAI && info.RelayMode == relayconstant.RelayModeChatCompletions && !info.StreamEstimatedTerminalSent {
+		if err := EmitEstimatedGPTStreamTerminal(c, info, usage, publishedResponseID, createAt, info.ClientResponseModelName(), systemFingerprint, 0); err != nil {
+			logger.LogError(c, "failed to emit estimated GPT stream terminal: "+err.Error())
+		}
+	} else if !info.IsStreamDetached() {
 		HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 	}
 

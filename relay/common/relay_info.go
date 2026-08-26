@@ -246,6 +246,7 @@ type RelayInfo struct {
 	StreamTerminalMarkersRequired     bool
 	StreamTerminalSuccess             bool
 	StreamTerminalUsageSeen           bool
+	StreamEstimatedTerminalSent       bool
 	upstreamAttempt                   atomic.Pointer[UpstreamRequestAttempt]
 
 	ThinkingContentInfo
@@ -266,6 +267,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	info.StreamTerminalMarkersRequired = false
 	info.StreamTerminalSuccess = false
 	info.StreamTerminalUsageSeen = false
+	info.StreamEstimatedTerminalSent = false
 	info.upstreamAttempt.Store(nil)
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)

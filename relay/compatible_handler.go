@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	openaichannel "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -255,6 +256,21 @@ func settleAcceptedStreamError(c *gin.Context, info *relaycommon.RelayInfo, usag
 	textUsage, ok := usage.(*dto.Usage)
 	if !ok || textUsage == nil {
 		textUsage = &dto.Usage{}
+	}
+	isGPTTextStream := info.RelayMode == relayconstant.RelayModeChatCompletions ||
+		info.RelayMode == relayconstant.RelayModeResponses ||
+		info.RelayMode == relayconstant.RelayModeResponsesCompact
+	if info.IsStream && isGPTTextStream && !info.StreamTerminalUsageSeen {
+		if !service.ValidGPTTextUsage(textUsage) {
+			textUsage = service.ResponseText2Usage(c, "", info.UpstreamModelName, info.GetEstimatePromptTokens())
+		}
+		textUsage.UsageSource = "estimated"
+		info.PreservePreConsumedQuota = true
+		if !info.StreamEstimatedTerminalSent {
+			if err := openaichannel.EmitEstimatedGPTStreamTerminal(c, info, textUsage, "", 0, info.ClientResponseModelName(), "", 0); err != nil {
+				logger.LogError(c, "failed to emit estimated GPT stream terminal: "+err.Error())
+			}
+		}
 	}
 	info.MarkStreamDrainIncomplete(relaycommon.StreamDrainResultUpstreamError)
 	if billingErr := service.SettleAcceptedTextBilling(c, info, textUsage); billingErr != nil {

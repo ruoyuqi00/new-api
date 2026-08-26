@@ -146,6 +146,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	responseID := ""
 	publishedResponseID := ""
 	responseModel := ""
+	pendingEstimatedTerminal := false
+	imageGenerationSeen := false
 	isGPTModel := isGPTResponsesModel(info)
 
 	if resp.StatusCode == http.StatusOK && shouldSendCodexRateLimitsPrelude(c, info) {
@@ -193,6 +195,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			if streamResponse.Response.Model != "" {
 				responseModel = streamResponse.Response.Model
+			}
+			if streamResponse.Response.HasImageGenerationCall() {
+				imageGenerationSeen = true
 			}
 			if streamResponse.Response.Usage != nil && !streamResponse.Response.HasImageGenerationCall() {
 				candidate := &dto.Usage{
@@ -258,10 +263,15 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 		terminalFailure := false
+		suppressTerminalEvent := false
 		switch originalEventType {
 		case "response.completed", "response.done":
 			terminalReceived = true
 			info.StreamTerminalSuccess = true
+			if !info.StreamTerminalUsageSeen && !imageGenerationSeen {
+				pendingEstimatedTerminal = true
+				suppressTerminalEvent = true
+			}
 		case "response.incomplete", "response.failed", "response.error", "error":
 			terminalReceived = true
 			info.StreamTerminalSuccess = false
@@ -304,6 +314,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					Output: []dto.ResponsesOutput{},
 				}
 			}
+			if !info.StreamTerminalUsageSeen && !imageGenerationSeen {
+				pendingEstimatedTerminal = true
+				suppressTerminalEvent = true
+			}
 			sanitized, err := common.Marshal(&streamResponse)
 			if err != nil {
 				sr.Error(err)
@@ -311,9 +325,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			data = string(sanitized)
 		}
-		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
-			sr.Stop(err)
-			return
+		if !suppressTerminalEvent {
+			if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
+				sr.Stop(err)
+				return
+			}
 		}
 		if !terminalFailure && streamResponse.Response != nil && streamResponse.Response.ID != "" {
 			publishedResponseID = streamResponse.Response.ID
@@ -333,6 +349,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		case dto.ResponsesOutputTypeItemDone:
 			// 函数调用处理
 			if streamResponse.Item != nil {
+				if streamResponse.Item.Type == dto.ResponsesOutputTypeImageGenerationCall {
+					imageGenerationSeen = true
+				}
 				switch streamResponse.Item.Type {
 				case dto.BuildInCallWebSearchCall:
 					if info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
@@ -353,7 +372,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 	if !terminalReceived {
 		info.PreservePreConsumedQuota = true
-		if c.Request.Context().Err() == nil && info.StreamStatus != nil {
+		if !imageGenerationSeen && c.Request.Context().Err() == nil {
+			pendingEstimatedTerminal = true
+		}
+		if (imageGenerationSeen || c.Request.Context().Err() != nil) && info.StreamStatus != nil {
 			switch info.StreamStatus.EndReason {
 			case relaycommon.StreamEndReasonClientGone, relaycommon.StreamEndReasonHandlerStop:
 			default:
@@ -417,6 +439,15 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	if pendingEstimatedTerminal && !imageGenerationSeen && c.Request.Context().Err() == nil && !info.StreamEstimatedTerminalSent {
+		sequenceNumber := int64(0)
+		if nextSequenceNumber != nil {
+			sequenceNumber = *nextSequenceNumber
+		}
+		if err := EmitEstimatedGPTStreamTerminal(c, info, usage, publishedResponseID, 0, info.ClientResponseModelName(), "", sequenceNumber); err != nil {
+			logger.LogError(c, "failed to emit estimated responses terminal: "+err.Error())
+		}
+	}
 
 	return usage, nil
 }
