@@ -54,6 +54,13 @@ const newKeys = {
       'Nested JSON: user id → target group → ratio.',
     'No groups configured.': 'No groups configured.',
     'Recent request success only': 'Recent request success only',
+    'Availability uses up to 300 recent GPT text requests':
+      'Availability uses up to 300 recent GPT text requests',
+    Observing: 'Observing',
+    'Recent {{count}} of 300 GPT text requests':
+      'Recent {{count}} of 300 GPT text requests',
+    'Success {{success}}%, failed {{failure}}%':
+      'Success {{success}}%, failed {{failure}}%',
     Stable: 'Stable',
     Degraded: 'Degraded',
     Unavailable: 'Unavailable',
@@ -86,6 +93,13 @@ const newKeys = {
       '嵌套 JSON：用户 ID → 目标分组 → 倍率。',
     'No groups configured.': '暂无已配置分组。',
     'Recent request success only': '仅统计近期请求成功情况',
+    'Availability uses up to 300 recent GPT text requests':
+      '可用性仅统计最近最多 300 个 GPT 文本请求',
+    Observing: '观察中',
+    'Recent {{count}} of 300 GPT text requests':
+      '最近 {{count}} / 300 个 GPT 文本请求',
+    'Success {{success}}%, failed {{failure}}%':
+      '成功 {{success}}%，失败 {{failure}}%',
     Stable: '稳定',
     Degraded: '降级',
     Unavailable: '不可用',
@@ -118,6 +132,13 @@ const newKeys = {
       'JSON imbriqué : identifiant utilisateur → groupe cible → ratio.',
     'No groups configured.': 'Aucun groupe configuré.',
     'Recent request success only': 'Succès récents des requêtes uniquement',
+    'Availability uses up to 300 recent GPT text requests':
+      "La disponibilité utilise jusqu'à 300 requêtes texte GPT récentes",
+    Observing: 'Observation',
+    'Recent {{count}} of 300 GPT text requests':
+      '{{count}} requêtes texte GPT récentes sur 300',
+    'Success {{success}}%, failed {{failure}}%':
+      'Réussite {{success}} %, échec {{failure}} %',
     Stable: 'Stable',
     Degraded: 'Dégradé',
     Unavailable: 'Indisponible',
@@ -150,6 +171,13 @@ const newKeys = {
       'ネストされた JSON：ユーザー ID → 対象グループ → 倍率。',
     'No groups configured.': '設定されたグループはありません。',
     'Recent request success only': '最近のリクエスト成功のみ',
+    'Availability uses up to 300 recent GPT text requests':
+      '可用性は直近最大300件のGPTテキストリクエストで判定します',
+    Observing: '観測中',
+    'Recent {{count}} of 300 GPT text requests':
+      '直近のGPTテキストリクエスト {{count}} / 300 件',
+    'Success {{success}}%, failed {{failure}}%':
+      '成功 {{success}}%、失敗 {{failure}}%',
     Stable: '安定',
     Degraded: '低下',
     Unavailable: '利用不可',
@@ -182,6 +210,13 @@ const newKeys = {
       'Вложенный JSON: ID пользователя → целевая группа → коэффициент.',
     'No groups configured.': 'Группы не настроены.',
     'Recent request success only': 'Только успешность последних запросов',
+    'Availability uses up to 300 recent GPT text requests':
+      'Доступность рассчитывается по последним 300 текстовым запросам GPT',
+    Observing: 'Наблюдение',
+    'Recent {{count}} of 300 GPT text requests':
+      'Последние текстовые запросы GPT: {{count}} из 300',
+    'Success {{success}}%, failed {{failure}}%':
+      'Успешно {{success}} %, с ошибкой {{failure}} %',
     Stable: 'Стабильно',
     Degraded: 'Снижено',
     Unavailable: 'Недоступно',
@@ -214,6 +249,13 @@ const newKeys = {
       'JSON lồng nhau: ID người dùng → nhóm đích → tỷ lệ.',
     'No groups configured.': 'Chưa cấu hình nhóm nào.',
     'Recent request success only': 'Chỉ thành công của các lượt gọi gần đây',
+    'Availability uses up to 300 recent GPT text requests':
+      'Mức khả dụng dựa trên tối đa 300 yêu cầu văn bản GPT gần nhất',
+    Observing: 'Đang theo dõi',
+    'Recent {{count}} of 300 GPT text requests':
+      '{{count}}/300 yêu cầu văn bản GPT gần nhất',
+    'Success {{success}}%, failed {{failure}}%':
+      'Thành công {{success}}%, lỗi {{failure}}%',
     Stable: 'Ổn định',
     Degraded: 'Suy giảm',
     Unavailable: 'Không khả dụng',

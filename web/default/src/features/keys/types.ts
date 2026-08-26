@@ -65,7 +65,13 @@ export interface GroupAvailabilityItem {
   request_count: number
   success_count: number
   success_rate: number
-  status: 'stable' | 'degraded' | 'unavailable' | 'no_data' | string
+  status:
+    | 'stable'
+    | 'degraded'
+    | 'unavailable'
+    | 'observing'
+    | 'no_data'
+    | string
   observed_at: number
 }
 
