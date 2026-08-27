@@ -138,8 +138,20 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 	if len(resolutions) == 0 {
 		resolutions = selected.Resolutions
 	}
+	defaultResolution := ""
+	if len(resolutions) > 0 {
+		defaultResolution = strings.TrimSpace(resolutions[0])
+	}
+	if selected.Kind == YucoreMediaKindImage {
+		resolutions = yucoreMediaImageResolutionOptions(resolutions)
+	}
 	if normalized.Resolution == "" && len(resolutions) > 0 {
-		normalized.Resolution = resolutions[0]
+		normalized.Resolution = defaultResolution
+		if selected.Kind == YucoreMediaKindImage {
+			if canonical, ok := yucoreMediaCanonicalString(normalized.Resolution, resolutions); ok {
+				normalized.Resolution = canonical
+			}
+		}
 	} else if normalized.Resolution != "" && len(resolutions) > 0 {
 		canonical, ok := yucoreMediaCanonicalString(normalized.Resolution, resolutions)
 		if !ok {
@@ -570,6 +582,50 @@ func yucoreMediaCanonicalString(value string, allowed []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func yucoreMediaImageResolutionRank(value string) (int, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "1k", "1024":
+		return 1, true
+	case "2k", "2048":
+		return 2, true
+	case "4k", "4096":
+		return 4, true
+	default:
+		return 0, false
+	}
+}
+
+func yucoreMediaImageResolutionOptions(allowed []string) []string {
+	maxRank := 0
+	for _, value := range allowed {
+		rank, ok := yucoreMediaImageResolutionRank(value)
+		if !ok {
+			return allowed
+		}
+		if rank > maxRank {
+			maxRank = rank
+		}
+	}
+	if maxRank == 0 {
+		return allowed
+	}
+	options := make([]string, 0, 3)
+	for _, option := range []struct {
+		label string
+		rank  int
+	}{
+		{label: "1k", rank: 1},
+		{label: "2k", rank: 2},
+		{label: "4k", rank: 4},
+	} {
+		if option.rank <= maxRank {
+			options = append(options, option.label)
+		}
+	}
+	return options
 }
 
 func yucoreMediaCapabilityAllowsAny(capability model.YucoreMediaModelCapability, parameters ...string) bool {

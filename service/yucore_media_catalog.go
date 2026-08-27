@@ -166,6 +166,9 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 	if configured {
 		item.Durations = append([]int(nil), capability.Durations...)
 		item.Resolutions = append([]string(nil), capability.Resolutions...)
+		if kind == YucoreMediaKindImage {
+			item.Resolutions = yucoreMediaImageResolutionOptions(item.Resolutions)
+		}
 		item.AspectRatios = append([]string(nil), capability.AspectRatios...)
 		item.ReferenceModes = append([]string(nil), capability.ReferenceModes...)
 		item.RequiredReferenceKinds = append([]string(nil), capability.RequiredReferenceKinds...)
@@ -203,6 +206,9 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 		}
 	} else {
 		item.Modes = []string{"text-to-image"}
+		if configured {
+			item.Sizes = append([]string(nil), item.Resolutions...)
+		}
 		item.Counts = []int{1}
 		if configured && strings.TrimSpace(capability.EditPath) != "" {
 			item.Modes = append(item.Modes, "image-to-image")

@@ -1133,20 +1133,43 @@ func HydrateYucoreMediaTaskWithHeaders(task *YucoreMediaTask, upstreamHeaders Yu
 	return task, nil
 }
 
-func normalizeYucoreMediaImageSize(size string) string {
+func normalizeYucoreMediaImageSize(size string, aspectRatio string) string {
 	size = strings.TrimSpace(size)
 	switch strings.ToLower(size) {
 	case "", "auto":
 		return ""
 	case "1k", "1024":
-		return "1024x1024"
+		return yucoreMediaImageDimensions(1024, aspectRatio)
 	case "2k", "2048":
-		return "2048x2048"
+		return yucoreMediaImageDimensions(2048, aspectRatio)
 	case "4k", "4096":
-		return "4096x4096"
+		return yucoreMediaImageDimensions(4096, aspectRatio)
 	default:
 		return size
 	}
+}
+
+func yucoreMediaImageDimensions(maxEdge int, aspectRatio string) string {
+	ratio := strings.TrimSpace(strings.ToLower(aspectRatio))
+	if ratio == "" || ratio == "auto" || ratio == "1:1" {
+		return fmt.Sprintf("%dx%d", maxEdge, maxEdge)
+	}
+	parts := strings.Split(ratio, ":")
+	if len(parts) != 2 {
+		return fmt.Sprintf("%dx%d", maxEdge, maxEdge)
+	}
+	widthRatio, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	heightRatio, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || widthRatio <= 0 || heightRatio <= 0 {
+		return fmt.Sprintf("%dx%d", maxEdge, maxEdge)
+	}
+	width, height := maxEdge, maxEdge
+	if widthRatio > heightRatio {
+		height = max(1, int(math.Round(float64(maxEdge)*float64(heightRatio)/float64(widthRatio))))
+	} else if heightRatio > widthRatio {
+		width = max(1, int(math.Round(float64(maxEdge)*float64(widthRatio)/float64(heightRatio))))
+	}
+	return fmt.Sprintf("%dx%d", width, height)
 }
 
 func yucoreMediaEndpoint(baseURL string) (string, error) {
@@ -2161,7 +2184,7 @@ func runOpenAICompatibleYucoreImageTask(task *YucoreMediaTask, config yucoreMedi
 	if task.NegativePrompt != "" && yucoreMediaCapabilityAllowsParameter(capability, "negative_prompt") {
 		body["negative_prompt"] = task.NegativePrompt
 	}
-	if size := normalizeYucoreMediaImageSize(task.Size); size != "" && yucoreMediaCapabilityAllowsParameter(capability, "size") {
+	if size := normalizeYucoreMediaImageSize(task.Size, task.AspectRatio); size != "" && yucoreMediaCapabilityAllowsParameter(capability, "size") {
 		body["size"] = size
 	}
 	if task.Quality != "" && !strings.EqualFold(task.Quality, "auto") && yucoreMediaCapabilityAllowsParameter(capability, "quality") {

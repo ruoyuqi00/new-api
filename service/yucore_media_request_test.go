@@ -81,6 +81,67 @@ func TestNormalizeYucoreMediaRequestValidatesDurationResolutionAndAspectRatio(t 
 	require.ErrorContains(t, err, "aspect ratio")
 }
 
+func TestNormalizeYucoreMediaRequestAllowsResolutionBelowModelMaximum(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		resolutions  []string
+		requested    string
+		want         string
+		shouldReject string
+	}{
+		{name: "2k accepts 1k", resolutions: []string{"2k"}, requested: "1k", want: "1k", shouldReject: "4k"},
+		{name: "4k accepts 2k", resolutions: []string{"4k"}, requested: "2k", want: "2k", shouldReject: "8k"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected := YucoreMediaCatalogModel{
+				Id:           "image-" + test.name,
+				Kind:         YucoreMediaKindImage,
+				Modes:        []string{"text-to-image"},
+				Counts:       []int{1},
+				Resolutions:  test.resolutions,
+				AspectRatios: []string{"1:1", "16:9", "9:16"},
+			}
+
+			normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{
+				Resolution:  test.requested,
+				AspectRatio: "16:9",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, test.want, normalized.Resolution)
+			assert.Equal(t, "16:9", normalized.AspectRatio)
+
+			_, err = NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{Resolution: test.shouldReject})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "resolution")
+		})
+	}
+}
+
+func TestNormalizeYucoreMediaRequestKeepsModelMaximumAsDefault(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		resolutions []string
+		want        string
+	}{
+		{name: "2k", resolutions: []string{"2k"}, want: "2k"},
+		{name: "4k", resolutions: []string{"4k"}, want: "4k"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected := YucoreMediaCatalogModel{
+				Id:          "image-default-" + test.name,
+				Kind:        YucoreMediaKindImage,
+				Modes:       []string{"text-to-image"},
+				Counts:      []int{1},
+				Resolutions: test.resolutions,
+			}
+
+			normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, test.want, normalized.Resolution)
+		})
+	}
+}
+
 func TestNormalizeYucoreMediaRequestPreservesConfiguredDurationOrder(t *testing.T) {
 	selected := yucoreMediaRequestTestModel("operator-ordered-video")
 	selected.Durations = []int{10, 5}

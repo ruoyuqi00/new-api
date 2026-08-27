@@ -221,6 +221,26 @@ func TestBuildYucoreMediaCatalogProjectsConfiguredCapabilities(t *testing.T) {
 	assert.Equal(t, "per_call", item.Pricing.Unit)
 }
 
+func TestYucoreMediaImageResolutionOptionsUseCapabilityAsMaximum(t *testing.T) {
+	assert.Equal(t, []string{"1k"}, yucoreMediaImageResolutionOptions([]string{"1k"}))
+	assert.Equal(t, []string{"1k", "2k"}, yucoreMediaImageResolutionOptions([]string{"2k"}))
+	assert.Equal(t, []string{"1k", "2k", "4k"}, yucoreMediaImageResolutionOptions([]string{"4k"}))
+	assert.Equal(t, []string{"1024x1024", "1536x1024"}, yucoreMediaImageResolutionOptions([]string{"1024x1024", "1536x1024"}))
+}
+
+func TestBuildYucoreMediaCatalogImageSizesExposeLowerTiers(t *testing.T) {
+	item := buildYucoreMediaCatalogModel("image-2k", YucoreMediaKindImage, model.YucoreMediaModelCapability{
+		Kind:        YucoreMediaKindImage,
+		Resolutions: []string{"2k"},
+		AspectRatios: []string{
+			"1:1", "16:9", "9:16",
+		},
+	}, true, 1)
+
+	assert.Equal(t, []string{"1k", "2k"}, item.Resolutions)
+	assert.Equal(t, []string{"1k", "2k"}, item.Sizes)
+}
+
 func TestBuildYucoreMediaCatalogHidesProbeModels(t *testing.T) {
 	db := setupYucoreMediaCatalogTest(t)
 	createYucoreMediaCatalogUser(t, db, 9105)

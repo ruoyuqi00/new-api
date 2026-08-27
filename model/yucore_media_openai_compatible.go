@@ -243,6 +243,9 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 		resolution = strings.TrimSpace(task.Size)
 	}
 	if resolution != "" && !strings.EqualFold(resolution, "auto") {
+		if strings.EqualFold(strings.TrimSpace(task.Kind), "image") {
+			resolution = normalizeYucoreMediaImageSize(resolution, task.AspectRatio)
+		}
 		if allowsParameter("resolution") {
 			payload["resolution"] = resolution
 		} else if allowsParameter("size") {
@@ -827,7 +830,10 @@ func runOpenAICompatibleYucoreImageEditTask(task *YucoreMediaTask, config yucore
 		fields["n"] = strconv.Itoa(task.Count)
 	}
 	if task.Size != "" && !strings.EqualFold(task.Size, "auto") && yucoreMediaCapabilityAllowsParameter(capability, "size") {
-		fields["size"] = normalizeYucoreMediaImageSize(task.Size)
+		fields["size"] = normalizeYucoreMediaImageSize(task.Size, task.AspectRatio)
+	}
+	if task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && yucoreMediaCapabilityAllowsParameter(capability, "aspect_ratio") {
+		fields["aspect_ratio"] = task.AspectRatio
 	}
 	if task.Quality != "" && !strings.EqualFold(task.Quality, "auto") && yucoreMediaCapabilityAllowsParameter(capability, "quality") {
 		fields["quality"] = task.Quality
@@ -837,9 +843,6 @@ func runOpenAICompatibleYucoreImageEditTask(task *YucoreMediaTask, config yucore
 	}
 	if capability.ResponseFormat != "" && yucoreMediaCapabilityAllowsParameter(capability, "response_format") {
 		fields["response_format"] = capability.ResponseFormat
-	}
-	if task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && yucoreMediaCapabilityAllowsParameter(capability, "aspect_ratio") {
-		fields["aspect_ratio"] = task.AspectRatio
 	}
 	for key, value := range fields {
 		if value != "" {

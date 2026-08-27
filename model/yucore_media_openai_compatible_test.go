@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -167,6 +168,77 @@ func TestBuildOpenAICompatibleAsyncPayloadDurationPolicies(t *testing.T) {
 	assert.Equal(t, "url", grokPayload["response_format"])
 	assert.NotContains(t, grokPayload, "ratio")
 	assert.NotContains(t, grokPayload, "image_url")
+}
+
+func TestBuildOpenAICompatibleAsyncImagePayloadPreservesAspectRatio(t *testing.T) {
+	task := &YucoreMediaTask{
+		Kind:        "image",
+		ModelId:     "image-model",
+		Prompt:      "a mountain lake",
+		Size:        "2k",
+		AspectRatio: "9:16",
+	}
+
+	payload := buildOpenAICompatibleAsyncPayload(task, YucoreMediaModelCapability{
+		AllowedParameters: []string{"size", "aspect_ratio"},
+	})
+	assert.Equal(t, "1152x2048", payload["size"])
+	assert.Equal(t, "9:16", payload["aspect_ratio"])
+}
+
+func TestYucoreMediaImageDimensionsPreserveAspectRatioWithinResolutionCap(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxEdge  int
+		aspect   string
+		expected string
+	}{
+		{name: "square", maxEdge: 1024, aspect: "1:1", expected: "1024x1024"},
+		{name: "landscape", maxEdge: 2048, aspect: "16:9", expected: "2048x1152"},
+		{name: "portrait", maxEdge: 4096, aspect: "9:16", expected: "2304x4096"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, yucoreMediaImageDimensions(test.maxEdge, test.aspect))
+		})
+	}
+}
+
+func TestRunOpenAICompatibleYucoreImageTaskSendsIndependentSizeAndAspectRatio(t *testing.T) {
+	truncateTables(t)
+	require.NoError(t, DB.AutoMigrate(&YucoreMediaTask{}))
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, common.Unmarshal(body, &received))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"iVBORw0KGgo="}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	task := &YucoreMediaTask{
+		TaskId:      "image-size-aspect",
+		Kind:        "image",
+		ModelId:     "image-2k",
+		Prompt:      "a square subject in a landscape frame",
+		Size:        "1k",
+		AspectRatio: "16:9",
+		Count:       1,
+		Format:      "url",
+		Status:      YucoreMediaTaskStatusProcessing,
+	}
+	require.NoError(t, DB.Create(task).Error)
+	capability := YucoreMediaModelCapability{
+		Transport:         yucoreMediaTransportSyncImage,
+		CreatePath:        "/v1/images/generations",
+		AllowedParameters: []string{"size", "aspect_ratio"},
+	}
+	config := yucoreMediaAdapterConfig{BaseURL: server.URL, APIKey: "test-key", TimeoutSeconds: 5}
+
+	require.NoError(t, runOpenAICompatibleYucoreImageTask(task, config, capability))
+	assert.Equal(t, "1024x576", received["size"])
+	assert.Equal(t, "16:9", received["aspect_ratio"])
 }
 
 func newCanonicalOpenAICompatiblePayloadTask(t *testing.T, modelID string, references []YucoreMediaReferenceInput, metadata map[string]any) *YucoreMediaTask {
