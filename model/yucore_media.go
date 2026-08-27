@@ -2152,6 +2152,7 @@ func appendOpenAICompatibleImageAsset(assets []YucoreMediaAsset, task *YucoreMed
 	if revisedPrompt != "" {
 		label = fmt.Sprintf("%s · result %d", task.ModelId, index+1)
 	}
+	width, height := yucoreMediaTaskImageDimensions(task)
 	return append(assets, YucoreMediaAsset{
 		Id:        fmt.Sprintf("%s_asset_%d", task.TaskId, index),
 		Kind:      task.Kind,
@@ -2159,13 +2160,30 @@ func appendOpenAICompatibleImageAsset(assets []YucoreMediaAsset, task *YucoreMed
 		ThumbUrl:  fmt.Sprintf("/api/yucore/media/tasks/%s/assets/%d", task.TaskId, index),
 		SourceUrl: assetURL,
 		Label:     label,
-		Width:     1024,
-		Height:    1024,
+		Width:     width,
+		Height:    height,
 		MimeType:  mimeType,
 		Metadata: map[string]any{
 			"adapter": "openai-compatible",
 		},
 	})
+}
+
+func yucoreMediaTaskImageDimensions(task *YucoreMediaTask) (int, int) {
+	if task == nil {
+		return 1024, 1024
+	}
+	value := normalizeYucoreMediaImageSize(task.Size, task.AspectRatio)
+	parts := strings.Split(value, "x")
+	if len(parts) != 2 {
+		return 1024, 1024
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return 1024, 1024
+	}
+	return width, height
 }
 
 func runOpenAICompatibleYucoreImageTask(task *YucoreMediaTask, config yucoreMediaAdapterConfig, capability YucoreMediaModelCapability) error {

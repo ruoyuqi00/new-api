@@ -241,6 +241,60 @@ func TestRunOpenAICompatibleYucoreImageTaskSendsIndependentSizeAndAspectRatio(t 
 	assert.Equal(t, "16:9", received["aspect_ratio"])
 }
 
+func TestRunOpenAICompatibleYucoreImageTaskPreservesCustomDimensions(t *testing.T) {
+	truncateTables(t)
+	require.NoError(t, DB.AutoMigrate(&YucoreMediaTask{}))
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, common.Unmarshal(body, &received))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"iVBORw0KGgo="}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	task := &YucoreMediaTask{
+		TaskId:      "image-custom-dimensions",
+		Kind:        "image",
+		ModelId:     "image-1k",
+		Prompt:      "a portrait subject",
+		Size:        "650x1024",
+		AspectRatio: "auto",
+		Count:       1,
+		Format:      "url",
+		Status:      YucoreMediaTaskStatusProcessing,
+	}
+	require.NoError(t, DB.Create(task).Error)
+	capability := YucoreMediaModelCapability{
+		Transport:                yucoreMediaTransportSyncImage,
+		CreatePath:               "/v1/images/generations",
+		SupportsCustomDimensions: true,
+		AllowedParameters:        []string{"size", "aspect_ratio"},
+	}
+	config := yucoreMediaAdapterConfig{BaseURL: server.URL, APIKey: "test-key", TimeoutSeconds: 5}
+
+	require.NoError(t, runOpenAICompatibleYucoreImageTask(task, config, capability))
+	assert.Equal(t, "650x1024", received["size"])
+	assert.NotContains(t, received, "aspect_ratio")
+}
+
+func TestAppendOpenAICompatibleImageAssetUsesRequestedDimensions(t *testing.T) {
+	task := &YucoreMediaTask{
+		TaskId:      "asset-dimensions",
+		Kind:        "image",
+		ModelId:     "image-model",
+		Size:        "1k",
+		AspectRatio: "16:9",
+		Format:      "png",
+	}
+
+	assets := appendOpenAICompatibleImageAsset(nil, task, 0, "https://cdn.example.com/result.png", "", "")
+	require.Len(t, assets, 1)
+	assert.Equal(t, 1024, assets[0].Width)
+	assert.Equal(t, 576, assets[0].Height)
+}
+
 func newCanonicalOpenAICompatiblePayloadTask(t *testing.T, modelID string, references []YucoreMediaReferenceInput, metadata map[string]any) *YucoreMediaTask {
 	t.Helper()
 	inputs, err := common.Marshal(references)
@@ -1232,7 +1286,7 @@ func TestYucoreMediaConfiguredModelIDs(t *testing.T) {
 	})
 
 	configured := YucoreMediaConfiguredModelIDs()
-	require.Len(t, configured, 26)
+	require.Len(t, configured, 29)
 	assert.Contains(t, configured, "grok-imagine-image")
 	assert.Contains(t, configured, "grok-imagine-image-quality")
 	assert.Contains(t, configured, "grok-imagine-video")
@@ -1240,6 +1294,9 @@ func TestYucoreMediaConfiguredModelIDs(t *testing.T) {
 	assert.Contains(t, configured, "grok-imagine-video-1.5-preview")
 	assert.Contains(t, configured, "gpt-image-2-adobe")
 	assert.Contains(t, configured, "gpt-image-2-2k")
+	assert.Contains(t, configured, "gpt-image-2-1k")
+	assert.Contains(t, configured, "gpt-image-2-4k")
+	assert.Contains(t, configured, "gpt-image-2")
 	assert.Contains(t, configured, "grok-video")
 	assert.NotContains(t, configured, "seedance-2.0-mini-8s")
 	assert.NotContains(t, configured, "veo-clean")

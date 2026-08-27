@@ -480,6 +480,21 @@ function getSizes(model?: YucoreMediaModel) {
   return model?.sizes ?? emptyStringOptions
 }
 
+function getImageDimensionCap(sizes: string[]) {
+  return sizes.reduce((cap, value) => {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === '1k' || normalized === '1024') return Math.max(cap, 1024)
+    if (normalized === '2k' || normalized === '2048') return Math.max(cap, 2048)
+    if (normalized === '4k' || normalized === '4096') return Math.max(cap, 4096)
+    const parts = normalized.replaceAll(/[×*]/g, 'x').split('x')
+    if (parts.length !== 2) return cap
+    const width = Number.parseInt(parts[0], 10)
+    const height = Number.parseInt(parts[1], 10)
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return cap
+    return Math.max(cap, width, height)
+  }, 0)
+}
+
 function getFormats(model?: YucoreMediaModel) {
   if (model?.output_formats?.length) return model.output_formats
   if (model?.formats?.length) return model.formats
@@ -1228,6 +1243,8 @@ export function YucoreStudioWorkspace({
   const [mode, setMode] = useState('text-to-image')
   const [aspectRatio, setAspectRatio] = useState('auto')
   const [size, setSize] = useState('1k')
+  const [customWidth, setCustomWidth] = useState('1024')
+  const [customHeight, setCustomHeight] = useState('1024')
   const [format, setFormat] = useState('png')
   const [quality, setQuality] = useState('high')
   const [stylePreset, setStylePreset] = useState('auto')
@@ -1316,6 +1333,38 @@ export function YucoreStudioWorkspace({
   const activeModes = activeModel?.modes ?? emptyStringOptions
   const activeAspectRatios = getAspectRatios(activeModel)
   const activeSizes = getSizes(activeModel)
+  const activeSizeOptions = useMemo(() => {
+    if (
+      activeModel?.supports_custom_dimensions &&
+      activeMediaKind === 'image'
+    ) {
+      return activeSizes.includes('custom')
+        ? activeSizes
+        : [...activeSizes, 'custom']
+    }
+    return activeSizes
+  }, [activeMediaKind, activeModel?.supports_custom_dimensions, activeSizes])
+  const customDimensionCap = useMemo(
+    () => getImageDimensionCap(activeSizes),
+    [activeSizes]
+  )
+  const customWidthValue = /^\d+$/.test(customWidth) ? Number(customWidth) : 0
+  const customHeightValue = /^\d+$/.test(customHeight)
+    ? Number(customHeight)
+    : 0
+  const customSizeValid =
+    activeModel?.supports_custom_dimensions === true &&
+    customDimensionCap > 0 &&
+    Number.isInteger(customWidthValue) &&
+    Number.isInteger(customHeightValue) &&
+    customWidthValue > 0 &&
+    customHeightValue > 0 &&
+    customWidthValue <= customDimensionCap &&
+    customHeightValue <= customDimensionCap
+  const customSizeError =
+    size === 'custom' && !customSizeValid
+      ? t('Enter a valid custom size within the model limit.')
+      : ''
   const activeFormats = getFormats(activeModel)
   const activeQualities = activeModel?.qualities ?? emptyStringOptions
   const activeStylePresets = activeModel?.style_presets ?? emptyStringOptions
@@ -1336,7 +1385,8 @@ export function YucoreStudioWorkspace({
     referenceUploadErrors.length > 0 ||
     !prompt.trim() ||
     !selectedGroup ||
-    !activeModel
+    !activeModel ||
+    (size === 'custom' && !customSizeValid)
   const visibleTasks = useMemo(
     () =>
       tasks.filter((task) =>
@@ -1857,7 +1907,11 @@ export function YucoreStudioWorkspace({
       )
     }
     if (activeSizes.length > 0) {
-      setSize((current) => keepOption(current, activeSizes, activeSizes[0]))
+      setSize((current) =>
+        current === 'custom' && activeModel.supports_custom_dimensions
+          ? current
+          : keepOption(current, activeSizes, activeSizes[0])
+      )
     }
     if (activeFormats.length > 0) {
       setFormat((current) =>
@@ -2436,6 +2490,13 @@ export function YucoreStudioWorkspace({
       }
       const submitModes = currentModel.modes
       const submitMode = submitModes.includes(mode) ? mode : submitModes[0]
+      const usingCustomDimensions =
+        nextKind === 'image' &&
+        currentModel.supports_custom_dimensions === true &&
+        size === 'custom'
+      const requestedSize = usingCustomDimensions
+        ? `${customWidthValue}x${customHeightValue}`
+        : size
       const task = await createYucoreMediaTask({
         group: selectedGroup,
         kind: nextKind,
@@ -2443,10 +2504,13 @@ export function YucoreStudioWorkspace({
         model_id: currentModel.id,
         prompt: taskPrompt,
         negative_prompt: negativePrompt,
-        ...(currentModel.aspect_ratios?.includes(aspectRatio)
+        ...(!usingCustomDimensions &&
+        currentModel.aspect_ratios?.includes(aspectRatio)
           ? { aspect_ratio: aspectRatio }
           : {}),
-        ...(currentModel.sizes?.includes(size) ? { size } : {}),
+        ...(currentModel.sizes?.includes(size) || usingCustomDimensions
+          ? { size: requestedSize }
+          : {}),
         ...(currentModel.qualities?.includes(quality) ? { quality } : {}),
         ...((currentModel.output_formats ?? currentModel.formats)?.includes(
           format
@@ -5392,16 +5456,66 @@ export function YucoreStudioWorkspace({
                             {activeModel?.size_label ?? '尺寸'}
                           </div>
                           <div className='flex flex-wrap gap-2'>
-                            {activeSizes.map((item) => (
+                            {activeSizeOptions.map((item) => (
                               <SegmentedButton
                                 key={item}
                                 active={size === item}
                                 onClick={() => setSize(item)}
                               >
-                                {item === 'custom' ? '自定义' : item}
+                                {item === 'custom' ? t('Custom') : item}
                               </SegmentedButton>
                             ))}
                           </div>
+                          {size === 'custom' &&
+                            activeModel?.supports_custom_dimensions && (
+                              <div className='mt-3 space-y-2'>
+                                <div className='grid grid-cols-2 gap-2'>
+                                  <label className='space-y-1 text-xs text-white/55'>
+                                    <span className='block'>{t('Width')}</span>
+                                    <input
+                                      type='number'
+                                      min='1'
+                                      max={customDimensionCap}
+                                      inputMode='numeric'
+                                      value={customWidth}
+                                      onChange={(event) =>
+                                        setCustomWidth(event.target.value)
+                                      }
+                                      aria-label={t('Width')}
+                                      className='h-9 w-full rounded-lg border border-white/10 bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-cyan-200/40'
+                                    />
+                                  </label>
+                                  <label className='space-y-1 text-xs text-white/55'>
+                                    <span className='block'>{t('Height')}</span>
+                                    <input
+                                      type='number'
+                                      min='1'
+                                      max={customDimensionCap}
+                                      inputMode='numeric'
+                                      value={customHeight}
+                                      onChange={(event) =>
+                                        setCustomHeight(event.target.value)
+                                      }
+                                      aria-label={t('Height')}
+                                      className='h-9 w-full rounded-lg border border-white/10 bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-cyan-200/40'
+                                    />
+                                  </label>
+                                </div>
+                                <p
+                                  className={cn(
+                                    'text-[11px]',
+                                    customSizeError
+                                      ? 'text-rose-200'
+                                      : 'text-white/35'
+                                  )}
+                                >
+                                  {customSizeError ||
+                                    t('Maximum edge: {{limit}} px', {
+                                      limit: customDimensionCap,
+                                    })}
+                                </p>
+                              </div>
+                            )}
                         </div>
                       )}
 

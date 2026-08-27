@@ -138,6 +138,7 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 	if len(resolutions) == 0 {
 		resolutions = selected.Resolutions
 	}
+	resolutionCapabilities := append([]string(nil), resolutions...)
 	defaultResolution := ""
 	if len(resolutions) > 0 {
 		defaultResolution = strings.TrimSpace(resolutions[0])
@@ -153,18 +154,39 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 			}
 		}
 	} else if normalized.Resolution != "" && len(resolutions) > 0 {
-		canonical, ok := yucoreMediaCanonicalString(normalized.Resolution, resolutions)
-		if !ok {
-			return YucoreMediaRequestOptions{}, fmt.Errorf("model %s does not support resolution %s", selected.Id, normalized.Resolution)
+		if selected.Kind == YucoreMediaKindImage {
+			customResolution, isCustom, customErr := normalizeYucoreMediaCustomImageDimensions(
+				normalized.Resolution,
+				resolutionCapabilities,
+				capability.SupportsCustomDimensions,
+			)
+			if customErr != nil {
+				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s: %w", selected.Id, customErr)
+			}
+			if isCustom {
+				normalized.Resolution = customResolution
+				normalized.AspectRatio = "auto"
+			} else {
+				canonical, ok := yucoreMediaCanonicalString(normalized.Resolution, resolutions)
+				if !ok {
+					return YucoreMediaRequestOptions{}, fmt.Errorf("model %s does not support resolution %s", selected.Id, normalized.Resolution)
+				}
+				normalized.Resolution = canonical
+			}
+		} else {
+			canonical, ok := yucoreMediaCanonicalString(normalized.Resolution, resolutions)
+			if !ok {
+				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s does not support resolution %s", selected.Id, normalized.Resolution)
+			}
+			normalized.Resolution = canonical
 		}
-		normalized.Resolution = canonical
 	}
 
 	aspectRatios := capability.AspectRatios
 	if len(aspectRatios) == 0 {
 		aspectRatios = selected.AspectRatios
 	}
-	if normalized.AspectRatio != "" && len(aspectRatios) > 0 {
+	if normalized.AspectRatio != "" && !strings.EqualFold(normalized.AspectRatio, "auto") && len(aspectRatios) > 0 {
 		canonical, ok := yucoreMediaCanonicalString(normalized.AspectRatio, aspectRatios)
 		if !ok {
 			return YucoreMediaRequestOptions{}, fmt.Errorf("model %s does not support aspect ratio %s", selected.Id, normalized.AspectRatio)
@@ -626,6 +648,60 @@ func yucoreMediaImageResolutionOptions(allowed []string) []string {
 		}
 	}
 	return options
+}
+
+func normalizeYucoreMediaCustomImageDimensions(value string, allowed []string, supportsCustom bool) (string, bool, error) {
+	canonical := strings.TrimSpace(value)
+	canonical = strings.NewReplacer("*", "x", "X", "x", "×", "x").Replace(canonical)
+	if !strings.Contains(canonical, "x") {
+		return "", false, nil
+	}
+	if !supportsCustom {
+		return "", true, fmt.Errorf("custom image dimensions are not supported")
+	}
+	parts := strings.Split(canonical, "x")
+	if len(parts) != 2 {
+		return "", true, fmt.Errorf("custom image dimensions must use WIDTHxHEIGHT")
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return "", true, fmt.Errorf("custom image dimensions must be positive integers")
+	}
+	maxEdge, ok := yucoreMediaImageMaxEdge(allowed)
+	if !ok {
+		return "", true, fmt.Errorf("custom image dimensions have no configured resolution cap")
+	}
+	if width > maxEdge || height > maxEdge {
+		return "", true, fmt.Errorf("custom image dimensions exceed the %dpx resolution cap", maxEdge)
+	}
+	return fmt.Sprintf("%dx%d", width, height), true, nil
+}
+
+func yucoreMediaImageMaxEdge(allowed []string) (int, bool) {
+	maxEdge := 0
+	for _, value := range allowed {
+		trimmed := strings.TrimSpace(strings.ToLower(value))
+		switch trimmed {
+		case "1k", "1024":
+			maxEdge = max(maxEdge, 1024)
+		case "2k", "2048":
+			maxEdge = max(maxEdge, 2048)
+		case "4k", "4096":
+			maxEdge = max(maxEdge, 4096)
+		default:
+			parts := strings.Split(strings.NewReplacer("*", "x", "×", "x").Replace(trimmed), "x")
+			if len(parts) != 2 {
+				continue
+			}
+			width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+			height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if widthErr == nil && heightErr == nil {
+				maxEdge = max(maxEdge, max(width, height))
+			}
+		}
+	}
+	return maxEdge, maxEdge > 0
 }
 
 func yucoreMediaCapabilityAllowsAny(capability model.YucoreMediaModelCapability, parameters ...string) bool {

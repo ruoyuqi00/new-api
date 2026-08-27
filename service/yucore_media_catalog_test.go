@@ -230,8 +230,9 @@ func TestYucoreMediaImageResolutionOptionsUseCapabilityAsMaximum(t *testing.T) {
 
 func TestBuildYucoreMediaCatalogImageSizesExposeLowerTiers(t *testing.T) {
 	item := buildYucoreMediaCatalogModel("image-2k", YucoreMediaKindImage, model.YucoreMediaModelCapability{
-		Kind:        YucoreMediaKindImage,
-		Resolutions: []string{"2k"},
+		Kind:                     YucoreMediaKindImage,
+		Resolutions:              []string{"2k"},
+		SupportsCustomDimensions: true,
 		AspectRatios: []string{
 			"1:1", "16:9", "9:16",
 		},
@@ -239,6 +240,7 @@ func TestBuildYucoreMediaCatalogImageSizesExposeLowerTiers(t *testing.T) {
 
 	assert.Equal(t, []string{"1k", "2k"}, item.Resolutions)
 	assert.Equal(t, []string{"1k", "2k"}, item.Sizes)
+	assert.True(t, item.SupportsCustomDimensions)
 }
 
 func TestBuildYucoreMediaCatalogHidesProbeModels(t *testing.T) {

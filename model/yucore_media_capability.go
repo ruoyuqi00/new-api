@@ -72,6 +72,7 @@ type YucoreMediaModelCapability struct {
 	RequirePrimaryImageForMedia      bool                       `json:"require_primary_image_for_media,omitempty"`
 	SupportsAudio                    bool                       `json:"supports_audio,omitempty"`
 	SupportsSeed                     bool                       `json:"supports_seed,omitempty"`
+	SupportsCustomDimensions         bool                       `json:"supports_custom_dimensions,omitempty"`
 	PollIntervalSeconds              int                        `json:"poll_interval_seconds,omitempty"`
 	MaxPollDurationSeconds           int                        `json:"max_poll_duration_seconds,omitempty"`
 	MaxReferenceImages               int                        `json:"max_reference_images,omitempty"`

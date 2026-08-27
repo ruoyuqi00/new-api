@@ -139,6 +139,7 @@ export interface YucoreMediaModel {
   modes: string[]
   sizes?: string[]
   size_label?: string
+  supports_custom_dimensions?: boolean
   aspect_ratios?: string[]
   qualities?: string[]
   formats?: string[]

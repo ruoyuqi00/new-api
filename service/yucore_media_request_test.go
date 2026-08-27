@@ -117,6 +117,56 @@ func TestNormalizeYucoreMediaRequestAllowsResolutionBelowModelMaximum(t *testing
 	}
 }
 
+func TestNormalizeYucoreMediaRequestAllowsCustomImageDimensionsWithinCap(t *testing.T) {
+	capability := model.YucoreMediaModelCapability{
+		Kind:                     YucoreMediaKindImage,
+		Resolutions:              []string{"4k"},
+		SupportsCustomDimensions: true,
+	}
+	selected := YucoreMediaCatalogModel{
+		Id:           "custom-image-4k",
+		Kind:         YucoreMediaKindImage,
+		Modes:        []string{"text-to-image"},
+		Counts:       []int{1},
+		Resolutions:  []string{"1k", "2k", "4k"},
+		AspectRatios: []string{"1:1", "16:9", "9:16"},
+		capability:   &capability,
+	}
+
+	for _, requested := range []string{"650x1024", "1024X650", "4096x1"} {
+		normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{
+			Resolution:  requested,
+			AspectRatio: "16:9",
+		})
+		require.NoError(t, err, requested)
+		assert.Equal(t, strings.ToLower(strings.ReplaceAll(requested, "X", "x")), normalized.Resolution)
+		assert.Equal(t, "auto", normalized.AspectRatio)
+	}
+
+	for _, requested := range []string{"0x1024", "4097x1"} {
+		_, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{Resolution: requested})
+		require.Error(t, err, requested)
+		assert.Contains(t, err.Error(), "dimensions")
+	}
+	_, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{Resolution: "bad-size"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolution")
+}
+
+func TestNormalizeYucoreMediaRequestRejectsCustomImageDimensionsWhenUnsupported(t *testing.T) {
+	selected := YucoreMediaCatalogModel{
+		Id:          "fixed-image-1k",
+		Kind:        YucoreMediaKindImage,
+		Modes:       []string{"text-to-image"},
+		Counts:      []int{1},
+		Resolutions: []string{"1k"},
+	}
+
+	_, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{Resolution: "650x1024"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "custom image dimensions")
+}
+
 func TestNormalizeYucoreMediaRequestKeepsModelMaximumAsDefault(t *testing.T) {
 	for _, test := range []struct {
 		name        string

@@ -71,6 +71,7 @@ type YucoreMediaCatalogModel struct {
 	RequirePrimaryImageForMedia      bool                          `json:"require_primary_image_for_media,omitempty"`
 	SupportsAudio                    bool                          `json:"supports_audio"`
 	SupportsSeed                     bool                          `json:"supports_seed"`
+	SupportsCustomDimensions         bool                          `json:"supports_custom_dimensions,omitempty"`
 	InputLimits                      YucoreMediaCatalogInputLimits `json:"input_limits"`
 	Pricing                          YucoreMediaCatalogPricing     `json:"pricing"`
 	Async                            bool                          `json:"async"`
@@ -176,6 +177,7 @@ func buildYucoreMediaCatalogModel(modelID string, kind string, capability model.
 		item.RequirePrimaryImageForMedia = capability.RequirePrimaryImageForMedia
 		item.SupportsAudio = capability.SupportsAudio
 		item.SupportsSeed = capability.SupportsSeed
+		item.SupportsCustomDimensions = kind == YucoreMediaKindImage && capability.SupportsCustomDimensions
 		item.InputLimits.MaxReferenceImages = capability.ReferenceLimits.Images
 		item.InputLimits.MaxReferenceVideos = capability.ReferenceLimits.Videos
 		item.InputLimits.MaxReferenceAudios = capability.ReferenceLimits.Audios

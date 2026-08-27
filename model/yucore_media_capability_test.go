@@ -77,6 +77,24 @@ func TestCangyuanCatalogIncludesOnlyVerifiedGrokImagineModels(t *testing.T) {
 	assert.NotContains(t, catalog, "grok-imagine-edit")
 }
 
+func TestCangyuanImageCatalogSupportsCustomDimensionsForAllResolutionTiers(t *testing.T) {
+	catalog, err := loadCangyuanMediaCatalog()
+	require.NoError(t, err)
+
+	for _, modelID := range []string{
+		"gpt-image-2", "gpt-image-2-1k", "gpt-image-2-2k", "gpt-image-2-4k",
+		"nano-banana-pro-1k", "nano-banana-pro-2k", "nano-banana-pro-4k",
+		"nano-banana2-1k", "nano-banana2-2k", "nano-banana2-4k",
+	} {
+		capability, ok := catalog[modelID]
+		require.True(t, ok, modelID)
+		assert.Equal(t, "image", capability.Kind, modelID)
+		assert.True(t, capability.SupportsCustomDimensions, modelID)
+		assert.NotEmpty(t, capability.Resolutions, modelID)
+		assert.NotEmpty(t, capability.AspectRatios, modelID)
+	}
+}
+
 func TestCangyuanCatalogMatchesAuditedCostsAndCapabilities(t *testing.T) {
 	catalog, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)
