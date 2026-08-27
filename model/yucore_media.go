@@ -839,13 +839,14 @@ func buildYucoreMediaAssets(task *YucoreMediaTask) []YucoreMediaAsset {
 	}
 	assets := make([]YucoreMediaAsset, 0, count)
 	for i := 0; i < count; i++ {
+		width, height := 1024, 1024
 		asset := YucoreMediaAsset{
 			Id:       fmt.Sprintf("%s_asset_%d", task.TaskId, i),
 			Kind:     task.Kind,
 			Url:      fmt.Sprintf("/api/yucore/media/tasks/%s/assets/%d", task.TaskId, i),
 			Label:    fmt.Sprintf("%s result %d", task.ModelId, i+1),
-			Width:    1024,
-			Height:   1024,
+			Width:    width,
+			Height:   height,
 			MimeType: "image/svg+xml",
 			Metadata: map[string]any{"mock": true},
 		}
@@ -853,6 +854,8 @@ func buildYucoreMediaAssets(task *YucoreMediaTask) []YucoreMediaAsset {
 			asset.Label = fmt.Sprintf("%s preview", task.ModelId)
 			asset.Width = 1280
 			asset.Height = 720
+		} else {
+			asset.Width, asset.Height = yucoreMediaTaskImageDimensions(task)
 		}
 		assets = append(assets, asset)
 	}

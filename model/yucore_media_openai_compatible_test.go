@@ -186,6 +186,23 @@ func TestBuildOpenAICompatibleAsyncImagePayloadPreservesAspectRatio(t *testing.T
 	assert.Equal(t, "9:16", payload["aspect_ratio"])
 }
 
+func TestBuildOpenAICompatibleAsyncImagePayloadOmitsAspectForCustomDimensions(t *testing.T) {
+	task := &YucoreMediaTask{
+		Kind:        "image",
+		ModelId:     "image-model",
+		Prompt:      "a portrait subject",
+		Size:        "650x1024",
+		AspectRatio: "16:9",
+	}
+
+	payload := buildOpenAICompatibleAsyncPayload(task, YucoreMediaModelCapability{
+		AllowedParameters: []string{"size", "aspect_ratio", "ratio"},
+	})
+	assert.Equal(t, "650x1024", payload["size"])
+	assert.NotContains(t, payload, "aspect_ratio")
+	assert.NotContains(t, payload, "ratio")
+}
+
 func TestYucoreMediaImageDimensionsPreserveAspectRatioWithinResolutionCap(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -293,6 +310,22 @@ func TestAppendOpenAICompatibleImageAssetUsesRequestedDimensions(t *testing.T) {
 	require.Len(t, assets, 1)
 	assert.Equal(t, 1024, assets[0].Width)
 	assert.Equal(t, 576, assets[0].Height)
+}
+
+func TestBuildYucoreMediaAssetsUsesRequestedDimensions(t *testing.T) {
+	task := &YucoreMediaTask{
+		TaskId:      "mock-asset-dimensions",
+		Kind:        "image",
+		ModelId:     "image-model",
+		Size:        "650x1024",
+		AspectRatio: "auto",
+		Count:       1,
+	}
+
+	assets := buildYucoreMediaAssets(task)
+	require.Len(t, assets, 1)
+	assert.Equal(t, 650, assets[0].Width)
+	assert.Equal(t, 1024, assets[0].Height)
 }
 
 func newCanonicalOpenAICompatiblePayloadTask(t *testing.T, modelID string, references []YucoreMediaReferenceInput, metadata map[string]any) *YucoreMediaTask {

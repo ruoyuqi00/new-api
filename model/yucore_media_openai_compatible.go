@@ -242,6 +242,8 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 	if resolution == "" {
 		resolution = strings.TrimSpace(task.Size)
 	}
+	customImageDimensions := strings.EqualFold(strings.TrimSpace(task.Kind), "image") &&
+		strings.ContainsAny(resolution, "xX*×")
 	if resolution != "" && !strings.EqualFold(resolution, "auto") {
 		if strings.EqualFold(strings.TrimSpace(task.Kind), "image") {
 			resolution = normalizeYucoreMediaImageSize(resolution, task.AspectRatio)
@@ -252,9 +254,9 @@ func buildOpenAICompatibleAsyncPayload(task *YucoreMediaTask, capability YucoreM
 			payload["size"] = resolution
 		}
 	}
-	if task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && allowsParameter("aspect_ratio") {
+	if !customImageDimensions && task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && allowsParameter("aspect_ratio") {
 		payload["aspect_ratio"] = task.AspectRatio
-	} else if task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && allowsParameter("ratio") {
+	} else if !customImageDimensions && task.AspectRatio != "" && !strings.EqualFold(task.AspectRatio, "auto") && allowsParameter("ratio") {
 		payload["ratio"] = task.AspectRatio
 	}
 	if capability.ResponseFormat != "" && allowsParameter("response_format") {

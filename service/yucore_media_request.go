@@ -153,25 +153,25 @@ func NormalizeYucoreMediaRequest(selected YucoreMediaCatalogModel, options Yucor
 				normalized.Resolution = canonical
 			}
 		}
-	} else if normalized.Resolution != "" && len(resolutions) > 0 {
+	} else if normalized.Resolution != "" {
 		if selected.Kind == YucoreMediaKindImage {
-			customResolution, isCustom, customErr := normalizeYucoreMediaCustomImageDimensions(
-				normalized.Resolution,
-				resolutionCapabilities,
-				capability.SupportsCustomDimensions,
-			)
-			if customErr != nil {
-				return YucoreMediaRequestOptions{}, fmt.Errorf("model %s: %w", selected.Id, customErr)
-			}
-			if isCustom {
-				normalized.Resolution = customResolution
-				normalized.AspectRatio = "auto"
+			if canonical, ok := yucoreMediaCanonicalString(normalized.Resolution, resolutions); ok {
+				normalized.Resolution = canonical
 			} else {
-				canonical, ok := yucoreMediaCanonicalString(normalized.Resolution, resolutions)
-				if !ok {
+				customResolution, isCustom, customErr := normalizeYucoreMediaCustomImageDimensions(
+					normalized.Resolution,
+					resolutionCapabilities,
+					capability.SupportsCustomDimensions,
+				)
+				if customErr != nil {
+					return YucoreMediaRequestOptions{}, fmt.Errorf("model %s: %w", selected.Id, customErr)
+				}
+				if isCustom {
+					normalized.Resolution = customResolution
+					normalized.AspectRatio = "auto"
+				} else if len(resolutions) > 0 {
 					return YucoreMediaRequestOptions{}, fmt.Errorf("model %s does not support resolution %s", selected.Id, normalized.Resolution)
 				}
-				normalized.Resolution = canonical
 			}
 		} else {
 			canonical, ok := yucoreMediaCanonicalString(normalized.Resolution, resolutions)

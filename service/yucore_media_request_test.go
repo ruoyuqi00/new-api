@@ -167,6 +167,42 @@ func TestNormalizeYucoreMediaRequestRejectsCustomImageDimensionsWhenUnsupported(
 	assert.Contains(t, err.Error(), "custom image dimensions")
 }
 
+func TestNormalizeYucoreMediaRequestPreservesFixedImageDimensions(t *testing.T) {
+	selected := YucoreMediaCatalogModel{
+		Id:          "fixed-image-grid",
+		Kind:        YucoreMediaKindImage,
+		Modes:       []string{"text-to-image"},
+		Counts:      []int{1},
+		Resolutions: []string{"1024x1024", "1536x1024"},
+	}
+
+	normalized, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{
+		Resolution:  "1536x1024",
+		AspectRatio: "16:9",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "1536x1024", normalized.Resolution)
+	assert.Equal(t, "16:9", normalized.AspectRatio)
+}
+
+func TestNormalizeYucoreMediaRequestRejectsCustomImageDimensionsWithoutCap(t *testing.T) {
+	capability := model.YucoreMediaModelCapability{
+		Kind:                     YucoreMediaKindImage,
+		SupportsCustomDimensions: true,
+	}
+	selected := YucoreMediaCatalogModel{
+		Id:         "unbounded-image",
+		Kind:       YucoreMediaKindImage,
+		Modes:      []string{"text-to-image"},
+		Counts:     []int{1},
+		capability: &capability,
+	}
+
+	_, err := NormalizeYucoreMediaRequest(selected, YucoreMediaRequestOptions{Resolution: "650x1024"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolution cap")
+}
+
 func TestNormalizeYucoreMediaRequestKeepsModelMaximumAsDefault(t *testing.T) {
 	for _, test := range []struct {
 		name        string
