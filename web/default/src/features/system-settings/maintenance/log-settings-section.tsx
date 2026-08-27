@@ -234,11 +234,20 @@ export function LogSettingsSection({
         setLogCleanupTask(res.data)
         if (!isActiveLogCleanupTask(res.data)) {
           if (res.data.status === 'succeeded') {
-            const count =
-              res.data.result?.deleted_count ?? res.data.state?.processed ?? 0
+            const logCount =
+              res.data.result?.deleted_count ??
+              res.data.state?.processed_logs ??
+              res.data.state?.processed ??
+              0
+            const quotaDataCount =
+              res.data.result?.deleted_quota_data_count ?? 0
+            const count = logCount + quotaDataCount
             toast.success(
               count > 0
-                ? t('{{count}} log entries removed.', { count })
+                ? t('{{logCount}} logs and {{quotaDataCount}} usage records removed.', {
+                    logCount,
+                    quotaDataCount,
+                  })
                 : t('No log entries matched the selected time.')
             )
           } else if (res.data.status === 'failed') {
@@ -372,7 +381,7 @@ export function LogSettingsSection({
               <h4 className='text-sm font-medium'>{t('Clean history logs')}</h4>
               <p className='text-muted-foreground text-sm'>
                 {t(
-                  'Remove all log entries created before the selected timestamp.'
+                  'Remove historical logs and usage statistics before the selected timestamp.'
                 )}
               </p>
             </div>
@@ -411,7 +420,7 @@ export function LogSettingsSection({
                 </div>
                 <Progress value={logCleanupProgress} />
                 <div className='text-muted-foreground mt-2 text-xs'>
-                  {t('{{processed}} of {{total}} log entries processed.', {
+                  {t('{{processed}} of {{total}} historical records processed.', {
                     processed: logCleanupProcessed,
                     total: logCleanupTotal,
                   })}
@@ -588,12 +597,15 @@ export function LogSettingsSection({
             <AlertDialogDescription>
               {formattedPurgeDate
                 ? t(
-                    'This will permanently remove all log entries created before {{date}}.',
+                    'This removes logs and their usage statistics before {{date}} and adjusts cumulative user, token, and channel counters.',
                     { date: formattedPurgeDate }
                   )
                 : t(
-                    'This will permanently remove log entries before the selected timestamp.'
+                    'This removes logs and their usage statistics before the selected timestamp and adjusts cumulative user, token, and channel counters.'
                   )}{' '}
+              {t(
+                'Balances, orders, subscriptions, tasks, and configuration are not changed.'
+              )}{' '}
               {t('This action cannot be undone.')}
             </AlertDialogDescription>
           </AlertDialogHeader>

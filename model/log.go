@@ -793,7 +793,19 @@ func DeleteOldLogBatch(ctx context.Context, targetTimestamp int64, limit int) (i
 		return total, nil
 	}
 
-	result := LOG_DB.WithContext(ctx).Where("created_at < ?", targetTimestamp).Limit(limit).Delete(&Log{})
+	// Select IDs first so bounded deletion is portable to PostgreSQL, which
+	// does not support DELETE ... LIMIT, while retaining the same batch size on
+	// SQLite and MySQL.
+	var ids []int
+	if err := LOG_DB.WithContext(ctx).Model(&Log{}).
+		Where("created_at < ?", targetTimestamp).
+		Order("id asc").Limit(limit).Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result := LOG_DB.WithContext(ctx).Where("id IN ?", ids).Delete(&Log{})
 	if nil != result.Error {
 		return 0, result.Error
 	}

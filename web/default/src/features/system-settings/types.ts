@@ -103,10 +103,18 @@ export type LogCleanupTaskState = {
   processed: number
   progress: number
   remaining: number
+  total_logs?: number
+  processed_logs?: number
+  remaining_logs?: number
+  total_quota_data?: number
+  processed_quota_data?: number
+  remaining_quota_data?: number
+  usage_adjustment_applied?: boolean
 }
 
 export type LogCleanupTaskResult = {
   deleted_count: number
+  deleted_quota_data_count?: number
 }
 
 export type LogCleanupTask = SystemTask<

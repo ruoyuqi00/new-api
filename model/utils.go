@@ -39,6 +39,16 @@ func InitBatchUpdater() {
 	})
 }
 
+// FlushPendingUsageUpdates makes queued usage counters visible before a
+// historical log cleanup snapshots its deletion delta. It is intentionally
+// synchronous so the cleanup task cannot subtract from a stale counter while
+// the batch updater still holds consume updates in memory.
+func FlushPendingUsageUpdates() {
+	if common.BatchUpdateEnabled {
+		batchUpdate()
+	}
+}
+
 func addNewRecord(type_ int, id int, value int) {
 	batchUpdateLocks[type_].Lock()
 	defer batchUpdateLocks[type_].Unlock()

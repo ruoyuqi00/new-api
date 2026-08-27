@@ -40,12 +40,13 @@ Database operations use GORM and the existing ClickHouse branch. For regular dat
 ## Data Flow
 
 1. The admin selects a cutoff timestamp and starts the existing cleanup task.
-2. The task counts old rows in both tables and initializes separate totals.
-3. The task applies the persisted user/token/channel counter deltas in one main-DB transaction and marks them applied.
-4. Each pass removes up to the configured batch size from `logs` and `quota_data`, updates processed/remaining counts, and persists task state.
-5. Before aggregate deletion, the process removes cached aggregate entries whose bucket timestamp is before the cutoff. Entries at or after the cutoff stay available for the normal periodic flush.
-6. The task finishes with `{deleted_count, deleted_quota_data_count}`. Existing `deleted_count` remains the log count for old clients.
-7. The UI reports both counts and explains that balances are not changed; historical usage counters now reflect only retained logs.
+2. Pending asynchronous usage-counter updates are flushed before the historical snapshot, so counters and consume logs share the same boundary.
+3. The task counts old rows in both tables and initializes separate totals.
+4. The task applies the persisted user/token/channel counter deltas in one main-DB transaction and marks them applied.
+5. Each pass removes up to the configured batch size from `logs` and `quota_data`, updates processed/remaining counts, and persists task state.
+6. Before aggregate deletion, the process removes cached aggregate entries whose bucket timestamp is before the cutoff. Entries at or after the cutoff stay available for the normal periodic flush.
+7. The task finishes with `{deleted_count, deleted_quota_data_count}`. Existing `deleted_count` remains the log count for old clients.
+8. The UI reports both counts and explains that balances are not changed; historical usage counters now reflect only retained logs.
 
 ## Failure and Recovery
 

@@ -93,14 +93,26 @@ type LogCleanupPayload struct {
 }
 
 type LogCleanupState struct {
+	// The first four fields are retained for clients that already consume the
+	// task progress shape. They now describe both logs and quota_data rows.
 	Total     int64 `json:"total"`
 	Processed int64 `json:"processed"`
 	Progress  int   `json:"progress"`
 	Remaining int64 `json:"remaining"`
+
+	TotalLogs              int64                       `json:"total_logs,omitempty"`
+	ProcessedLogs          int64                       `json:"processed_logs,omitempty"`
+	RemainingLogs          int64                       `json:"remaining_logs,omitempty"`
+	TotalQuotaData         int64                       `json:"total_quota_data,omitempty"`
+	ProcessedQuotaData     int64                       `json:"processed_quota_data,omitempty"`
+	RemainingQuotaData     int64                       `json:"remaining_quota_data,omitempty"`
+	UsageDelta             *model.LogCleanupUsageDelta `json:"usage_delta,omitempty"`
+	UsageAdjustmentApplied bool                        `json:"usage_adjustment_applied,omitempty"`
 }
 
 type LogCleanupResult struct {
-	DeletedCount int64 `json:"deleted_count"`
+	DeletedCount          int64 `json:"deleted_count"`
+	DeletedQuotaDataCount int64 `json:"deleted_quota_data_count"`
 }
 
 var (
@@ -176,6 +188,33 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 	}
 	if activeTask != nil {
 		return activeTask, nil
+	}
+	// A failed task may already have applied its historical-counter snapshot.
+	// Resume that exact task rather than creating a second snapshot over the
+	// same logs. A different cutoff is rejected until the failed task completes.
+	latestTask, err := model.GetLatestSystemTask(model.SystemTaskTypeLogCleanup)
+	if err != nil {
+		return nil, err
+	}
+	if latestTask != nil && latestTask.Status == model.SystemTaskStatusFailed {
+		failedPayload := LogCleanupPayload{}
+		failedState := LogCleanupState{}
+		if err := latestTask.DecodePayload(&failedPayload); err != nil {
+			return nil, err
+		}
+		if err := latestTask.DecodeState(&failedState); err != nil {
+			return nil, err
+		}
+		if failedState.UsageAdjustmentApplied || failedState.UsageDelta != nil {
+			if failedPayload.TargetTimestamp != targetTimestamp {
+				return nil, errors.New("a failed log cleanup must be resumed before starting another cutoff")
+			}
+			requeued, requeueErr := model.RequeueFailedLogCleanupTask(latestTask.TaskID)
+			if requeueErr == nil {
+				notifySystemTaskRunner()
+			}
+			return requeued, requeueErr
+		}
 	}
 
 	payload := LogCleanupPayload{
@@ -348,20 +387,58 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 	if payload.BatchSize <= 0 {
 		payload.BatchSize = logCleanupBatchSize
 	}
+	model.FlushPendingUsageUpdates()
 
 	state := LogCleanupState{}
 	if err := task.DecodeState(&state); err != nil {
 		failSystemTask(task, runnerID, err)
 		return
 	}
+	// Tasks created by older versions only have the compatibility progress
+	// fields. Treat that state as log progress before adding quota_data work.
+	if state.TotalLogs == 0 && state.Total > 0 {
+		state.TotalLogs = state.Total
+		state.ProcessedLogs = state.Processed
+		state.RemainingLogs = state.Remaining
+	}
 
-	for {
-		remaining, err := model.CountOldLog(ctx, payload.TargetTimestamp)
+	if state.UsageDelta == nil {
+		delta, err := model.AggregateOldConsumeLogDeltas(ctx, payload.TargetTimestamp)
 		if err != nil {
 			failSystemTask(task, runnerID, err)
 			return
 		}
-		syncLogCleanupStateFromRemaining(&state, remaining)
+		state.UsageDelta = &delta
+		if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+			logSystemTaskLockError(ctx, task, err)
+			return
+		}
+	}
+	if !state.UsageAdjustmentApplied {
+		if err := model.ApplyLogCleanupUsageAdjustment(task.TaskID, runnerID, *state.UsageDelta); err != nil {
+			failSystemTask(task, runnerID, err)
+			return
+		}
+		state.UsageAdjustmentApplied = true
+		if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+			logSystemTaskLockError(ctx, task, err)
+			return
+		}
+	}
+	model.PruneQuotaDataCacheBefore(payload.TargetTimestamp)
+
+	for {
+		logRemaining, err := model.CountOldLog(ctx, payload.TargetTimestamp)
+		if err != nil {
+			failSystemTask(task, runnerID, err)
+			return
+		}
+		quotaDataRemaining, err := model.CountOldQuotaData(ctx, payload.TargetTimestamp)
+		if err != nil {
+			failSystemTask(task, runnerID, err)
+			return
+		}
+		syncLogCleanupStateFromRemaining(&state, logRemaining, quotaDataRemaining)
 		if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
 			logSystemTaskLockError(ctx, task, err)
 			return
@@ -375,7 +452,7 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 		// lock to expire. If a whole pass deletes nothing while rows remain, the
 		// rows cannot be removed and we fail instead of busy-looping.
 		progressed := false
-		for state.Remaining > 0 {
+		for state.RemainingLogs > 0 {
 			rowsAffected, err := model.DeleteOldLogBatch(ctx, payload.TargetTimestamp, payload.BatchSize)
 			if err != nil {
 				failSystemTask(task, runnerID, err)
@@ -385,17 +462,36 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 				break
 			}
 			progressed = true
-
-			state.Processed += rowsAffected
-			if state.Total < state.Processed {
-				state.Total = state.Processed
-			}
-			if state.Remaining > rowsAffected {
-				state.Remaining -= rowsAffected
+			state.ProcessedLogs += rowsAffected
+			if state.RemainingLogs > rowsAffected {
+				state.RemainingLogs -= rowsAffected
 			} else {
-				state.Remaining = 0
+				state.RemainingLogs = 0
 			}
-			state.Progress = logCleanupProgress(state.Processed, state.Total)
+			syncLogCleanupStateFromRemaining(&state, state.RemainingLogs, state.RemainingQuotaData)
+
+			if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+				logSystemTaskLockError(ctx, task, err)
+				return
+			}
+		}
+		for state.RemainingQuotaData > 0 {
+			rowsAffected, err := model.DeleteOldQuotaDataBatch(ctx, payload.TargetTimestamp, payload.BatchSize)
+			if err != nil {
+				failSystemTask(task, runnerID, err)
+				return
+			}
+			if rowsAffected == 0 {
+				break
+			}
+			progressed = true
+			state.ProcessedQuotaData += rowsAffected
+			if state.RemainingQuotaData > rowsAffected {
+				state.RemainingQuotaData -= rowsAffected
+			} else {
+				state.RemainingQuotaData = 0
+			}
+			syncLogCleanupStateFromRemaining(&state, state.RemainingLogs, state.RemainingQuotaData)
 
 			if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
 				logSystemTaskLockError(ctx, task, err)
@@ -411,6 +507,10 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 
 	state.Remaining = 0
 	state.Progress = 100
+	state.RemainingLogs = 0
+	state.RemainingQuotaData = 0
+	state.Processed = state.ProcessedLogs + state.ProcessedQuotaData
+	state.Total = state.TotalLogs + state.TotalQuotaData
 	if state.Total < state.Processed {
 		state.Total = state.Processed
 	}
@@ -419,27 +519,50 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 		return
 	}
 
-	result := LogCleanupResult{DeletedCount: state.Processed}
+	result := LogCleanupResult{
+		DeletedCount:          state.ProcessedLogs,
+		DeletedQuotaDataCount: state.ProcessedQuotaData,
+	}
 	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)
 	}
 }
 
-func syncLogCleanupStateFromRemaining(state *LogCleanupState, remaining int64) {
-	if state.Total <= 0 {
-		state.Total = remaining
-		state.Processed = 0
-	} else {
-		processedFromRemaining := state.Total - remaining
-		if processedFromRemaining > state.Processed {
-			state.Processed = processedFromRemaining
-		}
+func syncLogCleanupStateFromRemaining(state *LogCleanupState, logRemaining, quotaDataRemaining int64) {
+	if state.TotalLogs < state.ProcessedLogs+logRemaining {
+		state.TotalLogs = state.ProcessedLogs + logRemaining
 	}
-	if state.Processed < 0 {
-		state.Processed = 0
+	if state.TotalQuotaData < state.ProcessedQuotaData+quotaDataRemaining {
+		state.TotalQuotaData = state.ProcessedQuotaData + quotaDataRemaining
 	}
-	state.Remaining = remaining
+	// Reconcile progress from the durable totals as well as the in-memory
+	// counters. This recovers batches deleted just before a worker crashed and
+	// prevents a resumed task from reporting fewer deleted rows than it made.
+	if processedFromRemaining := state.TotalLogs - logRemaining; processedFromRemaining > state.ProcessedLogs {
+		state.ProcessedLogs = processedFromRemaining
+	}
+	if processedFromRemaining := state.TotalQuotaData - quotaDataRemaining; processedFromRemaining > state.ProcessedQuotaData {
+		state.ProcessedQuotaData = processedFromRemaining
+	}
+	if state.ProcessedLogs < 0 {
+		state.ProcessedLogs = 0
+	}
+	if state.ProcessedQuotaData < 0 {
+		state.ProcessedQuotaData = 0
+	}
+	state.RemainingLogs = maxInt64(logRemaining, 0)
+	state.RemainingQuotaData = maxInt64(quotaDataRemaining, 0)
+	state.Total = state.TotalLogs + state.TotalQuotaData
+	state.Processed = state.ProcessedLogs + state.ProcessedQuotaData
+	state.Remaining = state.RemainingLogs + state.RemainingQuotaData
 	state.Progress = logCleanupProgress(state.Processed, state.Total)
+}
+
+func maxInt64(value, minimum int64) int64 {
+	if value < minimum {
+		return minimum
+	}
+	return value
 }
 
 func logCleanupProgress(processed int64, total int64) int {

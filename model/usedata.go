@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -95,6 +96,48 @@ func LogQuotaData(params QuotaDataLogParams) {
 	CacheQuotaDataLock.Lock()
 	defer CacheQuotaDataLock.Unlock()
 	logQuotaDataCache(quotaData)
+}
+
+// PruneQuotaDataCacheBefore removes in-memory dashboard buckets that belong to
+// the same retention window as the persisted quota_data rows.
+func PruneQuotaDataCacheBefore(cutoff int64) {
+	CacheQuotaDataLock.Lock()
+	defer CacheQuotaDataLock.Unlock()
+	for key, quotaData := range CacheQuotaData {
+		if quotaData == nil || quotaData.CreatedAt < cutoff {
+			delete(CacheQuotaData, key)
+		}
+	}
+}
+
+func CountOldQuotaData(ctx context.Context, targetTimestamp int64) (int64, error) {
+	var total int64
+	if err := DB.WithContext(ctx).Model(&QuotaData{}).Where("created_at < ?", targetTimestamp).Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func DeleteOldQuotaDataBatch(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	// Select IDs first so the bounded batch has the same behavior on SQLite,
+	// MySQL, and PostgreSQL; DELETE ... LIMIT is not portable across them.
+	var ids []int
+	if err := DB.WithContext(ctx).Model(&QuotaData{}).
+		Where("created_at < ?", targetTimestamp).
+		Order("id asc").Limit(limit).Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result := DB.WithContext(ctx).Where("id IN ?", ids).Delete(&QuotaData{})
+	return result.RowsAffected, result.Error
 }
 
 func SaveQuotaDataCache() {

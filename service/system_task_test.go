@@ -97,6 +97,79 @@ func TestSystemTaskSchedulerCreatesWhenDueAndDedups(t *testing.T) {
 	require.Equal(t, int64(2), countSystemTasks(t, handler.taskType))
 }
 
+func TestRunLogCleanupTaskAdjustsCountersAndDeletesDashboardRows(t *testing.T) {
+	truncate(t)
+
+	now := common.GetTimestamp()
+	cutoff := now - 100
+	user := &model.User{Id: 501, Username: "cleanup-user", Password: "password", Status: common.UserStatusEnabled, Quota: 1000, UsedQuota: 300, RequestCount: 3}
+	require.NoError(t, model.DB.Create(user).Error)
+	require.NoError(t, model.DB.Create(&model.Token{Id: 511, UserId: user.Id, Key: "cleanup-token", Status: common.TokenStatusEnabled, UsedQuota: 300, RemainQuota: 700}).Error)
+	require.NoError(t, model.DB.Create(&model.Channel{Id: 521, Key: "cleanup-channel", Name: "cleanup", Status: common.ChannelStatusEnabled, UsedQuota: 300}).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId: user.Id, Username: user.Username, CreatedAt: cutoff - 1, Type: model.LogTypeConsume,
+		Quota: 300, PromptTokens: 100, CompletionTokens: 50, TokenId: 511, ChannelId: 521,
+	}).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId: user.Id, Username: user.Username, CreatedAt: cutoff - 2, Type: model.LogTypeError,
+		Quota: 999, TokenId: 511, ChannelId: 521,
+	}).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId: user.Id, Username: user.Username, CreatedAt: cutoff + 1, Type: model.LogTypeError,
+		Quota: 888, TokenId: 511, ChannelId: 521,
+	}).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId: user.Id, Username: user.Username, CreatedAt: cutoff, Type: model.LogTypeManage,
+		Quota: 777, TokenId: 511, ChannelId: 521,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.QuotaData{UserID: user.Id, Username: user.Username, CreatedAt: cutoff - 1, Count: 1, Quota: 300, TokenUsed: 150}).Error)
+
+	task, err := model.CreateSystemTask(model.SystemTaskTypeLogCleanup, LogCleanupPayload{TargetTimestamp: cutoff, BatchSize: 10}, LogCleanupState{})
+	require.NoError(t, err)
+	claimed, ok, err := model.ClaimSystemTask(task.ID, task.Type, "cleanup-runner", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, claimed)
+
+	runLogCleanupTask(context.Background(), claimed, "cleanup-runner")
+
+	var gotUser model.User
+	require.NoError(t, model.DB.First(&gotUser, user.Id).Error)
+	assert.Equal(t, 0, gotUser.UsedQuota)
+	assert.Equal(t, 2, gotUser.RequestCount)
+	assert.Equal(t, 1000, gotUser.Quota)
+	var gotToken model.Token
+	require.NoError(t, model.DB.First(&gotToken, 511).Error)
+	assert.Equal(t, 0, gotToken.UsedQuota)
+	assert.Equal(t, 700, gotToken.RemainQuota)
+	var gotChannel model.Channel
+	require.NoError(t, model.DB.First(&gotChannel, 521).Error)
+	assert.Equal(t, int64(0), gotChannel.UsedQuota)
+
+	var oldLogCount int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("created_at < ?", cutoff).Count(&oldLogCount).Error)
+	assert.Zero(t, oldLogCount)
+	var retainedLogCount int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("created_at >= ?", cutoff).Count(&retainedLogCount).Error)
+	assert.Equal(t, int64(2), retainedLogCount)
+	var oldQuotaDataCount int64
+	require.NoError(t, model.DB.Model(&model.QuotaData{}).Where("created_at < ?", cutoff).Count(&oldQuotaDataCount).Error)
+	assert.Zero(t, oldQuotaDataCount)
+	var retainedQuotaDataCount int64
+	require.NoError(t, model.DB.Model(&model.QuotaData{}).Where("created_at >= ?", cutoff).Count(&retainedQuotaDataCount).Error)
+	assert.Zero(t, retainedQuotaDataCount)
+
+	finished, err := model.GetSystemTaskByTaskID(task.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, finished)
+	assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+	var result LogCleanupResult
+	require.NoError(t, finished.DecodeState(&LogCleanupState{}))
+	require.NoError(t, common.UnmarshalJsonStr(finished.Result, &result))
+	assert.Equal(t, int64(2), result.DeletedCount)
+	assert.Equal(t, int64(1), result.DeletedQuotaDataCount)
+}
+
 func TestSystemTaskSchedulerSkipsDisabled(t *testing.T) {
 	truncate(t)
 

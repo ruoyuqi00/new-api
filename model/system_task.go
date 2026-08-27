@@ -406,6 +406,44 @@ func FinishSystemTask(taskID string, lockedBy string, status SystemTaskStatus, r
 	return ReleaseSystemTaskLock(taskID, lockedBy)
 }
 
+// RequeueFailedLogCleanupTask resumes a failed cleanup task without clearing
+// its persisted usage snapshot. This is important after a worker adjusted the
+// historical counters but failed while deleting rows: creating a new task
+// would snapshot the same logs and subtract those counters twice.
+func RequeueFailedLogCleanupTask(taskID string) (*SystemTask, error) {
+	if taskID == "" {
+		return nil, errors.New("task id is required")
+	}
+	var task SystemTask
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("task_id = ? AND type = ? AND status = ?", taskID, SystemTaskTypeLogCleanup, SystemTaskStatusFailed).First(&task).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("task_id = ?", taskID).Delete(&SystemTaskLock{}).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&SystemTask{}).Where("id = ? AND status = ?", task.ID, SystemTaskStatusFailed).Updates(map[string]any{
+			"status":     SystemTaskStatusPending,
+			"active_key": SystemTaskTypeLogCleanup,
+			"locked_by":  "",
+			"error":      "",
+			"result":     "",
+			"updated_at": common.GetTimestamp(),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("failed to requeue log cleanup task")
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &task, DB.Where("id = ?", task.ID).First(&task).Error
+}
+
 func (task *SystemTask) DecodePayload(v any) error {
 	return decodeSystemTaskJSONString(task.Payload, v)
 }

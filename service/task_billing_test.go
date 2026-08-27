@@ -662,6 +662,7 @@ func TestMain(m *testing.M) {
 		&model.Token{},
 		&model.Log{},
 		&model.Channel{},
+		&model.QuotaData{},
 		&model.TopUp{},
 		&model.SubscriptionPlan{},
 		&model.UserSubscription{},
@@ -691,6 +692,7 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM tokens")
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")
+		model.DB.Exec("DELETE FROM quota_data")
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM subscription_plans")
 		model.DB.Exec("DELETE FROM user_subscriptions")
