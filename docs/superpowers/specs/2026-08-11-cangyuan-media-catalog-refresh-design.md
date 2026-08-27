@@ -48,6 +48,16 @@ removed only from the Cangyuan channel because the current YuAPI price for these
 two routes is below this provider's cost and cheaper channels already serve
 them. Their global model prices and other channels are not changed.
 
+### 2026-08-28 capability metadata clarification
+
+The embedded capability catalog is shared by the media request validator; it
+does not create a channel ability or make a provider route eligible by itself.
+The `gpt-image-2`, `gpt-image-2-1k`, and `gpt-image-2-4k` capability rows may
+therefore be present so existing non-Cangyuan abilities can expose bounded
+custom dimensions. Cangyuan still exposes only the abilities explicitly
+configured on its channels, and no `upstream_cost` is inferred for the new
+rows until provider evidence is recorded.
+
 ### Stale and removed identifiers
 
 The production Cangyuan video configuration still contains `sora-2`,
