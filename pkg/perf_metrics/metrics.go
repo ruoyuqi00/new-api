@@ -31,7 +31,7 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 		return
 	}
 	if isTextRelayForAvailability(info) {
-		_ = groupavailability.Record(info.UsingGroup, success)
+		_ = groupavailability.RecordSample(info.UsingGroup, success)
 	}
 	now := time.Now()
 	hasTtft := info.IsStream && info.HasSendResponse()

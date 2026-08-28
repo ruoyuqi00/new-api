@@ -35,9 +35,28 @@ type Summary struct {
 
 func Record(group string, success bool) error {
 	group = strings.TrimSpace(group)
-	if group == "" || !ratio_setting.IsAvailabilityMonitoringEnabled(group) {
+	if group == "" {
 		return nil
 	}
+	if !ratio_setting.IsAvailabilityMonitoringEnabled(group) {
+		return nil
+	}
+	return recordSample(group, success)
+}
+
+// RecordSample stores an observed text request independently of the display
+// toggle. The controller still filters disabled groups from the API response;
+// retaining short-lived samples here prevents a stale process setting from
+// producing an empty card after monitoring is enabled.
+func RecordSample(group string, success bool) error {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return nil
+	}
+	return recordSample(group, success)
+}
+
+func recordSample(group string, success bool) error {
 	if !common.RedisEnabled || common.RDB == nil {
 		return nil
 	}
