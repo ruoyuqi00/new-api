@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -18,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 )
 
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
@@ -73,6 +75,16 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 				jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 				if err != nil {
 					return newAPIErrorFromParamOverride(err)
+				}
+			}
+			// A channel may need a tier alias override (for example 2k ->
+			// 2048x2048), but it must not replace an explicit client width and
+			// height with a square. Preserve that request-level contract after
+			// applying the channel override.
+			if info.ChannelType == constant.ChannelTypeOpenAI {
+				jsonData, err = preserveExplicitImageDimensions(jsonData, request)
+				if err != nil {
+					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 				}
 			}
 
@@ -159,4 +171,22 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
 	return nil
+}
+
+func preserveExplicitImageDimensions(jsonData []byte, request *dto.ImageRequest) ([]byte, error) {
+	if request == nil {
+		return jsonData, nil
+	}
+	value := strings.TrimSpace(request.Size)
+	value = strings.NewReplacer("*", "x", "X", "x", "×", "x").Replace(value)
+	parts := strings.Split(value, "x")
+	if len(parts) != 2 {
+		return jsonData, nil
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return jsonData, nil
+	}
+	return sjson.SetBytes(jsonData, "size", fmt.Sprintf("%dx%d", width, height))
 }
