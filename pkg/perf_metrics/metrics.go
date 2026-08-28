@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/groupavailability"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
+	"github.com/QuantumNous/new-api/types"
 )
 
 var hotBuckets sync.Map
@@ -29,7 +30,7 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	if info == nil {
 		return
 	}
-	if groupavailability.IsTextRequestPath(info.RequestURLPath) {
+	if isTextRelayForAvailability(info) {
 		_ = groupavailability.Record(info.UsingGroup, success)
 	}
 	now := time.Now()
@@ -56,6 +57,20 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 		OutputTokens: outputTokens,
 		GenerationMs: generationMs,
 	})
+}
+
+// isTextRelayForAvailability keeps Claude Messages monitoring active when a
+// conversion or retry path has rewritten the request URL before settlement.
+// Claude relay format is text-only; media and task formats remain excluded.
+func isTextRelayForAvailability(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	if groupavailability.IsTextRequestPath(info.RequestURLPath) {
+		return true
+	}
+	return info.RelayFormat == types.RelayFormatClaude ||
+		info.GetFinalRequestRelayFormat() == types.RelayFormatClaude
 }
 
 func Record(sample Sample) {
