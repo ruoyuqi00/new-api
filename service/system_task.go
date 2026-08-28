@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +21,8 @@ const (
 	// tasks created on other nodes and mark expired leases failed.
 	systemTaskRunnerIdleInterval = 15 * time.Second
 	systemTaskLockTTL            = 60 * time.Second
+	systemTaskLeaseRetryWindow   = 10 * time.Second
+	systemTaskLeaseRetryInterval = 2 * time.Second
 	logCleanupBatchSize          = 100
 
 	// systemTaskSchedulerInterval throttles how often the scheduler/stale-lock
@@ -134,7 +138,7 @@ func notifySystemTaskRunner() {
 
 func StartSystemTaskRunner() {
 	systemTaskRunnerOnce.Do(func() {
-		if !common.IsMasterNode {
+		if !systemTaskRunnerEnabled() {
 			return
 		}
 
@@ -175,6 +179,19 @@ func StartSystemTaskRunner() {
 			}
 		})
 	})
+}
+
+// systemTaskRunnerEnabled prevents retired master containers from competing
+// with the active node. Existing single-node deployments keep the historical
+// default; multi-instance deployments can designate exactly one runner with
+// SYSTEM_TASK_RUNNER_NODE_NAME and disable all other nodes with
+// SYSTEM_TASK_RUNNER_ENABLED=false.
+func systemTaskRunnerEnabled() bool {
+	if !common.IsMasterNode || !common.GetEnvOrDefaultBool("SYSTEM_TASK_RUNNER_ENABLED", true) {
+		return false
+	}
+	designatedNode := strings.TrimSpace(os.Getenv("SYSTEM_TASK_RUNNER_NODE_NAME"))
+	return designatedNode == "" || designatedNode == common.NodeName
 }
 
 func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
@@ -362,7 +379,10 @@ func runWithLeaseHeartbeat(task *model.SystemTask, runnerID string, fn func(ctx 
 			case <-done:
 				return
 			case <-ticker.C:
-				if err := model.RenewSystemTaskLock(task.TaskID, runnerID, systemTaskLockUntil()); err != nil {
+				err := retryLeaseRenewal(func() error {
+					return model.RenewSystemTaskLock(task.TaskID, runnerID, systemTaskLockUntil())
+				}, systemTaskLeaseRetryWindow, systemTaskLeaseRetryInterval)
+				if err != nil {
 					cancel()
 					return
 				}
@@ -372,6 +392,40 @@ func runWithLeaseHeartbeat(task *model.SystemTask, runnerID string, fn func(ctx 
 
 	fn(ctx)
 	close(done)
+}
+
+// retryLeaseRenewal absorbs short database outages without immediately
+// cancelling a long-running task. A lock-loss error is terminal because
+// another runner may already own the lease.
+func retryLeaseRenewal(renew func() error, retryWindow, retryInterval time.Duration) error {
+	if renew == nil {
+		return errors.New("lease renewal function is required")
+	}
+	if retryWindow <= 0 {
+		return renew()
+	}
+	if retryInterval <= 0 {
+		retryInterval = time.Millisecond
+	}
+
+	deadline := time.Now().Add(retryWindow)
+	var lastErr error
+	for {
+		lastErr = renew()
+		if lastErr == nil || errors.Is(lastErr, model.ErrSystemTaskLockLost) {
+			return lastErr
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return lastErr
+		}
+		wait := retryInterval
+		if wait > remaining {
+			wait = remaining
+		}
+		timer := time.NewTimer(wait)
+		<-timer.C
+	}
 }
 
 func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID string) {

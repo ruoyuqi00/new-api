@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -95,6 +96,38 @@ func TestSystemTaskSchedulerCreatesWhenDueAndDedups(t *testing.T) {
 
 	runSystemTaskScheduler()
 	require.Equal(t, int64(2), countSystemTasks(t, handler.taskType))
+}
+
+func TestSystemTaskRunnerHonorsExplicitDesignatedNode(t *testing.T) {
+	previousMaster := common.IsMasterNode
+	previousNodeName := common.NodeName
+	t.Cleanup(func() {
+		common.IsMasterNode = previousMaster
+		common.NodeName = previousNodeName
+	})
+
+	common.IsMasterNode = true
+	t.Setenv("SYSTEM_TASK_RUNNER_ENABLED", "true")
+	t.Setenv("SYSTEM_TASK_RUNNER_NODE_NAME", "yuapi-primary")
+	common.NodeName = "yuapi-primary"
+	assert.True(t, systemTaskRunnerEnabled())
+
+	common.NodeName = "stale-candidate"
+	assert.False(t, systemTaskRunnerEnabled())
+}
+
+func TestLeaseRenewalRetriesTransientDatabaseFailure(t *testing.T) {
+	attempts := 0
+	err := retryLeaseRenewal(func() error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("temporary database error")
+		}
+		return nil
+	}, 50*time.Millisecond, time.Millisecond)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, attempts)
 }
 
 func TestRunLogCleanupTaskAdjustsCountersAndDeletesDashboardRows(t *testing.T) {
