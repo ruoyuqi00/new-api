@@ -25,8 +25,10 @@ import (
 )
 
 type ModelRequest struct {
-	Model string `json:"model"`
-	Group string `json:"group,omitempty"`
+	Model       string `json:"model"`
+	Group       string `json:"group,omitempty"`
+	Size        string `json:"size,omitempty"`
+	AspectRatio string `json:"aspect_ratio,omitempty"`
 }
 
 func Distribute() func(c *gin.Context) {
@@ -86,6 +88,7 @@ func Distribute() func(c *gin.Context) {
 				}
 				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+				imageRequirements := imageSelectionRequirementsForRequest(c.Request.URL.Path, modelRequest)
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
 					playgroundRequest := &dto.PlayGroundRequest{}
@@ -107,40 +110,45 @@ func Distribute() func(c *gin.Context) {
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
 					affinityTemporarilyUnavailable := false
+					affinityRequestIncompatible := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
 						channelSupportsRequestPath(preferred, c.Request.URL.Path) {
-						if usingGroup == "auto" {
-							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-							autoGroups := service.GetUserAutoGroup(userGroup)
-							for _, g := range autoGroups {
-								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
-									if service.IsChannelPoolTemporarilyUnavailableWithContext(c, preferred, g, modelRequest.Model) {
-										affinityTemporarilyUnavailable = true
-										continue
+						if imageRequirements != nil && !model.ChannelSupportsImageRequest(preferred, modelRequest.Model, *imageRequirements) {
+							affinityRequestIncompatible = true
+						} else {
+							if usingGroup == "auto" {
+								userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+								autoGroups := service.GetUserAutoGroup(userGroup)
+								for _, g := range autoGroups {
+									if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+										if service.IsChannelPoolTemporarilyUnavailableWithContext(c, preferred, g, modelRequest.Model) {
+											affinityTemporarilyUnavailable = true
+											continue
+										}
+										selectGroup = g
+										common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+										channel = preferred
+										affinityUsable = true
+										selectedByAffinity = true
+										service.MarkChannelAffinityUsed(c, g, preferred.Id)
+										break
 									}
-									selectGroup = g
-									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+								}
+							} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+								if service.IsChannelPoolTemporarilyUnavailableWithContext(c, preferred, usingGroup, modelRequest.Model) {
+									affinityTemporarilyUnavailable = true
+								} else {
 									channel = preferred
+									selectGroup = usingGroup
 									affinityUsable = true
 									selectedByAffinity = true
-									service.MarkChannelAffinityUsed(c, g, preferred.Id)
-									break
+									service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 								}
-							}
-						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-							if service.IsChannelPoolTemporarilyUnavailableWithContext(c, preferred, usingGroup, modelRequest.Model) {
-								affinityTemporarilyUnavailable = true
-							} else {
-								channel = preferred
-								selectGroup = usingGroup
-								affinityUsable = true
-								selectedByAffinity = true
-								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 							}
 						}
 					}
-					if !affinityUsable && !affinityTemporarilyUnavailable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
+					if !affinityUsable && !affinityTemporarilyUnavailable && !affinityRequestIncompatible && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
 						service.ClearCurrentChannelAffinityCache(c)
 					}
 				}
@@ -165,11 +173,12 @@ func Distribute() func(c *gin.Context) {
 
 				if channel == nil {
 					retryParam := &service.RetryParam{
-						Ctx:         c,
-						ModelName:   modelRequest.Model,
-						TokenGroup:  usingGroup,
-						RequestPath: c.Request.URL.Path,
-						Retry:       common.GetPointer(0),
+						Ctx:               c,
+						ModelName:         modelRequest.Model,
+						TokenGroup:        usingGroup,
+						RequestPath:       c.Request.URL.Path,
+						Retry:             common.GetPointer(0),
+						ImageRequirements: imageRequirements,
 					}
 					poolFullSeen := false
 					setupRejectedSeen := false
@@ -307,12 +316,20 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 		return nil, errors.New("invalid JSON request body")
 	}
 
-	values := gjson.GetManyBytes(requestBody, "model", "group")
+	values := gjson.GetManyBytes(requestBody, "model", "group", "size", "aspect_ratio")
 	model, err := getJSONStringValue(values[0], "model")
 	if err != nil {
 		return nil, err
 	}
 	group, err := getJSONStringValue(values[1], "group")
+	if err != nil {
+		return nil, err
+	}
+	size, err := getJSONStringValue(values[2], "size")
+	if err != nil {
+		return nil, err
+	}
+	aspectRatio, err := getJSONStringValue(values[3], "aspect_ratio")
 	if err != nil {
 		return nil, err
 	}
@@ -323,9 +340,21 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	c.Request.Body = io.NopCloser(storage)
 
 	return &ModelRequest{
-		Model: model,
-		Group: group,
+		Model:       model,
+		Group:       group,
+		Size:        size,
+		AspectRatio: aspectRatio,
 	}, nil
+}
+
+func imageSelectionRequirementsForRequest(path string, request *ModelRequest) *model.ImageSelectionRequirements {
+	if request == nil || (!strings.HasPrefix(path, "/v1/images/generations") && !strings.HasPrefix(path, "/v1/images/edits")) {
+		return nil
+	}
+	return &model.ImageSelectionRequirements{
+		Size:        request.Size,
+		AspectRatio: request.AspectRatio,
+	}
 }
 
 func getJSONStringValue(result gjson.Result, field string) (string, error) {
@@ -399,7 +428,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 				return nil, false, err
 			}
 			if req != nil {
-				modelRequest.Model = req.Model
+				modelRequest = *req
 			}
 		} else if c.Request.Method == http.MethodGet {
 			relayMode = relayconstant.RelayModeVideoFetchByID
@@ -414,7 +443,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			if err != nil {
 				return nil, false, err
 			}
-			modelRequest.Model = req.Model
+			modelRequest = *req
 			relayMode = relayconstant.RelayModeVideoSubmit
 		} else if c.Request.Method == http.MethodGet {
 			relayMode = relayconstant.RelayModeVideoFetchByID
@@ -437,7 +466,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		if err != nil {
 			return nil, false, err
 		}
-		modelRequest.Model = req.Model
+		modelRequest = *req
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01
@@ -460,8 +489,8 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
 			req, err := getModelFromRequest(c)
-			if err == nil && req.Model != "" {
-				modelRequest.Model = req.Model
+			if err == nil && req != nil {
+				modelRequest = *req
 			}
 		}
 	}
@@ -493,8 +522,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		if err != nil {
 			return nil, false, err
 		}
-		modelRequest.Model = req.Model
-		modelRequest.Group = req.Group
+		modelRequest = *req
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 

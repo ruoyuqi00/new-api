@@ -3,8 +3,19 @@ package service
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestRetryParamPropagatesImageSelectionRequirements(t *testing.T) {
+	retry := 0
+	requirements := &model.ImageSelectionRequirements{Size: "1k", AspectRatio: "2:3"}
+	param := RetryParam{Retry: &retry, ModelName: "gpt-image-2-1k", ImageRequirements: requirements}
+
+	options := param.ChannelSelectionOptions()
+	assert.Equal(t, requirements, options.ImageRequirements)
+	assert.Equal(t, "gpt-image-2-1k", options.ImageModelName)
+}
 
 func TestRetryParamExcludesFailedChannelWithoutSkippingNextPriority(t *testing.T) {
 	retry := 0

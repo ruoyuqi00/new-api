@@ -29,7 +29,9 @@ var (
 )
 
 type ChannelSelectionOptions struct {
-	SkipChannelIDs map[int]struct{}
+	SkipChannelIDs    map[int]struct{}
+	ImageRequirements *ImageSelectionRequirements
+	ImageModelName    string
 }
 
 const (
@@ -242,13 +244,19 @@ func CooldownChannelPool(channelID int, group string, modelName string, seconds 
 }
 
 func filterChannelsBySelectionOptions(channels []int, options ChannelSelectionOptions) []int {
-	if len(channels) == 0 || len(options.SkipChannelIDs) == 0 {
+	if len(channels) == 0 || (len(options.SkipChannelIDs) == 0 && options.ImageRequirements == nil) {
 		return channels
 	}
 	filtered := make([]int, 0, len(channels))
 	for _, channelID := range channels {
 		if _, skip := options.SkipChannelIDs[channelID]; skip {
 			continue
+		}
+		if options.ImageRequirements != nil {
+			channel, ok := channelsIDM[channelID]
+			if ok && !ChannelSupportsImageRequest(channel, options.ImageModelName, *options.ImageRequirements) {
+				continue
+			}
 		}
 		filtered = append(filtered, channelID)
 	}
@@ -274,13 +282,39 @@ func filterChannelsByChannelPoolAvailability(channels []int, group string, model
 }
 
 func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelectionOptions) []Ability {
-	if len(abilities) == 0 || len(options.SkipChannelIDs) == 0 {
+	if len(abilities) == 0 || (len(options.SkipChannelIDs) == 0 && options.ImageRequirements == nil) {
 		return abilities
+	}
+	channelByID := make(map[int]*Channel)
+	if options.ImageRequirements != nil {
+		channelIDs := make([]int, 0, len(abilities))
+		seen := make(map[int]struct{}, len(abilities))
+		for _, ability := range abilities {
+			if _, ok := seen[ability.ChannelId]; ok {
+				continue
+			}
+			seen[ability.ChannelId] = struct{}{}
+			channelIDs = append(channelIDs, ability.ChannelId)
+		}
+		var channels []*Channel
+		if err := DB.Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+			common.SysError(fmt.Sprintf("image capability query failed: err=%v", err))
+			return abilities
+		}
+		for _, channel := range channels {
+			channelByID[channel.Id] = channel
+		}
 	}
 	filtered := make([]Ability, 0, len(abilities))
 	for _, ability := range abilities {
 		if _, skip := options.SkipChannelIDs[ability.ChannelId]; skip {
 			continue
+		}
+		if options.ImageRequirements != nil {
+			channel, ok := channelByID[ability.ChannelId]
+			if ok && !ChannelSupportsImageRequest(channel, options.ImageModelName, *options.ImageRequirements) {
+				continue
+			}
 		}
 		filtered = append(filtered, ability)
 	}

@@ -51,6 +51,7 @@ type ChannelOtherSettings struct {
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
 	ChannelPoolConcurrencyLimit           int                   `json:"channel_pool_concurrency_limit,omitempty"`
 	ChannelPoolCooldownSeconds            int                   `json:"channel_pool_cooldown_seconds,omitempty"`
+	ImageDimensionSupport                 string                `json:"image_dimension_support,omitempty"` // auto, any, ratio, square, pending
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

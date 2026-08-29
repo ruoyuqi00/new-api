@@ -18,6 +18,7 @@ type RetryParam struct {
 	ModelName         string
 	RequestPath       string
 	Retry             *int
+	ImageRequirements *model.ImageSelectionRequirements
 	resetNextTry      bool
 	skippedChannelIDs map[int]struct{}
 	providerChannelID int
@@ -79,7 +80,9 @@ func (p *RetryParam) SkipChannelID(channelID int) {
 
 func (p *RetryParam) ChannelSelectionOptions() model.ChannelSelectionOptions {
 	return model.ChannelSelectionOptions{
-		SkipChannelIDs: p.skippedChannelIDs,
+		SkipChannelIDs:    p.skippedChannelIDs,
+		ImageRequirements: p.ImageRequirements,
+		ImageModelName:    p.ModelName,
 	}
 }
 
