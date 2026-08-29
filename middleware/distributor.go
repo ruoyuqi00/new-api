@@ -351,6 +351,9 @@ func imageSelectionRequirementsForRequest(path string, request *ModelRequest) *m
 	if request == nil || (!strings.HasPrefix(path, "/v1/images/generations") && !strings.HasPrefix(path, "/v1/images/edits")) {
 		return nil
 	}
+	if strings.TrimSpace(request.Size) == "" && strings.TrimSpace(request.AspectRatio) == "" {
+		return nil
+	}
 	return &model.ImageSelectionRequirements{
 		Size:        request.Size,
 		AspectRatio: request.AspectRatio,
