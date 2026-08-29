@@ -77,12 +77,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 					return newAPIErrorFromParamOverride(err)
 				}
 			}
-			// A channel may need a tier alias override (for example 2k ->
-			// 2048x2048), but it must not replace an explicit client width and
-			// height with a square. Preserve that request-level contract after
-			// applying the channel override.
+			// Preserve explicit dimensions and tier-plus-ratio requests after
+			// channel defaults are applied, so a square fallback cannot replace
+			// the client's requested shape.
 			if info.ChannelType == constant.ChannelTypeOpenAI {
-				jsonData, err = preserveExplicitImageDimensions(jsonData, request)
+				jsonData, err = preserveRequestedImageDimensions(jsonData, request)
 				if err != nil {
 					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 				}
@@ -173,20 +172,52 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	return nil
 }
 
-func preserveExplicitImageDimensions(jsonData []byte, request *dto.ImageRequest) ([]byte, error) {
+func preserveRequestedImageDimensions(jsonData []byte, request *dto.ImageRequest) ([]byte, error) {
 	if request == nil {
 		return jsonData, nil
 	}
 	value := strings.TrimSpace(request.Size)
 	value = strings.NewReplacer("*", "x", "X", "x", "×", "x").Replace(value)
 	parts := strings.Split(value, "x")
-	if len(parts) != 2 {
+	if len(parts) == 2 {
+		width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+		height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+			return jsonData, nil
+		}
+		return sjson.SetBytes(jsonData, "size", fmt.Sprintf("%dx%d", width, height))
+	}
+
+	if request.AspectRatio == nil {
 		return jsonData, nil
 	}
-	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
-	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+	maxEdge := 0
+	switch strings.ToLower(value) {
+	case "1k", "1024":
+		maxEdge = 1024
+	case "2k", "2048":
+		maxEdge = 2048
+	case "4k", "4096":
+		maxEdge = 4096
+	default:
 		return jsonData, nil
+	}
+
+	ratioParts := strings.Split(strings.TrimSpace(*request.AspectRatio), ":")
+	if len(ratioParts) != 2 {
+		return jsonData, nil
+	}
+	widthRatio, widthErr := strconv.Atoi(strings.TrimSpace(ratioParts[0]))
+	heightRatio, heightErr := strconv.Atoi(strings.TrimSpace(ratioParts[1]))
+	if widthErr != nil || heightErr != nil || widthRatio <= 0 || heightRatio <= 0 || widthRatio == heightRatio {
+		return jsonData, nil
+	}
+
+	width, height := maxEdge, maxEdge
+	if widthRatio > heightRatio {
+		height = max(1, (maxEdge*heightRatio+widthRatio/2)/widthRatio)
+	} else {
+		width = max(1, (maxEdge*widthRatio+heightRatio/2)/heightRatio)
 	}
 	return sjson.SetBytes(jsonData, "size", fmt.Sprintf("%dx%d", width, height))
 }

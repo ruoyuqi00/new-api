@@ -8,12 +8,33 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/gin-gonic/gin"
 )
+
+func TestConvertImageRequestPreservesExplicitAspectRatio(t *testing.T) {
+	var request dto.ImageRequest
+	require.NoError(t, common.Unmarshal([]byte(`{"model":"image-01","prompt":"portrait","size":"1k","aspect_ratio":"2:3"}`), &request))
+
+	converted, err := (&Adaptor{}).ConvertImageRequest(
+		gin.CreateTestContextOnly(httptest.NewRecorder(), gin.New()),
+		&relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeImagesGenerations},
+		request,
+	)
+	require.NoError(t, err)
+
+	payload, err := common.Marshal(converted)
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, common.Unmarshal(payload, &fields))
+	assert.Equal(t, "2:3", fields["aspect_ratio"])
+}
 
 func TestGetRequestURLForImageGeneration(t *testing.T) {
 	t.Parallel()

@@ -3,8 +3,19 @@ package dto
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/require"
 )
+
+func TestImageRequestRoundTripPreservesAspectRatio(t *testing.T) {
+	input := []byte(`{"model":"gpt-image-2-1k","prompt":"portrait","size":"1k","aspect_ratio":"2:3"}`)
+	var request ImageRequest
+	require.NoError(t, common.Unmarshal(input, &request))
+
+	output, err := common.Marshal(request)
+	require.NoError(t, err)
+	require.JSONEq(t, string(input), string(output))
+}
 
 func TestImageRequestGPTImage2PriceRatio(t *testing.T) {
 	tests := []struct {
