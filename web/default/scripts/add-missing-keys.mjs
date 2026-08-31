@@ -27,6 +27,13 @@ function stableStringify(obj) {
 
 const newKeys = {
   en: {
+    'Any aspect ratio': 'Any aspect ratio',
+    'Automatic detection': 'Automatic detection',
+    'Controls whether non-square image requests can use this channel.':
+      'Controls whether non-square image requests can use this channel.',
+    'Image dimension support': 'Image dimension support',
+    'Pending verification': 'Pending verification',
+    'Square only': 'Square only',
     'Affiliate Credit Rebate': 'Affiliate Credit Rebate',
     'Affiliate Rebate Percentage': 'Affiliate Rebate Percentage',
     'Earn {{percentage}} on eligible referral credits.':
@@ -66,6 +73,13 @@ const newKeys = {
     Unavailable: 'Unavailable',
   },
   zh: {
+    'Any aspect ratio': '任意宽高比',
+    'Automatic detection': '自动检测',
+    'Controls whether non-square image requests can use this channel.':
+      '控制非正方形图像请求是否可使用此渠道。',
+    'Image dimension support': '图像尺寸能力',
+    'Pending verification': '待验证',
+    'Square only': '仅正方形',
     'Affiliate Credit Rebate': '邀请充值返利',
     'Affiliate Rebate Percentage': '邀请返利比例',
     'Earn {{percentage}} on eligible referral credits.':
@@ -105,6 +119,13 @@ const newKeys = {
     Unavailable: '不可用',
   },
   fr: {
+    'Any aspect ratio': "Tout rapport d'aspect",
+    'Automatic detection': 'Détection automatique',
+    'Controls whether non-square image requests can use this channel.':
+      "Détermine si les requêtes d'images non carrées peuvent utiliser ce canal.",
+    'Image dimension support': "Prise en charge des dimensions d'image",
+    'Pending verification': 'Vérification en attente',
+    'Square only': 'Carré uniquement',
     'Affiliate Credit Rebate': "Remise d'affiliation sur les crédits",
     'Affiliate Rebate Percentage': "Pourcentage de remise d'affiliation",
     'Earn {{percentage}} on eligible referral credits.':
@@ -123,9 +144,10 @@ const newKeys = {
     'User-specific group ratios': 'Ratios de groupe par utilisateur',
     'Configure a ratio for one user without changing their group permissions.':
       'Configurez un ratio pour un utilisateur sans modifier ses permissions de groupe.',
-    'Group availability monitoring': 'Surveillance de la disponibilité des groupes',
+    'Group availability monitoring':
+      'Surveillance de la disponibilité des groupes',
     'Show request success availability only; latency and upstream details are never exposed.':
-      "Affiche uniquement la réussite récente des requêtes ; la latence et les détails amont ne sont jamais exposés.",
+      'Affiche uniquement la réussite récente des requêtes ; la latence et les détails amont ne sont jamais exposés.',
     'JSON map of group identifiers to availability monitoring switches.':
       'Carte JSON des groupes vers leurs interrupteurs de surveillance de disponibilité.',
     'Nested JSON: user id → target group → ratio.':
@@ -144,6 +166,13 @@ const newKeys = {
     Unavailable: 'Indisponible',
   },
   ja: {
+    'Any aspect ratio': '任意のアスペクト比',
+    'Automatic detection': '自動検出',
+    'Controls whether non-square image requests can use this channel.':
+      '正方形以外の画像リクエストでこのチャネルを使用できるかを制御します。',
+    'Image dimension support': '画像サイズ対応',
+    'Pending verification': '確認待ち',
+    'Square only': '正方形のみ',
     'Affiliate Credit Rebate': '紹介クレジット還元',
     'Affiliate Rebate Percentage': '紹介還元率',
     'Earn {{percentage}} on eligible referral credits.':
@@ -183,6 +212,13 @@ const newKeys = {
     Unavailable: '利用不可',
   },
   ru: {
+    'Any aspect ratio': 'Любое соотношение сторон',
+    'Automatic detection': 'Автоматическое определение',
+    'Controls whether non-square image requests can use this channel.':
+      'Определяет, можно ли использовать этот канал для запросов неквадратных изображений.',
+    'Image dimension support': 'Поддержка размеров изображений',
+    'Pending verification': 'Ожидает проверки',
+    'Square only': 'Только квадратные',
     'Affiliate Credit Rebate': 'Партнёрское вознаграждение за пополнение',
     'Affiliate Rebate Percentage': 'Процент партнёрского вознаграждения',
     'Earn {{percentage}} on eligible referral credits.':
@@ -222,6 +258,13 @@ const newKeys = {
     Unavailable: 'Недоступно',
   },
   vi: {
+    'Any aspect ratio': 'Mọi tỷ lệ khung hình',
+    'Automatic detection': 'Tự động phát hiện',
+    'Controls whether non-square image requests can use this channel.':
+      'Kiểm soát việc yêu cầu ảnh không vuông có thể sử dụng kênh này hay không.',
+    'Image dimension support': 'Hỗ trợ kích thước ảnh',
+    'Pending verification': 'Đang chờ xác minh',
+    'Square only': 'Chỉ hình vuông',
     'Affiliate Credit Rebate': 'Hoàn thưởng tín dụng giới thiệu',
     'Affiliate Rebate Percentage': 'Tỷ lệ hoàn thưởng giới thiệu',
     'Earn {{percentage}} on eligible referral credits.':

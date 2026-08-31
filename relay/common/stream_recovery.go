@@ -58,6 +58,7 @@ type StreamRecovery struct {
 	billingBasis StreamBillingBasis
 	drainedBytes int64
 	finished     bool
+	channelID    int
 
 	upstreamContext    context.Context
 	upstreamCancel     context.CancelFunc
@@ -128,9 +129,14 @@ func (info *RelayInfo) EnableStreamRecovery() {
 	if info == nil || !constant.StreamUsageDrainEnabled || info.StreamRecovery != nil {
 		return
 	}
+	channelID := 0
+	if info.ChannelMeta != nil {
+		channelID = info.ChannelMeta.ChannelId
+	}
 	info.StreamRecovery = &StreamRecovery{
 		enabled:    true,
 		usageState: StreamUsageStatePending,
+		channelID:  channelID,
 	}
 }
 
@@ -182,10 +188,14 @@ func (info *RelayInfo) MarkStreamAccepted() {
 	recovery := info.StreamRecovery
 	recovery.mu.Lock()
 	hook := recovery.testTransitionHook
+	upstreamContext := recovery.upstreamContext
 	if !recovery.finished {
 		recovery.accepted = true
 	}
 	recovery.mu.Unlock()
+	if upstreamContext != nil && upstreamContext.Err() != nil {
+		recovery.tryDetach()
+	}
 	if hook != nil {
 		hook(streamRecoveryTransitionAccept)
 	}
@@ -195,21 +205,30 @@ func (info *RelayInfo) TryDetachStream() bool {
 	if info == nil || info.StreamRecovery == nil {
 		return false
 	}
+	return info.StreamRecovery.tryDetach()
+}
 
-	recovery := info.StreamRecovery
+func (recovery *StreamRecovery) tryDetach() bool {
 	recovery.mu.Lock()
-	if !recovery.enabled || !recovery.accepted || recovery.detached || recovery.finished {
+	if !recovery.enabled || !recovery.accepted || recovery.finished {
 		recovery.mu.Unlock()
 		return false
 	}
-	channelID := 0
-	if info.ChannelMeta != nil {
-		channelID = info.ChannelMeta.ChannelId
-	}
-	release := streamRecoveryAdmission.tryAcquire(channelID)
-	if release == nil {
+	if recovery.detached {
 		recovery.mu.Unlock()
-		info.MarkStreamUsageUnknown(StreamDrainResultCapacity)
+		return true
+	}
+	release := streamRecoveryAdmission.tryAcquire(recovery.channelID)
+	if release == nil {
+		recovery.usageState = StreamUsageStateUnknown
+		recovery.drainResult = StreamDrainResultCapacity
+		hook := recovery.testTransitionHook
+		cleanup := recovery.finishLocked()
+		recovery.mu.Unlock()
+		if hook != nil {
+			hook(streamRecoveryTransitionUnknown)
+		}
+		cleanup.run()
 		return false
 	}
 
@@ -391,8 +410,13 @@ func (info *RelayInfo) SetStreamBillingBasis(basis StreamBillingBasis) {
 
 func (recovery *StreamRecovery) handleParentDone() {
 	recovery.mu.Lock()
-	if recovery.accepted || recovery.finished {
+	if recovery.finished {
 		recovery.mu.Unlock()
+		return
+	}
+	if recovery.accepted {
+		recovery.mu.Unlock()
+		recovery.tryDetach()
 		return
 	}
 	hook := recovery.testTransitionHook

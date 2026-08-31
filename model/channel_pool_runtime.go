@@ -254,6 +254,9 @@ func filterChannelsBySelectionOptions(channels []int, options ChannelSelectionOp
 		}
 		if options.ImageRequirements != nil {
 			channel, ok := channelsIDM[channelID]
+			if !ok && options.ImageRequirements.RequiresNonSquare() {
+				continue
+			}
 			if ok && !ChannelSupportsImageRequest(channel, options.ImageModelName, *options.ImageRequirements) {
 				continue
 			}
@@ -299,7 +302,7 @@ func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelec
 		var channels []*Channel
 		if err := DB.Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
 			common.SysError(fmt.Sprintf("image capability query failed: err=%v", err))
-			return abilities
+			return nil
 		}
 		for _, channel := range channels {
 			channelByID[channel.Id] = channel
@@ -312,6 +315,9 @@ func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelec
 		}
 		if options.ImageRequirements != nil {
 			channel, ok := channelByID[ability.ChannelId]
+			if !ok && options.ImageRequirements.RequiresNonSquare() {
+				continue
+			}
 			if ok && !ChannelSupportsImageRequest(channel, options.ImageModelName, *options.ImageRequirements) {
 				continue
 			}

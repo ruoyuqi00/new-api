@@ -14,6 +14,7 @@ import (
 
 	common2 "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/groupavailability"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -25,6 +26,63 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+var ErrResponseHeaderTimeout = errors.New("upstream response header timeout")
+
+type responseHeaderTimeoutRoundTripper struct {
+	base    http.RoundTripper
+	timeout time.Duration
+}
+
+func (r *responseHeaderTimeoutRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	requestContext, cancel := context.WithCancel(req.Context())
+	var stateMu sync.Mutex
+	finished := false
+	timedOut := false
+	timer := time.AfterFunc(r.timeout, func() {
+		stateMu.Lock()
+		if !finished {
+			timedOut = true
+			cancel()
+		}
+		stateMu.Unlock()
+	})
+
+	resp, err := r.base.RoundTrip(req.WithContext(requestContext))
+	stateMu.Lock()
+	finished = true
+	didTimeout := timedOut
+	stateMu.Unlock()
+	timer.Stop()
+	if didTimeout {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		cancel()
+		return nil, ErrResponseHeaderTimeout
+	}
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if resp.Body == nil {
+		cancel()
+		return resp, nil
+	}
+	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
+}
 
 // ApplyUpstreamBodyMetadata restores metadata that net/http cannot infer from
 // a ReplayableBody. Callers must pass the original body because NewRequest
@@ -531,7 +589,21 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		requestContext = httptrace.WithClientTrace(requestContext, trace)
 	}
 	req = req.WithContext(requestContext)
-	resp, err := client.Do(req)
+	requestClient := client
+	if info != nil && info.IsStream && c != nil && c.Request != nil &&
+		groupavailability.IsTextRequestPath(c.Request.URL.Path) && common2.RelayResponseHeaderTimeout > 0 {
+		clientCopy := *client
+		baseTransport := clientCopy.Transport
+		if baseTransport == nil {
+			baseTransport = http.DefaultTransport
+		}
+		clientCopy.Transport = &responseHeaderTimeoutRoundTripper{
+			base:    baseTransport,
+			timeout: time.Duration(common2.RelayResponseHeaderTimeout) * time.Second,
+		}
+		requestClient = &clientCopy
+	}
+	resp, err := requestClient.Do(req)
 	if err != nil {
 		switch req.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
@@ -540,6 +612,18 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 		info.FinishStreamRecovery()
 		logger.LogError(c, "do request failed: "+err.Error())
+		if errors.Is(err, ErrResponseHeaderTimeout) {
+			return nil, types.NewErrorWithStatusCode(
+				err,
+				types.ErrorCodeDoRequestFailed,
+				http.StatusGatewayTimeout,
+				types.ErrOptionWithPublicError(types.OpenAIError{
+					Message: "The upstream service timed out before responding.",
+					Type:    string(types.ErrorTypeUpstreamError),
+					Code:    types.ErrorCodeDoRequestFailed,
+				}),
+			)
+		}
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {

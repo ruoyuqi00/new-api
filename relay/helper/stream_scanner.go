@@ -16,9 +16,11 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/groupavailability"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
 
@@ -166,12 +168,13 @@ func PrepareEventStreamHeaders(c *gin.Context, resp *http.Response) {
 }
 
 type streamScannerOptions struct {
-	pingTicks    <-chan time.Time
-	writePing    func(*gin.Context) error
-	pingTickDone func()
-	dataQueued   func(string)
-	dataHandled  func()
-	cleanupDone  func(int64)
+	pingTicks             <-chan time.Time
+	firstTokenTimeoutDone <-chan time.Time
+	writePing             func(*gin.Context) error
+	pingTickDone          func()
+	dataQueued            func(string)
+	dataHandled           func()
+	cleanupDone           func(int64)
 }
 
 func ExtendWriteDeadline(c *gin.Context) {
@@ -185,6 +188,23 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	streamScannerHandler(c, resp, info, dataHandler, streamScannerOptions{})
 }
 
+func firstTokenTimeoutEnabled(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	if groupavailability.IsTextRequestPath(info.RequestURLPath) {
+		return true
+	}
+	path := strings.TrimSuffix(strings.SplitN(info.RequestURLPath, "?", 2)[0], "/")
+	if strings.HasPrefix(path, "/v1/images") ||
+		strings.HasPrefix(path, "/v1/audio") ||
+		strings.HasPrefix(path, "/v1/videos") {
+		return false
+	}
+	return info.RelayFormat == types.RelayFormatClaude ||
+		info.GetFinalRequestRelayFormat() == types.RelayFormatClaude
+}
+
 func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult), options streamScannerOptions) {
 	if resp == nil || dataHandler == nil {
 		return
@@ -194,22 +214,33 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	ctx, cancel := context.WithCancel(context.Background())
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
+	firstTokenTimeoutDone := options.firstTokenTimeoutDone
+	var firstTokenTimer *time.Timer
+	if firstTokenTimeoutDone == nil && firstTokenTimeoutEnabled(info) && constant.StreamFirstTokenTimeoutSeconds > 0 {
+		firstTokenTimer = time.NewTimer(time.Duration(constant.StreamFirstTokenTimeoutSeconds) * time.Second)
+		firstTokenTimeoutDone = firstTokenTimer.C
+	} else if !firstTokenTimeoutEnabled(info) {
+		firstTokenTimeoutDone = nil
+	}
 
 	var (
-		stopChan       = make(chan bool, 3)
-		detachReady    = make(chan struct{})
-		pingErrors     = make(chan error, 1)
-		drainReader    = &streamDrainReader{reader: resp.Body, info: info}
-		scanner        = NewStreamScanner(drainReader)
-		ticker         = time.NewTicker(streamingTimeout)
-		pingTicker     *time.Ticker
-		writeMutex     sync.Mutex
-		pendingData    atomic.Int64 // transient priority hint, not stream state
-		drainLimit     atomic.Bool
-		scannerReadErr error
-		wg             sync.WaitGroup
-		cleanupOnce    sync.Once
-		stopOnce       sync.Once
+		stopChan             = make(chan bool, 3)
+		detachReady          = make(chan struct{})
+		pingErrors           = make(chan error, 1)
+		drainReader          = &streamDrainReader{reader: resp.Body, info: info}
+		scanner              = NewStreamScanner(drainReader)
+		ticker               = time.NewTicker(streamingTimeout)
+		pingTicker           *time.Ticker
+		writeMutex           sync.Mutex
+		pendingData          atomic.Int64 // transient priority hint, not stream state
+		firstContentReceived atomic.Bool
+		firstContentReady    = make(chan struct{})
+		firstContentOnce     sync.Once
+		drainLimit           atomic.Bool
+		scannerReadErr       error
+		wg                   sync.WaitGroup
+		cleanupOnce          sync.Once
+		stopOnce             sync.Once
 	)
 
 	stop := func() {
@@ -248,6 +279,9 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				_ = resp.Body.Close()
 			}
 			ticker.Stop()
+			if firstTokenTimer != nil {
+				firstTokenTimer.Stop()
+			}
 			if pingTicker != nil {
 				pingTicker.Stop()
 			}
@@ -407,6 +441,8 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			if !strings.HasPrefix(data, "[DONE]") {
 				info.SetFirstResponseTime()
 				info.ReceivedResponseCount++
+				firstContentReceived.Store(true)
+				firstContentOnce.Do(func() { close(firstContentReady) })
 				CaptureActualResponseModelJSON(info, common.StringToByteSlice(data))
 
 				pendingData.Add(1)
@@ -458,6 +494,19 @@ waitForStream:
 			}
 		}
 		select {
+		case <-firstContentReady:
+			if firstTokenTimer != nil {
+				firstTokenTimer.Stop()
+			}
+			firstTokenTimeoutDone = nil
+			firstContentReady = nil
+		case <-firstTokenTimeoutDone:
+			if firstContentReceived.Load() {
+				firstTokenTimeoutDone = nil
+				continue
+			}
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
+			break waitForStream
 		case <-streamingTimeoutDone:
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
 			break waitForStream

@@ -3,6 +3,7 @@ package constant
 import "strings"
 
 var StreamingTimeout int
+var StreamFirstTokenTimeoutSeconds int
 var DifyDebug bool
 var MaxFileDownloadMB int
 var StreamScannerMaxBufferMB int

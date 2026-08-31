@@ -148,6 +148,7 @@ export const channelFormSchema = z
     weight: z.number().optional(),
     channel_pool_concurrency_limit: z.number().int().min(0).optional(),
     channel_pool_cooldown_seconds: z.number().int().min(0).optional(),
+    image_dimension_support: z.enum(['auto', 'any', 'square', 'pending']),
     test_model: z.string().optional(),
     auto_ban: z.number().optional(),
     status: z.number(),
@@ -313,6 +314,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   weight: 0,
   channel_pool_concurrency_limit: 0,
   channel_pool_cooldown_seconds: 0,
+  image_dimension_support: 'auto',
   test_model: '',
   auto_ban: 1,
   status: CHANNEL_STATUS.ENABLED,
@@ -410,6 +412,8 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateIgnoredModels = ''
   let channelPoolConcurrencyLimit = 0
   let channelPoolCooldownSeconds = 0
+  let imageDimensionSupport: ChannelFormValues['image_dimension_support'] =
+    'auto'
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -444,6 +448,15 @@ export function transformChannelToFormDefaults(
         0,
         Number(parsed.channel_pool_cooldown_seconds) || 0
       )
+      if (parsed.image_dimension_support === 'ratio') {
+        imageDimensionSupport = 'any'
+      } else if (
+        ['auto', 'any', 'square', 'pending'].includes(
+          parsed.image_dimension_support
+        )
+      ) {
+        imageDimensionSupport = parsed.image_dimension_support
+      }
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -466,6 +479,7 @@ export function transformChannelToFormDefaults(
     weight: channel.weight || 0,
     channel_pool_concurrency_limit: channelPoolConcurrencyLimit,
     channel_pool_cooldown_seconds: channelPoolCooldownSeconds,
+    image_dimension_support: imageDimensionSupport,
     test_model: channel.test_model || '',
     auto_ban: channel.auto_ban ?? 1,
     status: channel.status,
@@ -618,6 +632,8 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   } else {
     delete settingsObj.channel_pool_cooldown_seconds
   }
+  settingsObj.image_dimension_support =
+    formData.image_dimension_support || 'auto'
 
   // Upstream model update settings (for model-fetchable channel types)
   if (MODEL_FETCHABLE_TYPES.has(formData.type)) {

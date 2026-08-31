@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestChannelSupportsImageRequestRejectsFixedSquareOverride(t *testing.T) {
@@ -37,6 +39,32 @@ func TestFilterChannelsBySelectionOptionsSkipsIncompatibleImageChannel(t *testin
 		ImageModelName:    "gpt-image-2-1k",
 	})
 	require.Equal(t, []int{2357}, got)
+}
+
+func TestFilterChannelsBySelectionOptionsRejectsUnknownChannelForNonSquareRequest(t *testing.T) {
+	previous := channelsIDM
+	channelsIDM = map[int]*Channel{}
+	t.Cleanup(func() { channelsIDM = previous })
+
+	got := filterChannelsBySelectionOptions([]int{9999}, ChannelSelectionOptions{
+		ImageRequirements: &ImageSelectionRequirements{Size: "650x1024"},
+		ImageModelName:    "gpt-image-2-1k",
+	})
+	require.Empty(t, got)
+}
+
+func TestFilterAbilitiesBySelectionOptionsFailsClosedWhenImageCapabilitiesCannotBeLoaded(t *testing.T) {
+	previousDB := DB
+	db, err := gorm.Open(sqlite.Open("file:image_selection_fail_closed?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	DB = db
+	t.Cleanup(func() { DB = previousDB })
+
+	got := filterAbilitiesBySelectionOptions([]Ability{{ChannelId: 9999}}, ChannelSelectionOptions{
+		ImageRequirements: &ImageSelectionRequirements{Size: "650x1024"},
+		ImageModelName:    "gpt-image-2-1k",
+	})
+	require.Empty(t, got)
 }
 
 func stringPtr(value string) *string {

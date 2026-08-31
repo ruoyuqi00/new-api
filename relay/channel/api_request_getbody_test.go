@@ -17,6 +17,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,6 +189,43 @@ func TestDoRequestMarksWrittenPostWithoutResponseHeadersAmbiguous(t *testing.T) 
 
 	require.Error(t, err)
 	require.Nil(t, resp)
+	assert.True(t, info.UpstreamRequestWasWritten())
+	assert.False(t, info.UpstreamResponseHeadersWereReceived())
+	assert.True(t, info.HasAmbiguousUpstreamSubmission())
+}
+
+func TestDoRequestTimesOutWaitingForStreamingTextResponseHeaders(t *testing.T) {
+	service.InitHttpClient()
+	previousTimeout := basecommon.RelayResponseHeaderTimeout
+	basecommon.RelayResponseHeaderTimeout = 1
+	t.Cleanup(func() { basecommon.RelayResponseHeaderTimeout = previousTimeout })
+
+	releaseHandler := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-releaseHandler:
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(releaseHandler) })
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`))
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}, IsStream: true}
+	req, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{"input":"hello","stream":true}`))
+	require.NoError(t, err)
+
+	resp, err := doRequest(c, req, info)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	assert.ErrorIs(t, err, ErrResponseHeaderTimeout)
+	var apiErr *types.NewAPIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusGatewayTimeout, apiErr.StatusCode)
+	assert.NotContains(t, apiErr.ToPublicOpenAIError("request-id").Message, server.URL)
 	assert.True(t, info.UpstreamRequestWasWritten())
 	assert.False(t, info.UpstreamResponseHeadersWereReceived())
 	assert.True(t, info.HasAmbiguousUpstreamSubmission())

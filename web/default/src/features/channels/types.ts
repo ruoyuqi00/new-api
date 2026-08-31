@@ -108,6 +108,7 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_detected_models?: string[]
   channel_pool_concurrency_limit?: number
   channel_pool_cooldown_seconds?: number
+  image_dimension_support?: 'auto' | 'any' | 'square' | 'pending'
   advanced_custom?: AdvancedCustomConfig
 }
 

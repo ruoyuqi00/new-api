@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1553,6 +1554,44 @@ func TestStreamScannerHandler_StreamStatus_Timeout(t *testing.T) {
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonTimeout, info.StreamStatus.EndReason)
 	assert.False(t, info.StreamStatus.IsNormalEnd())
+}
+
+func TestStreamScannerHandlerTimesOutBeforeFirstContentEvent(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = writer.Close() })
+	c, _, info := setupStreamTest(t, nil)
+	info.RequestURLPath = "/v1/responses"
+	firstTokenTimeout := make(chan time.Time, 1)
+	done := make(chan struct{})
+
+	go func() {
+		streamScannerHandler(c, &http.Response{Body: reader}, info, func(string, *StreamResult) {}, streamScannerOptions{
+			firstTokenTimeoutDone: firstTokenTimeout,
+		})
+		close(done)
+	}()
+	firstTokenTimeout <- time.Now()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first-content timeout")
+	}
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonTimeout, info.StreamStatus.EndReason)
+	assert.Zero(t, info.ReceivedResponseCount)
+}
+
+func TestFirstTokenTimeoutScopeExcludesImageAndAudioStreams(t *testing.T) {
+	assert.True(t, firstTokenTimeoutEnabled(&relaycommon.RelayInfo{RequestURLPath: "/v1/responses"}))
+	assert.True(t, firstTokenTimeoutEnabled(&relaycommon.RelayInfo{RequestURLPath: "/v1/messages"}))
+	assert.True(t, firstTokenTimeoutEnabled(&relaycommon.RelayInfo{
+		RequestURLPath: "/internal/converted",
+		RelayFormat:    types.RelayFormatClaude,
+	}))
+	assert.False(t, firstTokenTimeoutEnabled(&relaycommon.RelayInfo{RequestURLPath: "/v1/images/generations"}))
+	assert.False(t, firstTokenTimeoutEnabled(&relaycommon.RelayInfo{RequestURLPath: "/v1/audio/speech"}))
+	assert.False(t, firstTokenTimeoutEnabled(&relaycommon.RelayInfo{RequestURLPath: "/v1/videos"}))
 }
 
 func TestStreamScannerHandler_StreamStatus_SoftErrors(t *testing.T) {

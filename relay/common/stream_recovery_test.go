@@ -119,6 +119,29 @@ func TestStreamRecoveryPostAcceptCancellationKeepsUpstreamAlive(t *testing.T) {
 	assert.ErrorIs(t, upstream.Err(), context.Canceled)
 }
 
+func TestStreamRecoveryPostAcceptCancellationAutomaticallyDetaches(t *testing.T) {
+	configureStreamRecoveryTest(t)
+
+	info := newStreamRecoveryTestInfo(12)
+	info.EnableStreamRecovery()
+	parent, cancelParent := context.WithCancel(context.Background())
+	upstream := info.StartStreamRecoveryAttempt(parent)
+	info.MarkStreamAccepted()
+
+	cancelParent()
+	info.StreamRecovery.handleParentDone()
+
+	snapshot := info.GetStreamRecoverySnapshot()
+	assert.True(t, snapshot.Accepted)
+	assert.True(t, snapshot.Detached)
+	select {
+	case <-upstream.Done():
+		require.FailNow(t, "automatically detached stream canceled the accepted upstream")
+	default:
+	}
+	info.MarkStreamUsageUnknown(StreamDrainResultUpstreamError)
+}
+
 func TestStreamRecoveryDoneTracksCurrentUpstreamAttempt(t *testing.T) {
 	configureStreamRecoveryTest(t)
 

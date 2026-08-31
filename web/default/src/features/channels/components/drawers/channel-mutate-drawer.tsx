@@ -328,6 +328,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.weight ||
     values.channel_pool_concurrency_limit ||
     values.channel_pool_cooldown_seconds ||
+    values.image_dimension_support !== 'auto' ||
     values.proxy?.trim() ||
     values.system_prompt?.trim() ||
     values.force_format ||
@@ -3598,6 +3599,50 @@ export function ChannelMutateDrawer({
                                         }
                                       />
                                     </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='image_dimension_support'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Image dimension support')}
+                                    </FormLabel>
+                                    <Select
+                                      value={field.value}
+                                      onValueChange={field.onChange}
+                                    >
+                                      <FormControl>
+                                        <SelectTrigger>
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                      </FormControl>
+                                      <SelectContent>
+                                        <SelectGroup>
+                                          <SelectItem value='auto'>
+                                            {t('Automatic detection')}
+                                          </SelectItem>
+                                          <SelectItem value='any'>
+                                            {t('Any aspect ratio')}
+                                          </SelectItem>
+                                          <SelectItem value='square'>
+                                            {t('Square only')}
+                                          </SelectItem>
+                                          <SelectItem value='pending'>
+                                            {t('Pending verification')}
+                                          </SelectItem>
+                                        </SelectGroup>
+                                      </SelectContent>
+                                    </Select>
+                                    <FormDescription>
+                                      {t(
+                                        'Controls whether non-square image requests can use this channel.'
+                                      )}
+                                    </FormDescription>
                                     <FormMessage />
                                   </FormItem>
                                 )}
