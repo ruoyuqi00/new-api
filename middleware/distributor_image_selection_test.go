@@ -21,5 +21,7 @@ func TestGetModelRequestPreservesImageSelectionFields(t *testing.T) {
 	require.True(t, shouldSelectChannel)
 	require.Equal(t, "1k", request.Size)
 	require.Equal(t, "2:3", request.AspectRatio)
-	require.Equal(t, &model.ImageSelectionRequirements{Size: "1k", AspectRatio: "2:3"}, imageSelectionRequirementsForRequest(c.Request.URL.Path, request))
+	requirements, err := imageSelectionRequirementsForRequest(c.Request.URL.Path, request)
+	require.NoError(t, err)
+	require.Equal(t, &model.ImageSelectionRequirements{CanonicalModel: "gpt-image-2", Size: "1k", AspectRatio: "2:3", Tier: "1k"}, requirements)
 }

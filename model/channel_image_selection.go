@@ -23,6 +23,89 @@ type ImageSelectionRequirements struct {
 	ExactDimensions bool
 }
 
+func BuildImageSelectionRequirements(request *dto.ImageRequest) (*ImageSelectionRequirements, error) {
+	if request == nil {
+		return nil, errors.New("image request is nil")
+	}
+	requirements := &ImageSelectionRequirements{
+		CanonicalModel: normalizeImageCapabilityModel(request.Model),
+		Size:           strings.TrimSpace(request.Size),
+	}
+	if request.AspectRatio != nil {
+		requirements.AspectRatio = strings.TrimSpace(*request.AspectRatio)
+	}
+	quote, configured, err := operation_setting.ResolveImageResolutionPrice(request.Model, request.Size)
+	if err != nil {
+		return nil, err
+	}
+	if configured {
+		requirements.CanonicalModel = quote.PricingModel
+		requirements.Tier = quote.Tier
+		requirements.Size = quote.NormalizedSize
+	} else {
+		tier, normalizedSize, tierErr := imageSelectionTier(request.Size)
+		if tierErr != nil {
+			return nil, tierErr
+		}
+		requirements.Tier = tier
+		requirements.Size = normalizedSize
+	}
+	if width, height, ok := parseImageDimensions(requirements.Size); ok {
+		requirements.Width = width
+		requirements.Height = height
+		requirements.ExactDimensions = true
+	}
+	if requirements.AspectRatio != "" && !validImageAspectRatio(requirements.AspectRatio) {
+		return nil, fmt.Errorf("invalid image aspect ratio %q", requirements.AspectRatio)
+	}
+	return requirements, nil
+}
+
+func ImageModelSelectionNames(modelName string, tier operation_setting.ImageResolutionTier) []string {
+	canonical := normalizeImageCapabilityModel(modelName)
+	names := []string{canonical}
+	if tier != "" {
+		names = append(names, canonical+"-"+string(tier))
+	}
+	return names
+}
+
+func imageSelectionTier(size string) (operation_setting.ImageResolutionTier, string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(size))
+	switch normalized {
+	case "", "auto", "1k":
+		return operation_setting.ImageResolutionTier1K, normalized, nil
+	case "2k":
+		return operation_setting.ImageResolutionTier2K, normalized, nil
+	case "4k":
+		return operation_setting.ImageResolutionTier4K, normalized, nil
+	}
+	width, height, ok := parseImageDimensions(normalized)
+	if !ok {
+		return "", normalized, fmt.Errorf("invalid image size %q", size)
+	}
+	switch {
+	case width <= 1024 && height <= 1024:
+		return operation_setting.ImageResolutionTier1K, fmt.Sprintf("%dx%d", width, height), nil
+	case width <= 2048 && height <= 2048:
+		return operation_setting.ImageResolutionTier2K, fmt.Sprintf("%dx%d", width, height), nil
+	case width <= 4096 && height <= 4096:
+		return operation_setting.ImageResolutionTier4K, fmt.Sprintf("%dx%d", width, height), nil
+	default:
+		return "", fmt.Sprintf("%dx%d", width, height), fmt.Errorf("image size %q exceeds the 4096x4096 limit", size)
+	}
+}
+
+func validImageAspectRatio(value string) bool {
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return false
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	return widthErr == nil && heightErr == nil && width > 0 && height > 0
+}
+
 func ValidateImageCapabilitySettings(settings dto.ChannelOtherSettings) error {
 	support := strings.ToLower(strings.TrimSpace(settings.ImageDimensionSupport))
 	switch support {

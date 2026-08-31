@@ -88,7 +88,11 @@ func Distribute() func(c *gin.Context) {
 				}
 				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-				imageRequirements := imageSelectionRequirementsForRequest(c.Request.URL.Path, modelRequest)
+				imageRequirements, imageRequirementsErr := imageSelectionRequirementsForRequest(c.Request.URL.Path, modelRequest)
+				if imageRequirementsErr != nil {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, imageRequirementsErr.Error(), types.ErrorCodeInvalidRequest)
+					return
+				}
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
 					playgroundRequest := &dto.PlayGroundRequest{}
@@ -347,17 +351,18 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	}, nil
 }
 
-func imageSelectionRequirementsForRequest(path string, request *ModelRequest) *model.ImageSelectionRequirements {
+func imageSelectionRequirementsForRequest(path string, request *ModelRequest) (*model.ImageSelectionRequirements, error) {
 	if request == nil || (!strings.HasPrefix(path, "/v1/images/generations") && !strings.HasPrefix(path, "/v1/images/edits")) {
-		return nil
+		return nil, nil
 	}
 	if strings.TrimSpace(request.Size) == "" && strings.TrimSpace(request.AspectRatio) == "" {
-		return nil
+		return nil, nil
 	}
-	return &model.ImageSelectionRequirements{
-		Size:        request.Size,
-		AspectRatio: request.AspectRatio,
+	var aspectRatio *string
+	if request.AspectRatio != "" {
+		aspectRatio = &request.AspectRatio
 	}
+	return model.BuildImageSelectionRequirements(&dto.ImageRequest{Model: request.Model, Size: request.Size, AspectRatio: aspectRatio})
 }
 
 func getJSONStringValue(result gjson.Result, field string) (string, error) {

@@ -74,6 +74,25 @@ func TestValidateImageCapabilitySettings(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestBuildImageSelectionRequirementsNormalizesModelAndTier(t *testing.T) {
+	ratio := "3:2"
+	request := &dto.ImageRequest{Model: "openai/gpt-image-2-1k", Size: "1536x1024", AspectRatio: &ratio}
+	requirements, err := BuildImageSelectionRequirements(request)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-image-2", requirements.CanonicalModel)
+	require.Equal(t, "1536x1024", requirements.Size)
+	require.Equal(t, "2k", string(requirements.Tier))
+	require.Equal(t, 1536, requirements.Width)
+	require.Equal(t, 1024, requirements.Height)
+	require.True(t, requirements.ExactDimensions)
+}
+
+func TestBuildImageSelectionRequirementsRejectsInvalidShape(t *testing.T) {
+	ratio := "wide"
+	_, err := BuildImageSelectionRequirements(&dto.ImageRequest{Model: "gpt-image-2", Size: "1k", AspectRatio: &ratio})
+	require.Error(t, err)
+}
+
 func TestFilterChannelsBySelectionOptionsRejectsUnknownChannelForNonSquareRequest(t *testing.T) {
 	previous := channelsIDM
 	channelsIDM = map[int]*Channel{}
