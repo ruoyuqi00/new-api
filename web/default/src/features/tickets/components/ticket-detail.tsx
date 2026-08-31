@@ -213,7 +213,7 @@ export function TicketDetail({
                     multiple
                     className='sr-only'
                     onChange={(event) =>
-                      setFiles(Array.from(event.target.files ?? []).slice(0, 5))
+                      setFiles([...(event.target.files ?? [])].slice(0, 5))
                     }
                   />
                   <Button type='submit' disabled={replyMutation.isPending}>

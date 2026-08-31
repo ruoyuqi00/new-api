@@ -157,7 +157,7 @@ export function TicketCreateDialog() {
                   multiple
                   className='sr-only'
                   onChange={(event) =>
-                    setFiles(Array.from(event.target.files ?? []).slice(0, 5))
+                    setFiles([...(event.target.files ?? [])].slice(0, 5))
                   }
                 />
               </div>
