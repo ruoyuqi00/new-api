@@ -286,6 +286,26 @@ func SetApiRouter(router *gin.Engine) {
 				}
 			}
 		}
+		ticketRoute := apiRouter.Group("/tickets")
+		ticketRoute.Use(middleware.UserAuth())
+		{
+			ticketRoute.GET("", middleware.DisableCache(), controller.ListTickets)
+			ticketRoute.POST("", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.CreateTicket)
+			ticketRoute.GET("/:id", middleware.DisableCache(), controller.GetTicket)
+			ticketRoute.POST("/:id/messages", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ReplyTicket)
+			ticketRoute.POST("/:id/attachments", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UploadTicketAttachment)
+			ticketRoute.GET("/:id/attachments/:attachment_id", middleware.DisableCache(), controller.DownloadTicketAttachment)
+		}
+		adminTicketRoute := apiRouter.Group("/admin/tickets")
+		adminTicketRoute.Use(middleware.AdminAuth())
+		{
+			adminTicketRoute.GET("", middleware.DisableCache(), controller.AdminListTickets)
+			adminTicketRoute.GET("/:id", middleware.DisableCache(), controller.AdminGetTicket)
+			adminTicketRoute.POST("/:id/messages", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AdminReplyTicket)
+			adminTicketRoute.PATCH("/:id", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AdminUpdateTicket)
+			adminTicketRoute.POST("/:id/attachments", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UploadTicketAttachment)
+			adminTicketRoute.GET("/:id/attachments/:attachment_id", middleware.DisableCache(), controller.DownloadTicketAttachment)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{
