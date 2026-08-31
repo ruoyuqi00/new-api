@@ -89,3 +89,64 @@ active rollback container and retained candidate had restart count `0`. The
 candidate remains private and must not receive production traffic until its
 complete frontend asset graph, rather than only entry assets, matches the
 production baseline.
+
+## Official image resolution pricing candidate
+
+Source and scope:
+
+- Source commit: `ce4ecdc0d`
+- Branch: `codex/first-token-image-capability-20260831`
+- Local binary SHA-256: `fec2aedc8f87d6ccd161ec45ee564d3d16d829fcf1a71a789eb691abe920f390`
+- Loopback candidate: `http://127.0.0.1:13015`
+- Database: independent disposable SQLite; no production database or Redis
+  connection is used.
+- Production traffic, Caddy, production containers, production options, user
+  balances, channels, and logs were not modified.
+
+The candidate implements price selection only:
+
+- official-model 1K/2K/4K base price policies;
+- smallest-square-boundary dimension classification;
+- legacy alias minimum tiers;
+- pre-consume and settlement price freezing;
+- atomic option validation and replacement;
+- optional `/api/pricing` policy metadata;
+- non-sensitive consume-log audit metadata.
+
+Channel selection, upstream model mapping, upstream image parameters, task
+billing, billing expressions, affinity, violation fees, actual response model,
+retry, and media stream behavior remain on their existing paths.
+
+Verification evidence:
+
+- `go test ./... -count=1` passed.
+- Explicit billing-expression, tiered billing, task billing, affinity,
+  violation-fee, actual-response-model, image, and pricing regressions passed.
+- Go race tests could not start because the local Windows Go toolchain has CGO
+  disabled; this is a toolchain limitation, not a test failure.
+- The production runtime chunk map was parsed from the recovered production
+  entry bundle. All 119 entry and lazy-loaded assets were fetched read-only
+  from the public production domain, validated as JavaScript/CSS where
+  applicable, and embedded in the local candidate.
+- All 119 candidate assets matched their production SHA-256 values. The two
+  previously missing chunks, `3395.7bb002d7bb.js` and `531.c823517b31.js`,
+  now return JavaScript with their production hashes.
+- Playwright verified homepage, sign-in, sign-up, docs, dashboard, API keys,
+  usage logs, wallet, system settings, and infinite canvas with no page error,
+  request failure, HTTP error, or chunk-load failure.
+- Screenshots confirmed the default YuCore brand UI, blue-marble globe login,
+  custom navigation, API-key layout, system settings, and infinite canvas.
+
+No paid image request was sent. The local pricing simulation produced:
+
+| Model and request | Tier | Base price | Count | Group | Quota |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `gpt-image-2`, `650x1024` | 1K | 0.01 | 1 | 1.0 | 5,000 |
+| `gpt-image-2`, `1024x1536` | 2K | 0.04 | 1 | 0.3 | 6,000 |
+| `gpt-image-2-4k`, `1024x1024` | 4K floor | 0.045 | 2 | 0.3 | 13,500 |
+| `nano-banana-pro`, `2048x3072` | 4K | 0.161416666667 | 1 | 1.0 | 80,708 |
+| `nano-banana2`, `auto` | default 1K | 0.063916666667 | 1 | 1.0 | 31,958 |
+
+`4097x512` was rejected before billing, and an unmanaged image model retained
+the legacy pricing path. The candidate is ready for user UI review only; no
+production rollout is authorized by this record.
