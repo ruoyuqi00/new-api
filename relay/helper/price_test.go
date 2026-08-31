@@ -1,11 +1,13 @@
 package helper
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -16,6 +18,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func configureImageResolutionPriceTestRatios(t *testing.T) {
+	t.Helper()
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	originalGroups := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroups))
+	})
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"gpt-image-2":9,"gpt-image-2-4k":9,"unmanaged-image-model":0.2}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"image-test":0.3,"legacy-image":0.5}`))
+}
 
 func TestResolveEffectiveGroupPrefersAutoGroup(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -92,6 +106,96 @@ func TestModelPriceHelperFixedPriceAppliesRequestBillingRatios(t *testing.T) {
 	want, err := common.QuotaFromFloatStrict(priceData.ModelPrice * common.QuotaPerUnit * 3)
 	require.NoError(t, err)
 	require.Equal(t, want, priceData.QuotaToPreConsume)
+}
+
+func TestModelPriceHelperUsesResolutionPolicyAndFreezesQuote(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	configureImageResolutionPriceTestRatios(t)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	n := uint(2)
+	request := &dto.ImageRequest{Model: "gpt-image-2", Size: "650x1024", N: &n}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-image-2",
+		UserGroup:       "image-test",
+		UsingGroup:      "image-test",
+		Request:         request,
+	}
+
+	priceData, err := ModelPriceHelper(ctx, info, 0, request.GetTokenCountMeta())
+	require.NoError(t, err)
+	assert.True(t, priceData.UsePrice)
+	assert.InDelta(t, 0.01, priceData.ModelPrice, 1e-12)
+	assert.Equal(t, "gpt-image-2", priceData.ImageResolutionPricingModel)
+	assert.Equal(t, "650x1024", priceData.ImageResolutionRequestedSize)
+	assert.Equal(t, "1k", priceData.ImageResolutionTier)
+	assert.InDelta(t, 0.01, priceData.ImageResolutionUnitPrice, 1e-12)
+	assert.Equal(t, 2, priceData.ImageResolutionImageCount)
+	assert.Equal(t, 2.0, priceData.OtherRatios["n"])
+	assert.Equal(t, int(math.Round(0.01*common.QuotaPerUnit*0.3*2)), priceData.QuotaToPreConsume)
+}
+
+func TestModelPriceHelperResolutionAliasUsesMinimumTier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	configureImageResolutionPriceTestRatios(t)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	request := &dto.ImageRequest{Model: "gpt-image-2-4k", Size: "1024x1024"}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: request.Model,
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		Request:         request,
+	}
+
+	priceData, err := ModelPriceHelper(ctx, info, 0, request.GetTokenCountMeta())
+	require.NoError(t, err)
+	assert.Equal(t, "4k", priceData.ImageResolutionTier)
+	assert.InDelta(t, 0.045, priceData.ModelPrice, 1e-12)
+}
+
+func TestModelPriceHelperRejectsInvalidConfiguredImageSizeBeforePreConsume(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	configureImageResolutionPriceTestRatios(t)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	request := &dto.ImageRequest{Model: "gpt-image-2", Size: "4097x512"}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: request.Model,
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		Request:         request,
+	}
+
+	_, err := ModelPriceHelper(ctx, info, 0, request.GetTokenCountMeta())
+	require.ErrorContains(t, err, "4097x512")
+	assert.Zero(t, info.PriceData.QuotaToPreConsume)
+}
+
+func TestModelPriceHelperUnconfiguredImageModelKeepsLegacyRatios(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	configureImageResolutionPriceTestRatios(t)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	request := &dto.ImageRequest{Model: "unmanaged-image-model", Size: "1536x1024"}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: request.Model,
+		UserGroup:       "legacy-image",
+		UsingGroup:      "legacy-image",
+		Request:         request,
+	}
+	meta := &types.TokenCountMeta{ImagePriceRatio: 1.5, BillingRatios: map[string]float64{"n": 2}}
+
+	priceData, err := ModelPriceHelper(ctx, info, 0, meta)
+	require.NoError(t, err)
+	want, err := common.QuotaFromFloatStrict(0.2 * 1.5 * common.QuotaPerUnit * 0.5 * 2)
+	require.NoError(t, err)
+	assert.Equal(t, want, priceData.QuotaToPreConsume)
+	assert.Empty(t, priceData.ImageResolutionPricingModel)
 }
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {

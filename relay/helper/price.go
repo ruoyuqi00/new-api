@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -92,6 +93,15 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		return modelPriceHelperExpression(c, info, promptTokens, meta, groupRatioInfo, billingMode)
 	}
 
+	imageResolutionQuote, imageResolutionPriceConfigured, err := resolveRequestImageResolutionPrice(info)
+	if err != nil {
+		return types.PriceData{}, err
+	}
+	if imageResolutionPriceConfigured {
+		modelPrice = imageResolutionQuote.UnitPrice
+		usePrice = true
+	}
+
 	var preConsumedQuota int
 	var modelRatio float64
 	var completionRatio float64
@@ -103,7 +113,6 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	var audioRatio float64
 	var audioCompletionRatio float64
 	var freeModel bool
-	var err error
 	if !usePrice {
 		preConsumedTokens := common.Max(promptTokens, common.PreConsumedQuota)
 		if meta.MaxTokens != 0 {
@@ -136,7 +145,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 			return types.PriceData{}, fmt.Errorf("model %s pre-consume quota is out of range: %w", info.OriginModelName, err)
 		}
 	} else {
-		if meta.ImagePriceRatio != 0 {
+		if !imageResolutionPriceConfigured && meta.ImagePriceRatio != 0 {
 			modelPrice = modelPrice * meta.ImagePriceRatio
 		}
 		preConsumedQuota, err = common.QuotaFromFloatStrict(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
@@ -180,6 +189,17 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		CacheCreation1hRatio: cacheCreationRatio1h,
 		QuotaToPreConsume:    preConsumedQuota,
 	}
+	if imageResolutionPriceConfigured {
+		imageCount := 1
+		if count, ok := meta.BillingRatios["n"]; ok && count > 0 {
+			imageCount = int(count)
+		}
+		priceData.ImageResolutionPricingModel = imageResolutionQuote.PricingModel
+		priceData.ImageResolutionRequestedSize = imageResolutionQuote.NormalizedSize
+		priceData.ImageResolutionTier = string(imageResolutionQuote.Tier)
+		priceData.ImageResolutionUnitPrice = imageResolutionQuote.UnitPrice
+		priceData.ImageResolutionImageCount = imageCount
+	}
 	if usePrice {
 		quotaToPreConsume := modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio
 		for name, ratio := range meta.BillingRatios {
@@ -200,6 +220,22 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	}
 	info.PriceData = priceData
 	return priceData, nil
+}
+
+func resolveRequestImageResolutionPrice(info *relaycommon.RelayInfo) (operation_setting.ImageResolutionPriceQuote, bool, error) {
+	if info == nil {
+		return operation_setting.ImageResolutionPriceQuote{}, false, nil
+	}
+	var size string
+	switch request := info.Request.(type) {
+	case *dto.ImageRequest:
+		size = request.Size
+	case *dto.GeneralOpenAIRequest:
+		size = request.Size
+	default:
+		return operation_setting.ImageResolutionPriceQuote{}, false, nil
+	}
+	return operation_setting.ResolveImageResolutionPrice(info.OriginModelName, size)
 }
 
 // ModelPriceHelperPerCall 按次/按量计费的 PriceHelper (MJ、Task)
