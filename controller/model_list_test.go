@@ -343,6 +343,23 @@ func TestListModelsIncludesPerCallExpressionModel(t *testing.T) {
 	require.NotEmpty(t, pricing.BillingExpr)
 }
 
+func TestPricingIncludesCanonicalImageResolutionPolicyForAlias(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "default", Model: "gpt-image-2-1k", ChannelId: 1, Enabled: true,
+	}).Error)
+	model.InvalidatePricingCache()
+
+	pricing, ok := pricingByModelName(model.GetPricing())["gpt-image-2-1k"]
+	require.True(t, ok)
+	require.NotNil(t, pricing.ImageResolutionPricing)
+	assert.Equal(t, "gpt-image-2", pricing.ImageResolutionPricing.PricingModel)
+	assert.Equal(t, operation_setting.ImageResolutionTier1K, pricing.ImageResolutionPricing.AliasMinimumTier)
+	assert.Equal(t, operation_setting.ImageResolutionTier1K, pricing.ImageResolutionPricing.DefaultTier)
+	assert.InDelta(t, 0.01, pricing.ImageResolutionPricing.Prices[operation_setting.ImageResolutionTier1K], 1e-12)
+	assert.InDelta(t, 0.045, pricing.ImageResolutionPricing.Prices[operation_setting.ImageResolutionTier4K], 1e-12)
+}
+
 func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	withTieredBillingConfig(t, map[string]string{

@@ -86,9 +86,22 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendRequestConversionChain(relayInfo, other)
 	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
+	appendImageResolutionBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
 	return other
+}
+
+func appendImageResolutionBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || relayInfo.PriceData.ImageResolutionPricingModel == "" {
+		return
+	}
+	priceData := relayInfo.PriceData
+	other["image_pricing_model"] = priceData.ImageResolutionPricingModel
+	other["image_requested_size"] = priceData.ImageResolutionRequestedSize
+	other["image_resolution_tier"] = priceData.ImageResolutionTier
+	other["image_unit_price"] = priceData.ImageResolutionUnitPrice
+	other["image_count"] = priceData.ImageResolutionImageCount
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
