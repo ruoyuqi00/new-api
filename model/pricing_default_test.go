@@ -6,6 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestDefaultVendorMappingUsesDeterministicPrecedenceForAmbiguousNames(t *testing.T) {
+	assert.Equal(t, "OpenAI", defaultVendorNameForModel("gpt-5.3-codex-spark"))
+	assert.Equal(t, "讯飞", defaultVendorNameForModel("spark-4.0"))
+	assert.Equal(t, "Google", defaultVendorNameForModel("nano-banana2-1k"))
+}
+
 func TestDefaultVendorMappingClassifiesMediaModels(t *testing.T) {
 	vendorMap := map[int]*Vendor{
 		1: {Id: 1, Name: "OpenAI"},
