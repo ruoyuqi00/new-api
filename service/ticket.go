@@ -186,23 +186,19 @@ func AddTicketMessage(ctx context.Context, ticketID int64, authorID int, authorR
 		if err := tx.Create(message).Error; err != nil {
 			return err
 		}
-		status := model.TicketStatusPendingAdmin
-		unreadForUser := ticket.UnreadForUser
-		unreadForAdmin := ticket.UnreadForAdmin
-		if authorRole == model.TicketAuthorRoleAdmin {
-			status = model.TicketStatusPendingUser
-			unreadForUser++
-		} else {
-			unreadForAdmin++
+		updates := map[string]interface{}{
+			"status":          model.TicketStatusPendingAdmin,
+			"message_count":   gorm.Expr("message_count + ?", 1),
+			"last_message_at": message.CreatedAt,
+			"updated_at":      message.CreatedAt,
 		}
-		return tx.Model(&model.Ticket{}).Where("id = ?", ticketID).Updates(map[string]interface{}{
-			"status":           status,
-			"message_count":    gorm.Expr("message_count + ?", 1),
-			"unread_for_user":  unreadForUser,
-			"unread_for_admin": unreadForAdmin,
-			"last_message_at":  message.CreatedAt,
-			"updated_at":       message.CreatedAt,
-		}).Error
+		if authorRole == model.TicketAuthorRoleAdmin {
+			updates["status"] = model.TicketStatusPendingUser
+			updates["unread_for_user"] = gorm.Expr("unread_for_user + ?", 1)
+		} else {
+			updates["unread_for_admin"] = gorm.Expr("unread_for_admin + ?", 1)
+		}
+		return tx.Model(&model.Ticket{}).Where("id = ?", ticketID).Updates(updates).Error
 	})
 	if err != nil {
 		return nil, err
