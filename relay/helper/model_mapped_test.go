@@ -39,3 +39,25 @@ func TestDomesticCallAliasesPreservePublicModelAndMapUpstreamModel(t *testing.T)
 		})
 	}
 }
+
+func TestImageAliasPrefersCanonicalMappingWhenBothKeysExist(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("model_mapping", `{"gpt-image-2":"provider-image-v3","gpt-image-2-2k":"legacy-image-v2"}`)
+	request := &dto.GeneralOpenAIRequest{Model: "gpt-image-2-2k"}
+	info := &relaycommon.RelayInfo{OriginModelName: request.Model}
+
+	require.NoError(t, ModelMappedHelper(ctx, info, request))
+	require.Equal(t, "gpt-image-2-2k", info.OriginModelName)
+	require.Equal(t, "provider-image-v3", info.UpstreamModelName)
+	require.Equal(t, "provider-image-v3", request.Model)
+}
+
+func TestImageAliasFallsBackToLegacyMapping(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("model_mapping", `{"gpt-image-2-2k":"legacy-image-v2"}`)
+	request := &dto.GeneralOpenAIRequest{Model: "gpt-image-2-2k"}
+	info := &relaycommon.RelayInfo{OriginModelName: request.Model}
+
+	require.NoError(t, ModelMappedHelper(ctx, info, request))
+	require.Equal(t, "legacy-image-v2", info.UpstreamModelName)
+}

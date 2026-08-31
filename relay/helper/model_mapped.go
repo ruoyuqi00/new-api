@@ -1,11 +1,11 @@
 package helper
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	yucommon "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -29,13 +29,18 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 	modelMapping := c.GetString("model_mapping")
 	if modelMapping != "" && modelMapping != "{}" {
 		modelMap := make(map[string]string)
-		err := json.Unmarshal([]byte(modelMapping), &modelMap)
+		err := yucommon.Unmarshal([]byte(modelMapping), &modelMap)
 		if err != nil {
 			return fmt.Errorf("unmarshal_model_mapping_failed")
 		}
 
 		// 支持链式模型重定向，最终使用链尾的模型
 		currentModel := mappingModelName
+		if canonicalModel := canonicalImageModelName(mappingModelName); canonicalModel != mappingModelName {
+			if mappedModel, exists := modelMap[canonicalModel]; exists && mappedModel != "" {
+				currentModel = canonicalModel
+			}
+		}
 		visitedModels := map[string]bool{
 			currentModel: true,
 		}
@@ -78,4 +83,14 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		request.SetModelName(info.UpstreamModelName)
 	}
 	return nil
+}
+
+func canonicalImageModelName(modelName string) string {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	for _, suffix := range []string{"-1k", "-2k", "-4k"} {
+		if strings.HasSuffix(modelName, suffix) {
+			return strings.TrimSuffix(modelName, suffix)
+		}
+	}
+	return modelName
 }
