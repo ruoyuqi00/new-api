@@ -1,21 +1,77 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
 // ImageSelectionRequirements carries only the request fields needed before a
 // channel is selected. It intentionally does not alter billing or relay data.
 type ImageSelectionRequirements struct {
-	Size        string
-	AspectRatio string
+	CanonicalModel  string
+	Size            string
+	AspectRatio     string
+	Tier            operation_setting.ImageResolutionTier
+	Width           int
+	Height          int
+	ExactDimensions bool
+}
+
+func ValidateImageCapabilitySettings(settings dto.ChannelOtherSettings) error {
+	support := strings.ToLower(strings.TrimSpace(settings.ImageDimensionSupport))
+	switch support {
+	case "", "auto", "any", "custom", "ratio", "aspect_ratio", "aspect-ratio", "square", "fixed_square", "fixed-square", "pending", "unknown":
+	default:
+		return fmt.Errorf("invalid image_dimension_support %q", settings.ImageDimensionSupport)
+	}
+	for modelName, capability := range settings.ImageModelCapabilities {
+		if normalizeImageCapabilityModel(modelName) == "" {
+			return errors.New("image_model_capabilities contains an empty model")
+		}
+		if !validImageCapabilityTier(capability.MaxTier) {
+			return fmt.Errorf("image model %s has invalid max_tier %q", modelName, capability.MaxTier)
+		}
+		if capability.Shape != dto.ImageCapabilityShapeExact && capability.Shape != dto.ImageCapabilityShapeRatio {
+			return fmt.Errorf("image model %s has invalid shape %q", modelName, capability.Shape)
+		}
+	}
+	return nil
+}
+
+func ChannelImageCapabilityForModel(channel *Channel, modelName string) dto.ImageModelCapability {
+	capability := dto.ImageModelCapability{MaxTier: string(operation_setting.ImageResolutionTier1K)}
+	if channel == nil {
+		return capability
+	}
+	settings := channel.GetOtherSettings()
+	switch strings.ToLower(strings.TrimSpace(settings.ImageDimensionSupport)) {
+	case "any", "custom":
+		capability.MaxTier = string(operation_setting.ImageResolutionTier4K)
+		capability.Shape = dto.ImageCapabilityShapeExact
+	case "ratio", "aspect_ratio", "aspect-ratio":
+		capability.MaxTier = string(operation_setting.ImageResolutionTier4K)
+		capability.Shape = dto.ImageCapabilityShapeRatio
+	}
+	canonical := normalizeImageCapabilityModel(modelName)
+	for configuredModel, modelCapability := range settings.ImageModelCapabilities {
+		if normalizeImageCapabilityModel(configuredModel) == canonical {
+			capability = modelCapability
+			break
+		}
+	}
+	return capability
 }
 
 func (requirements ImageSelectionRequirements) RequiresNonSquare() bool {
+	if requirements.Width > 0 && requirements.Height > 0 {
+		return requirements.Width != requirements.Height
+	}
 	if width, height, ok := parseImageDimensions(requirements.Size); ok && width != height {
 		return true
 	}
@@ -32,28 +88,61 @@ func (requirements ImageSelectionRequirements) RequiresNonSquare() bool {
 	return widthErr == nil && heightErr == nil && width > 0 && height > 0 && width != height
 }
 
-// ChannelSupportsImageRequest filters only known-incompatible channels. An
-// unconfigured channel remains eligible, preserving existing price and weight
-// ordering while allowing admins to opt into stricter modes through settings.
 func ChannelSupportsImageRequest(channel *Channel, modelName string, requirements ImageSelectionRequirements) bool {
-	if channel == nil || !requirements.RequiresNonSquare() {
-		return true
-	}
-
-	settings := channel.GetOtherSettings()
-	switch strings.ToLower(strings.TrimSpace(settings.ImageDimensionSupport)) {
-	case "square", "fixed_square", "fixed-square", "pending", "unknown":
+	if channel == nil {
 		return false
-	case "any", "custom", "ratio", "aspect_ratio", "aspect-ratio":
+	}
+	capability := ChannelImageCapabilityForModel(channel, modelName)
+	if requirements.Tier != "" && imageCapabilityTierRank(requirements.Tier) > imageCapabilityTierRank(operation_setting.ImageResolutionTier(capability.MaxTier)) {
+		return false
+	}
+	if !requirements.RequiresNonSquare() {
 		return true
 	}
+	if channelParamOverrideForcesSquare(channel, modelName) {
+		return false
+	}
+	exactDimensions := requirements.ExactDimensions
+	if _, _, ok := parseImageDimensions(requirements.Size); ok {
+		exactDimensions = true
+	}
+	if exactDimensions && capability.Shape != dto.ImageCapabilityShapeExact {
+		return false
+	}
+	return capability.Shape == dto.ImageCapabilityShapeExact || capability.Shape == dto.ImageCapabilityShapeRatio
+}
 
-	// OpenAI-compatible JSON requests are protected by the relay's image
-	// dimension restoration after channel overrides are applied.
-	if channel.Type == constant.ChannelTypeOpenAI {
+func validImageCapabilityTier(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(operation_setting.ImageResolutionTier1K), string(operation_setting.ImageResolutionTier2K), string(operation_setting.ImageResolutionTier4K):
 		return true
+	default:
+		return false
 	}
-	return !channelParamOverrideForcesSquare(channel, modelName)
+}
+
+func imageCapabilityTierRank(tier operation_setting.ImageResolutionTier) int {
+	switch tier {
+	case operation_setting.ImageResolutionTier1K:
+		return 1
+	case operation_setting.ImageResolutionTier2K:
+		return 2
+	case operation_setting.ImageResolutionTier4K:
+		return 4
+	default:
+		return 0
+	}
+}
+
+func normalizeImageCapabilityModel(modelName string) string {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if idx := strings.LastIndex(modelName, "/"); idx >= 0 {
+		modelName = modelName[idx+1:]
+	}
+	for _, suffix := range []string{"-1k", "-2k", "-4k"} {
+		modelName = strings.TrimSuffix(modelName, suffix)
+	}
+	return modelName
 }
 
 type imageParamOverrideOperation struct {

@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -15,13 +17,18 @@ func TestChannelSupportsImageRequestRejectsFixedSquareOverride(t *testing.T) {
 	require.True(t, ChannelSupportsImageRequest(channel, "gpt-image-2-1k", ImageSelectionRequirements{Size: "1k", AspectRatio: "1:1"}))
 }
 
-func TestChannelSupportsImageRequestKeepsOpenAIOverrideChannelEligible(t *testing.T) {
-	channel := &Channel{Id: 2418, Type: constant.ChannelTypeOpenAI, ParamOverride: stringPtr(`{"size":"1024x1024"}`)}
+func TestChannelSupportsImageRequestRejectsFixedSquareOverrideEvenWhenVerified(t *testing.T) {
+	channel := &Channel{Id: 2418, Type: constant.ChannelTypeOpenAI, ParamOverride: stringPtr(`{"size":"1024x1024"}`), OtherSettings: `{"image_dimension_support":"any"}`}
+	require.False(t, ChannelSupportsImageRequest(channel, "gpt-image-2-1k", ImageSelectionRequirements{Size: "650x1024"}))
+}
+
+func TestChannelSupportsImageRequestAllowsVerifiedOpenAIChannel(t *testing.T) {
+	channel := &Channel{Id: 2418, Type: constant.ChannelTypeOpenAI, OtherSettings: `{"image_dimension_support":"any"}`}
 	require.True(t, ChannelSupportsImageRequest(channel, "gpt-image-2-1k", ImageSelectionRequirements{Size: "650x1024"}))
 }
 
 func TestChannelSupportsImageRequestAppliesConditionalOverrideToMatchingModel(t *testing.T) {
-	channel := &Channel{Id: 2487, Type: constant.ChannelTypeAdvancedCustom, ParamOverride: stringPtr(`{"operations":[{"mode":"set","path":"size","value":"2048x2048","conditions":[{"mode":"full","path":"original_model","value":"gpt-image-2-2k"}]}]}`)}
+	channel := &Channel{Id: 2487, Type: constant.ChannelTypeAdvancedCustom, ParamOverride: stringPtr(`{"operations":[{"mode":"set","path":"size","value":"2048x2048","conditions":[{"mode":"full","path":"original_model","value":"gpt-image-2-2k"}]}]}`), OtherSettings: `{"image_dimension_support":"any"}`}
 	require.False(t, ChannelSupportsImageRequest(channel, "gpt-image-2-2k", ImageSelectionRequirements{Size: "2k", AspectRatio: "3:2"}))
 	require.True(t, ChannelSupportsImageRequest(channel, "gpt-image-2", ImageSelectionRequirements{Size: "2k", AspectRatio: "3:2"}))
 }
@@ -30,7 +37,7 @@ func TestFilterChannelsBySelectionOptionsSkipsIncompatibleImageChannel(t *testin
 	previous := channelsIDM
 	channelsIDM = map[int]*Channel{
 		2418: {Id: 2418, Type: constant.ChannelTypeAdvancedCustom, ParamOverride: stringPtr(`{"size":"1024x1024"}`)},
-		2357: {Id: 2357},
+		2357: {Id: 2357, OtherSettings: `{"image_dimension_support":"any"}`},
 	}
 	t.Cleanup(func() { channelsIDM = previous })
 
@@ -39,6 +46,32 @@ func TestFilterChannelsBySelectionOptionsSkipsIncompatibleImageChannel(t *testin
 		ImageModelName:    "gpt-image-2-1k",
 	})
 	require.Equal(t, []int{2357}, got)
+}
+
+func TestChannelSupportsImageRequestHonorsModelTierAndShape(t *testing.T) {
+	channel := &Channel{Id: 2500, OtherSettings: `{"image_dimension_support":"any","image_model_capabilities":{"gpt-image-2":{"max_tier":"2k","shape":"exact"}}}`}
+	require.True(t, ChannelSupportsImageRequest(channel, "gpt-image-2", ImageSelectionRequirements{Size: "1536x1024", Tier: "2k"}))
+	require.False(t, ChannelSupportsImageRequest(channel, "gpt-image-2", ImageSelectionRequirements{Size: "2048x3072", Tier: "4k"}))
+	ratioOnly := &Channel{Id: 2501, OtherSettings: `{"image_dimension_support":"ratio","image_model_capabilities":{"gpt-image-2":{"max_tier":"2k","shape":"ratio"}}}`}
+	require.False(t, ChannelSupportsImageRequest(ratioOnly, "gpt-image-2", ImageSelectionRequirements{Size: "1536x1024", Tier: "2k"}))
+}
+
+func TestValidateImageCapabilitySettings(t *testing.T) {
+	require.NoError(t, ValidateImageCapabilitySettings(dto.ChannelOtherSettings{ImageDimensionSupport: "any"}))
+	require.NoError(t, ValidateImageCapabilitySettings(dto.ChannelOtherSettings{ImageDimensionSupport: "pending"}))
+	require.Error(t, ValidateImageCapabilitySettings(dto.ChannelOtherSettings{ImageDimensionSupport: "diagonal"}))
+	require.NoError(t, ValidateImageCapabilitySettings(dto.ChannelOtherSettings{
+		ImageDimensionSupport: "any",
+		ImageModelCapabilities: map[string]dto.ImageModelCapability{
+			"gpt-image-2": {MaxTier: "2k", Shape: dto.ImageCapabilityShapeExact},
+		},
+	}))
+	err := ValidateImageCapabilitySettings(dto.ChannelOtherSettings{
+		ImageModelCapabilities: map[string]dto.ImageModelCapability{
+			"gpt-image-2": {MaxTier: "8k", Shape: dto.ImageCapabilityShapeExact},
+		},
+	})
+	assert.Error(t, err)
 }
 
 func TestFilterChannelsBySelectionOptionsRejectsUnknownChannelForNonSquareRequest(t *testing.T) {
