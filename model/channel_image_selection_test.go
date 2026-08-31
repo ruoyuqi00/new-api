@@ -74,6 +74,11 @@ func TestValidateImageCapabilitySettings(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestChannelValidateSettingsRejectsInvalidImageCapability(t *testing.T) {
+	channel := &Channel{OtherSettings: `{"image_dimension_support":"diagonal"}`}
+	require.Error(t, channel.ValidateSettings())
+}
+
 func TestBuildImageSelectionRequirementsNormalizesModelAndTier(t *testing.T) {
 	ratio := "3:2"
 	request := &dto.ImageRequest{Model: "openai/gpt-image-2-1k", Size: "1536x1024", AspectRatio: &ratio}
