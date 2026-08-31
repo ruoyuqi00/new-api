@@ -60,6 +60,19 @@ func TestStoreTicketAttachmentEnforcesCountAndMIME(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestStoreTicketAttachmentRejectsHeaderInjectionName(t *testing.T) {
+	setupTicketServiceTestDB(t)
+	t.Setenv("YUAPI_TICKET_UPLOAD_ROOT", t.TempDir())
+	ticket, err := CreateTicket(context.Background(), 7, CreateTicketInput{Subject: "Name", Category: model.TicketCategoryGeneral, Priority: model.TicketPriorityNormal, Body: "Name."})
+	require.NoError(t, err)
+	var message model.TicketMessage
+	require.NoError(t, model.DB.Where("ticket_id = ?", ticket.ID).First(&message).Error)
+	_, err = StoreTicketAttachment(context.Background(), ticket.ID, message.ID, 7, false, TicketAttachmentInput{
+		FileName: "bad\"\r\nX.txt", MIMEType: "text/plain", Reader: bytes.NewReader([]byte("bad")), Size: 3,
+	})
+	assert.Error(t, err)
+}
+
 func TestOpenTicketAttachmentAllowsOwnerAndAdminOnly(t *testing.T) {
 	setupTicketServiceTestDB(t)
 	t.Setenv("YUAPI_TICKET_UPLOAD_ROOT", t.TempDir())

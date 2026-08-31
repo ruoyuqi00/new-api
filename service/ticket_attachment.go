@@ -180,7 +180,7 @@ func ticketAttachmentRoot() string {
 func safeTicketAttachmentName(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	clean := filepath.Base(strings.ReplaceAll(value, "\\", "/"))
-	if value == "" || clean == "." || clean == "/" || clean != value {
+	if value == "" || clean == "." || clean == "/" || clean != value || strings.ContainsAny(clean, "\"\r\n") {
 		return "", errors.New("invalid ticket attachment name")
 	}
 	if len([]rune(clean)) > 255 {
