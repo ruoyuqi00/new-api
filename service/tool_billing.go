@@ -36,7 +36,7 @@ type ToolCallResult struct {
 // ComputeToolCallQuota calculates the total quota for all tool calls in a
 // request. Tool prices are resolved via GetToolPriceForModel which supports
 // model-prefix overrides. groupRatio is applied.
-func ComputeToolCallQuota(usage ToolCallUsage, groupRatio float64) ToolCallResult {
+func ComputeToolCallQuota(usage ToolCallUsage, groupRatio float64) (ToolCallResult, error) {
 	var items []ToolCallItem
 	totalQuota := 0
 
@@ -70,8 +70,12 @@ func ComputeToolCallQuota(usage ToolCallUsage, groupRatio float64) ToolCallResul
 
 	if usage.ImageGenerationCall {
 		price := operation_setting.GetGPTImage1PriceOnceCall(usage.ImageGenerationQuality, usage.ImageGenerationSize)
-		if isImageGenerationOnlyBillingModel(usage.ModelName) {
-			price = operation_setting.GetGPTImage2PriceOnceCall(usage.ImageGenerationSize)
+		quote, configured, err := operation_setting.ResolveImageResolutionPrice(usage.ModelName, usage.ImageGenerationSize)
+		if err != nil {
+			return ToolCallResult{}, err
+		}
+		if configured {
+			price = quote.UnitPrice
 		}
 		quota := int(math.Round(price * common.QuotaPerUnit * groupRatio))
 		items = append(items, ToolCallItem{
@@ -87,5 +91,5 @@ func ComputeToolCallQuota(usage ToolCallUsage, groupRatio float64) ToolCallResul
 	return ToolCallResult{
 		TotalQuota: totalQuota,
 		Items:      items,
-	}
+	}, nil
 }

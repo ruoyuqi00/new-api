@@ -188,33 +188,6 @@ func GetGPTImage1PriceOnceCall(quality string, size string) float64 {
 	return GPTImage1High1024x1024
 }
 
-func GetGPTImage2PriceOnceCall(size string) float64 {
-	switch gptImage2PriceTier(size) {
-	case "2k":
-		return 0.08
-	case "4k":
-		return 0.12
-	default:
-		return 0.05
-	}
-}
-
-func gptImage2PriceTier(size string) string {
-	size = strings.ToLower(strings.TrimSpace(size))
-	size = strings.ReplaceAll(size, "*", "x")
-	size = strings.ReplaceAll(size, "_", "")
-	size = strings.ReplaceAll(size, "-", "")
-	size = strings.ReplaceAll(size, " ", "")
-	switch size {
-	case "2k", "2ksquare", "2048x2048", "1248x1248", "1536x1024", "1024x1536", "1440x1088", "1088x1440", "1392x1120", "1120x1392", "1664x928", "928x1664", "1904x816":
-		return "2k"
-	case "4k", "4ksquare", "4096x4096", "2480x2480", "3056x2032", "2032x3056", "2880x2160", "2160x2880", "2784x2224", "2224x2784", "3312x1872", "1872x3312", "3808x1632":
-		return "4k"
-	default:
-		return "1k"
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Gemini audio input pricing (per-million tokens, model-specific)
 // ---------------------------------------------------------------------------

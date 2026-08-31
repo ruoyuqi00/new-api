@@ -132,7 +132,13 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 
 	if ctx.GetBool("image_generation_call") {
 		if isImageGenerationOnlyBillingModel(summary.ModelName) {
-			summary.ImageGenerationCallPrice = operation_setting.GetGPTImage2PriceOnceCall(ctx.GetString("image_generation_call_size"))
+			summary.ImageGenerationCallPrice = relayInfo.PriceData.ImageResolutionUnitPrice
+			if summary.ImageGenerationCallPrice <= 0 {
+				quote, configured, err := operation_setting.ResolveImageResolutionPrice(summary.ModelName, ctx.GetString("image_generation_call_size"))
+				if configured && err == nil {
+					summary.ImageGenerationCallPrice = quote.UnitPrice
+				}
+			}
 		} else {
 			summary.ImageGenerationCallPrice = operation_setting.GetGPTImage1PriceOnceCall(ctx.GetString("image_generation_call_quality"), ctx.GetString("image_generation_call_size"))
 		}

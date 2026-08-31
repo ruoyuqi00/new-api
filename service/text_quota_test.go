@@ -528,10 +528,14 @@ func TestCalculateTextQuotaSummaryImageGenerationOnlyBillingForGPTImage2(t *test
 	relayInfo := &relaycommon.RelayInfo{
 		OriginModelName: "gpt-image-2",
 		PriceData: types.PriceData{
-			ModelPrice:      0.05,
-			UsePrice:        true,
-			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 0.5},
-			CompletionRatio: 1,
+			ModelPrice:                  0.01,
+			UsePrice:                    true,
+			GroupRatioInfo:              types.GroupRatioInfo{GroupRatio: 0.5},
+			CompletionRatio:             1,
+			ImageResolutionPricingModel: "gpt-image-2",
+			ImageResolutionTier:         "1k",
+			ImageResolutionUnitPrice:    0.01,
+			ImageResolutionImageCount:   1,
 		},
 		StartTime: time.Now(),
 	}
@@ -547,7 +551,8 @@ func TestCalculateTextQuotaSummaryImageGenerationOnlyBillingForGPTImage2(t *test
 	require.True(t, summary.ImageGenerationOnlyBilling)
 	require.Equal(t, 0.0, summary.ModelPrice)
 	require.Equal(t, 0.0, summary.CompletionRatio)
-	require.Equal(t, 12500, summary.Quota)
+	require.InDelta(t, 0.01, summary.ImageGenerationCallPrice, 1e-12)
+	require.Equal(t, 2500, summary.Quota)
 }
 
 func TestImageGenerationOnlyBillingRecognizesGPTImage2Aliases(t *testing.T) {
