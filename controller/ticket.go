@@ -88,7 +88,12 @@ func CreateTicket(c *gin.Context) {
 		ticketAPIError(c, err)
 		return
 	}
-	common.ApiSuccess(c, ticketSummaryResponseFromModel(*ticket))
+	var firstMessage model.TicketMessage
+	if err := model.DB.WithContext(c.Request.Context()).Where("ticket_id = ?", ticket.ID).Order("id ASC").First(&firstMessage).Error; err != nil {
+		ticketAPIError(c, errors.New("ticket message unavailable"))
+		return
+	}
+	common.ApiSuccess(c, gin.H{"ticket": ticketSummaryResponseFromModel(*ticket), "message_id": firstMessage.ID})
 }
 
 func GetTicket(c *gin.Context) {
@@ -273,7 +278,14 @@ func ticketDetailResponseFromService(detail ticketservice.TicketDetail) ticketDe
 		response.Messages = append(response.Messages, ticketMessageResponseFromModel(message))
 	}
 	for _, attachment := range detail.Attachments {
-		response.Attachments = append(response.Attachments, ticketAttachmentResponseFromModel(attachment))
+		attachmentResponse := ticketAttachmentResponseFromModel(attachment)
+		response.Attachments = append(response.Attachments, attachmentResponse)
+		for index := range response.Messages {
+			if response.Messages[index].ID == attachment.MessageID {
+				response.Messages[index].Attachments = append(response.Messages[index].Attachments, attachmentResponse)
+				break
+			}
+		}
 	}
 	return response
 }

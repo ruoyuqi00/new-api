@@ -46,6 +46,7 @@ func TestCreateTicketHandlerCreatesManualRefundFeedback(t *testing.T) {
 	CreateTicket(c)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"category":"refund"`)
+	assert.Contains(t, recorder.Body.String(), `"message_id"`)
 	assert.NotContains(t, recorder.Body.String(), "balance")
 }
 
@@ -74,4 +75,25 @@ func TestAdminReplyAndCloseTicketHandler(t *testing.T) {
 	c.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(ticket.ID, 10)}}
 	AdminUpdateTicket(c)
 	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestGetTicketHandlerIncludesAttachmentsOnTheirMessage(t *testing.T) {
+	setupTicketControllerTestDB(t)
+	t.Setenv("YUAPI_TICKET_UPLOAD_ROOT", t.TempDir())
+	ticket, err := ticketservice.CreateTicket(context.Background(), 7, ticketservice.CreateTicketInput{Subject: "Attachment", Category: model.TicketCategoryGeneral, Priority: model.TicketPriorityNormal, Body: "See file"})
+	require.NoError(t, err)
+	var message model.TicketMessage
+	require.NoError(t, model.DB.Where("ticket_id = ?", ticket.ID).First(&message).Error)
+	_, err = ticketservice.StoreTicketAttachment(context.Background(), ticket.ID, message.ID, 7, false, ticketservice.TicketAttachmentInput{FileName: "note.txt", MIMEType: "text/plain", Reader: bytes.NewBufferString("hello"), Size: 5})
+	require.NoError(t, err)
+	c, recorder := ticketControllerContext(http.MethodGet, "/api/tickets/"+strconv.FormatInt(ticket.ID, 10), "", 7, common.RoleCommonUser)
+	c.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(ticket.ID, 10)}}
+	GetTicket(c)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload struct {
+		Data ticketDetailResponse `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Len(t, payload.Data.Messages, 1)
+	assert.Len(t, payload.Data.Messages[0].Attachments, 1)
 }

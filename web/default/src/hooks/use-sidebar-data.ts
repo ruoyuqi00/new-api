@@ -126,6 +126,11 @@ export function useSidebarData(): SidebarData {
             url: '/profile',
             icon: User,
           },
+          {
+            title: t('Ticket Center'),
+            url: '/tickets',
+            icon: Ticket,
+          },
         ],
       },
       {
@@ -151,6 +156,11 @@ export function useSidebarData(): SidebarData {
             title: t('Users'),
             url: '/users',
             icon: Users,
+          },
+          {
+            title: t('Support Tickets'),
+            url: '/admin-tickets',
+            icon: Ticket,
           },
           {
             title: t('Redemption Codes'),
