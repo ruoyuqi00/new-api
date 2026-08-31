@@ -226,15 +226,8 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
-	if key == "yucore_media.model_capabilities" {
-		if err := validateYucoreMediaModelCapabilitiesForConfig(value); err != nil {
-			return err
-		}
-	}
-	if key == "SensitiveInputRetentionDays" {
-		if _, err := setting.ParseSensitiveInputRetentionDays(value); err != nil {
-			return err
-		}
+	if err := validateOptionValue(key, value); err != nil {
+		return err
 	}
 	// Save to database first
 	option := Option{
@@ -264,13 +257,8 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
-	if value, ok := values["yucore_media.model_capabilities"]; ok {
-		if err := validateYucoreMediaModelCapabilitiesForConfig(value); err != nil {
-			return err
-		}
-	}
-	if value, ok := values["SensitiveInputRetentionDays"]; ok {
-		if _, err := setting.ParseSensitiveInputRetentionDays(value); err != nil {
+	for key, value := range values {
+		if err := validateOptionValue(key, value); err != nil {
 			return err
 		}
 	}
@@ -299,10 +287,8 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
-	if key == "SensitiveInputRetentionDays" {
-		if _, err = setting.ParseSensitiveInputRetentionDays(value); err != nil {
-			return err
-		}
+	if err = validateOptionValue(key, value); err != nil {
+		return err
 	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
@@ -642,6 +628,20 @@ func updateOptionMap(key string, value string) (err error) {
 	return err
 }
 
+func validateOptionValue(key, value string) error {
+	switch key {
+	case "yucore_media.model_capabilities":
+		return validateYucoreMediaModelCapabilitiesForConfig(value)
+	case "SensitiveInputRetentionDays":
+		_, err := setting.ParseSensitiveInputRetentionDays(value)
+		return err
+	case "image_resolution_price_setting.models":
+		return operation_setting.ValidateImageResolutionPriceJSONString(value)
+	default:
+		return nil
+	}
+}
+
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
 func handleConfigUpdate(key, value string) bool {
 	parts := strings.SplitN(key, ".", 2)
@@ -669,6 +669,9 @@ func handleConfigUpdate(key, value string) bool {
 		performance_setting.UpdateAndSync()
 	} else if configName == "tool_price_setting" {
 		operation_setting.RebuildToolPriceIndex()
+	} else if configName == "image_resolution_price_setting" {
+		operation_setting.RebuildImageResolutionPriceIndex()
+		InvalidatePricingCache()
 	} else if configName == "billing_setting" {
 		InvalidatePricingCache()
 		ratio_setting.InvalidateExposedDataCache()
