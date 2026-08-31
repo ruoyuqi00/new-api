@@ -2,7 +2,7 @@
 
 Date: 2026-09-01 (Asia/Shanghai)
 Branch: `codex/first-token-image-capability-20260831`
-Commit: `73bd3ffaac5d36f2f53edb3a1f7ff1dbd70a6eb3`
+Commit: `875e17903`
 
 ## Scope
 
