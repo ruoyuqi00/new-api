@@ -150,3 +150,61 @@ No paid image request was sent. The local pricing simulation produced:
 `4097x512` was rejected before billing, and an unmanaged image model retained
 the legacy pricing path. The candidate is ready for user UI review only; no
 production rollout is authorized by this record.
+
+## Official image resolution pricing production rollout
+
+The user approved the loopback UI candidate before production changes.
+
+An initial cutover of commit `da138b00f` passed availability, UI asset, and
+billing-field checks, but the before/after pricing audit found that
+`gpt-5.3-codex-spark` changed its display vendor from OpenAI to 讯飞. Traffic
+was immediately restored to `newapi-image-selection-6e56d3d1c` through the
+saved Caddy runtime JSON. The rollback passed all three public status checks,
+the homepage fingerprint check, and retained both containers with restart
+count zero.
+
+The root cause was an existing unordered Go map used for default vendor
+matching: the model name contains both `gpt` and `spark`, so process startup
+could select either rule. Commit `0eb319d84` replaces the unordered matcher
+with explicit deterministic precedence and adds a regression test. The full
+Go suite passed before rebuilding.
+
+Final active release:
+
+- Source commit: `0eb319d8438a9807c561b2009ae59783d90897a6`
+- Image: `yuapi:production-20260831-image-pricing-0eb319d84-ui78330`
+- Image ID: `sha256:067a9467ba9caf21b20fe708d678658ccf42f8231dabf7f7d45b3a7a01efa85a`
+- Active container: `newapi-image-pricing-0eb319d84`
+- Active state: `running/healthy/0`
+- Rollback container: `newapi-image-selection-6e56d3d1c`
+- Rollback state: `running/0`
+
+Fresh pre-cutover recovery artifacts are retained under:
+
+`/opt/newapi/backups/20260831T-image-pricing-0eb319d84/`
+
+They include the immediate Caddy runtime JSON, persisted Caddyfile, old
+container/image metadata, current pricing snapshot, and a validated MySQL
+single-transaction backup. No database snapshot was restored, no balances or
+logs were reset, and no production price option was rewritten.
+
+Final verification:
+
+- The production candidate matched all 119 production UI asset SHA-256 values.
+- Homepage SHA-256 remains
+  `78330de2c18839c29f34305c3ff66d708911162ed331d4d5a9476f2cb8e5bb10`.
+- The previously missing `3395.7bb002d7bb.js` and
+  `531.c823517b31.js` chunks return JavaScript.
+- Current old/new snapshots have identical model sets, existing billing
+  fields, group data, endpoints, and vendor assignments. Nine models expose
+  the new optional image-resolution pricing metadata.
+- Six observation samples returned HTTP 200 for `api`, `global`, and `vip`.
+- Public read-only Playwright checks passed for sign-in, sign-up, and docs.
+- MySQL and Redis remain `running/healthy/0`; Caddy remains `running/0`.
+- Caddy runtime and persisted Caddyfile both contain the new target twice and
+  the old target zero times.
+- Candidate fatal/panic/database-migration error count is zero.
+
+The old production image/container, both rejected/private candidates, both new
+release images, and both backup directories remain retained. No cleanup was
+performed so rollback remains available while production is being tested.
