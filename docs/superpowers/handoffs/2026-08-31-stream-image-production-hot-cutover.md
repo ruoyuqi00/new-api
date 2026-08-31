@@ -68,3 +68,24 @@ three public status endpoints and homepage fingerprint before any cleanup.
 
 Keep both application images, containers, and the MySQL backup until the
 production observation window is explicitly closed.
+
+## Post-cutover rollback
+
+The release was rolled back after users reported frontend 500 pages while
+navigating to lazy-loaded routes such as sign-in, wallet, and usage logs.
+Runtime evidence showed that the candidate embedded the recovered production
+entry HTML and root JS/CSS but did not contain two matching lazy-loaded JS
+chunks. Requests for those chunks returned the SPA HTML fallback with HTTP 200
+and `text/html`, which bypassed HTTP 5xx monitoring but failed in the browser.
+
+Caddy runtime and the persisted host Caddyfile were restored to:
+
+- Active container: `newapi-image-selection-6e56d3d1c`
+- Active image: `yuapi:production-20260829-6e56d3d1c`
+
+After rollback, the three public status endpoints passed three consecutive
+samples, the affected chunk URLs returned `200 text/javascript`, and both the
+active rollback container and retained candidate had restart count `0`. The
+candidate remains private and must not receive production traffic until its
+complete frontend asset graph, rather than only entry assets, matches the
+production baseline.
