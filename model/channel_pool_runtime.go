@@ -13,7 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 const (
@@ -174,16 +173,18 @@ func ChannelPoolSelectionSnapshotFor(group string, modelName string, requestPath
 				snapshot.MissingChannelCount++
 				continue
 			}
+			if options.ImageRequirements != nil && !ChannelSupportsImageRequest(channel, options.ImageModelName, *options.ImageRequirements) {
+				snapshot.SelectionSkippedCount++
+				continue
+			}
 
 			snapshot.CandidateCount++
 			candidates = append(candidates, channel)
 		}
 	}
 
-	collectModelCandidates(modelName)
-	normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
-	if normalizedModel != modelName {
-		collectModelCandidates(normalizedModel)
+	for _, lookupModel := range channelSelectionModelNames(modelName, options) {
+		collectModelCandidates(lookupModel)
 	}
 	channelSyncLock.RUnlock()
 

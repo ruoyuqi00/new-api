@@ -25,3 +25,11 @@ func TestGetModelRequestPreservesImageSelectionFields(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &model.ImageSelectionRequirements{CanonicalModel: "gpt-image-2", Size: "1k", AspectRatio: "2:3", Tier: "1k"}, requirements)
 }
+
+func TestImageSelectionRequirementsAreBuiltForOfficialModelWithoutExplicitSize(t *testing.T) {
+	request := &ModelRequest{Model: "gpt-image-2"}
+	requirements, err := imageSelectionRequirementsForRequest("/v1/images/generations", request)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-image-2", requirements.CanonicalModel)
+	require.Equal(t, "1k", string(requirements.Tier))
+}
