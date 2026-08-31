@@ -118,17 +118,20 @@ func GetRandomSatisfiedChannelWithOptions(group string, model string, retry int,
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
-	// First, try to find channels with the exact model name.
-	channels := filterChannelsByRequestPath(group2model2channels[group][model], requestPath)
-	channels = filterChannelsBySelectionOptions(channels, options)
-	channels = filterChannelsByChannelPoolAvailability(channels, group, model)
-
-	// If no channels found, try to find channels with the normalized model name.
-	if len(channels) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		channels = filterChannelsByRequestPath(group2model2channels[group][normalizedModel], requestPath)
-		channels = filterChannelsBySelectionOptions(channels, options)
-		channels = filterChannelsByChannelPoolAvailability(channels, group, model)
+	modelNames := channelSelectionModelNames(model, options)
+	channels := make([]int, 0)
+	seenChannels := make(map[int]struct{})
+	for _, modelName := range modelNames {
+		candidates := filterChannelsByRequestPath(group2model2channels[group][modelName], requestPath)
+		candidates = filterChannelsBySelectionOptions(candidates, options)
+		candidates = filterChannelsByChannelPoolAvailability(candidates, group, model)
+		for _, channelID := range candidates {
+			if _, exists := seenChannels[channelID]; exists {
+				continue
+			}
+			seenChannels[channelID] = struct{}{}
+			channels = append(channels, channelID)
+		}
 	}
 
 	if len(channels) == 0 {
@@ -183,6 +186,21 @@ func GetRandomSatisfiedChannelWithOptions(group string, model string, retry int,
 		return nil, errors.New("channel not found")
 	}
 	return targetChannels[selectedIndex], nil
+}
+
+func channelSelectionModelNames(modelName string, options ChannelSelectionOptions) []string {
+	if options.ImageRequirements != nil {
+		names := ImageModelSelectionNames(options.ImageRequirements.CanonicalModel, options.ImageRequirements.Tier)
+		if len(names) > 0 && names[0] != "" {
+			return names
+		}
+	}
+	names := []string{modelName}
+	normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+	if normalizedModel != modelName {
+		names = append(names, normalizedModel)
+	}
+	return names
 }
 
 // filterChannelsByRequestPath restricts candidates by request path. Only Advanced

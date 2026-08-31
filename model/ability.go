@@ -128,7 +128,8 @@ func GetChannel(group string, model string, retry int, requestPath string) (*Cha
 func GetChannelWithOptions(group string, model string, retry int, requestPath string, options ChannelSelectionOptions) (*Channel, error) {
 	var abilities []Ability
 
-	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
+	modelNames := channelSelectionModelNames(model, options)
+	channelQuery := DB.Where(commonGroupCol+" = ? and model IN ? and enabled = ?", group, modelNames, true)
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) || common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 		err := channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error
 		if err != nil {

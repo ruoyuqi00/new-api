@@ -261,3 +261,25 @@ func TestGetChannelWithOptionsSelectsHighestPriorityAfterExcludingFailedChannel(
 	require.NotNil(t, selected)
 	assert.Equal(t, channels[1].Id, selected.Id)
 }
+
+func TestGetRandomSatisfiedChannelWithOptionsFindsLegacyImageAliasForCanonicalModel(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+	channel := &Channel{Id: 701, OtherSettings: `{"image_dimension_support":"any"}`}
+	channelSyncLock.Lock()
+	group2model2channels["image-group"] = map[string][]int{"gpt-image-2-2k": {channel.Id}}
+	channelsIDM[channel.Id] = channel
+	channelSyncLock.Unlock()
+
+	selected, err := GetRandomSatisfiedChannelWithOptions("image-group", "gpt-image-2", 0, "", ChannelSelectionOptions{
+		ImageModelName: "gpt-image-2",
+		ImageRequirements: &ImageSelectionRequirements{
+			CanonicalModel: "gpt-image-2",
+			Size:           "2k",
+			Tier:           "2k",
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, channel.Id, selected.Id)
+}

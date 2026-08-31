@@ -79,10 +79,14 @@ func (p *RetryParam) SkipChannelID(channelID int) {
 }
 
 func (p *RetryParam) ChannelSelectionOptions() model.ChannelSelectionOptions {
+	modelName := p.ModelName
+	if p.ImageRequirements != nil && p.ImageRequirements.CanonicalModel != "" {
+		modelName = p.ImageRequirements.CanonicalModel
+	}
 	return model.ChannelSelectionOptions{
 		SkipChannelIDs:    p.skippedChannelIDs,
 		ImageRequirements: p.ImageRequirements,
-		ImageModelName:    p.ModelName,
+		ImageModelName:    modelName,
 	}
 }
 
