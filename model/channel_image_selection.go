@@ -64,8 +64,15 @@ func BuildImageSelectionRequirements(request *dto.ImageRequest) (*ImageSelection
 func ImageModelSelectionNames(modelName string, tier operation_setting.ImageResolutionTier) []string {
 	canonical := normalizeImageCapabilityModel(modelName)
 	names := []string{canonical}
-	if tier != "" {
-		names = append(names, canonical+"-"+string(tier))
+	minRank := imageCapabilityTierRank(tier)
+	for _, candidateTier := range []operation_setting.ImageResolutionTier{
+		operation_setting.ImageResolutionTier1K,
+		operation_setting.ImageResolutionTier2K,
+		operation_setting.ImageResolutionTier4K,
+	} {
+		if minRank == 0 || imageCapabilityTierRank(candidateTier) >= minRank {
+			names = append(names, canonical+"-"+string(candidateTier))
+		}
 	}
 	return names
 }
@@ -176,7 +183,17 @@ func ChannelSupportsImageRequest(channel *Channel, modelName string, requirement
 		return false
 	}
 	capability := ChannelImageCapabilityForModel(channel, modelName)
-	if requirements.Tier != "" && imageCapabilityTierRank(requirements.Tier) > imageCapabilityTierRank(operation_setting.ImageResolutionTier(capability.MaxTier)) {
+	settings := channel.GetOtherSettings()
+	support := strings.ToLower(strings.TrimSpace(settings.ImageDimensionSupport))
+	modelCapabilityConfigured := false
+	canonicalModel := normalizeImageCapabilityModel(modelName)
+	for configuredModel := range settings.ImageModelCapabilities {
+		if normalizeImageCapabilityModel(configuredModel) == canonicalModel {
+			modelCapabilityConfigured = true
+			break
+		}
+	}
+	if requirements.Tier != "" && (modelCapabilityConfigured || support == "any" || support == "custom" || support == "ratio" || support == "aspect_ratio" || support == "aspect-ratio") && imageCapabilityTierRank(requirements.Tier) > imageCapabilityTierRank(operation_setting.ImageResolutionTier(capability.MaxTier)) {
 		return false
 	}
 	if !requirements.RequiresNonSquare() {

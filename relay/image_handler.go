@@ -80,7 +80,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			// Preserve explicit dimensions and tier-plus-ratio requests after
 			// channel defaults are applied, so a square fallback cannot replace
 			// the client's requested shape.
-			if info.ChannelType == constant.ChannelTypeOpenAI {
+			if info.ChannelType == constant.ChannelTypeOpenAI || info.ChannelType == constant.ChannelTypeAdvancedCustom {
 				jsonData, err = preserveRequestedImageDimensions(jsonData, request)
 				if err != nil {
 					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())

@@ -93,6 +93,11 @@ func TestBuildImageSelectionRequirementsRejectsInvalidShape(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestImageModelSelectionNamesIncludeHigherTierAliases(t *testing.T) {
+	require.Equal(t, []string{"gpt-image-2", "gpt-image-2-1k", "gpt-image-2-2k", "gpt-image-2-4k"}, ImageModelSelectionNames("gpt-image-2", "1k"))
+	require.Equal(t, []string{"gpt-image-2", "gpt-image-2-2k", "gpt-image-2-4k"}, ImageModelSelectionNames("gpt-image-2", "2k"))
+}
+
 func TestFilterChannelsBySelectionOptionsRejectsUnknownChannelForNonSquareRequest(t *testing.T) {
 	previous := channelsIDM
 	channelsIDM = map[int]*Channel{}
