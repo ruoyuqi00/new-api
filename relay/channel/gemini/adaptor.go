@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service/relayconvert"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/types"
 
@@ -63,26 +65,15 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		return nil, errors.New("not supported model for image generation, only imagen models are supported")
 	}
 
-	// convert size to aspect ratio but allow user to specify aspect ratio
-	aspectRatio := "1:1" // default aspect ratio
+	// Convert the shared request into Imagen's native tier and ratio fields.
 	size := strings.TrimSpace(request.Size)
-	if size != "" {
-		if strings.Contains(size, ":") {
-			aspectRatio = size
-		} else {
-			switch size {
-			case "256x256", "512x512", "1024x1024":
-				aspectRatio = "1:1"
-			case "1536x1024":
-				aspectRatio = "3:2"
-			case "1024x1536":
-				aspectRatio = "2:3"
-			case "1024x1792":
-				aspectRatio = "9:16"
-			case "1792x1024":
-				aspectRatio = "16:9"
-			}
-		}
+	aspectRatio := imagenAspectRatio(request)
+	tier, err := imagenResolutionTier(size)
+	if err != nil {
+		return nil, err
+	}
+	if tier == operation_setting.ImageResolutionTier4K {
+		return nil, errors.New("imagen adapter does not support 4k image size")
 	}
 
 	// build gemini imagen request
@@ -95,6 +86,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		Parameters: dto.GeminiImageParameters{
 			SampleCount:      int(lo.FromPtrOr(request.N, uint(1))),
 			AspectRatio:      aspectRatio,
+			ImageSize:        strings.ToUpper(string(tier)),
 			PersonGeneration: "allow_adult", // default allow adult
 		},
 	}
@@ -105,8 +97,8 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	// imageSize values: 1K (default), 2K
 	// https://ai.google.dev/gemini-api/docs/imagen
 	// https://platform.openai.com/docs/api-reference/images/create
-	if request.Quality != "" {
-		imageSize := "1K" // default
+	if size == "" || strings.EqualFold(size, "auto") {
+		imageSize := "1K"
 		switch request.Quality {
 		case "hd", "high":
 			imageSize = "2K"
@@ -122,6 +114,69 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 
 	return geminiRequest, nil
+}
+
+func imagenAspectRatio(request dto.ImageRequest) string {
+	if request.AspectRatio != nil {
+		if value := strings.TrimSpace(*request.AspectRatio); value != "" && !strings.EqualFold(value, "auto") {
+			return value
+		}
+	}
+	if width, height, ok := imageDimensions(request.Size); ok {
+		divisor := greatestCommonDivisor(width, height)
+		return fmt.Sprintf("%d:%d", width/divisor, height/divisor)
+	}
+	return "1:1"
+}
+
+func imagenResolutionTier(size string) (operation_setting.ImageResolutionTier, error) {
+	normalized := strings.ToLower(strings.TrimSpace(size))
+	switch normalized {
+	case "", "auto", "1k":
+		return operation_setting.ImageResolutionTier1K, nil
+	case "2k":
+		return operation_setting.ImageResolutionTier2K, nil
+	case "4k":
+		return operation_setting.ImageResolutionTier4K, nil
+	}
+	width, height, ok := imageDimensions(normalized)
+	if !ok {
+		return "", fmt.Errorf("invalid image size %q", size)
+	}
+	switch {
+	case width <= 1024 && height <= 1024:
+		return operation_setting.ImageResolutionTier1K, nil
+	case width <= 2048 && height <= 2048:
+		return operation_setting.ImageResolutionTier2K, nil
+	case width <= 4096 && height <= 4096:
+		return operation_setting.ImageResolutionTier4K, nil
+	default:
+		return "", fmt.Errorf("image size %q exceeds the 4096x4096 limit", size)
+	}
+}
+
+func imageDimensions(size string) (int, int, bool) {
+	canonical := strings.NewReplacer("*", "x", "X", "x", "×", "x").Replace(strings.TrimSpace(size))
+	parts := strings.Split(canonical, "x")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+func greatestCommonDivisor(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a < 1 {
+		return 1
+	}
+	return a
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
