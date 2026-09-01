@@ -75,3 +75,19 @@ login page, and the runtime target before any cleanup.
 
 Keep both application containers, images, the source archive, and the backup
 directory until the production observation window is explicitly closed.
+
+## User-authorized instance cleanup
+
+After the production release remained healthy, the user explicitly requested
+that only the current YuAPI application instance remain. Six retired YuAPI
+containers were stopped and removed, including the previous rollback
+container. Their container metadata was saved as
+`retired-yuapi-containers-before.json` in the backup directory before removal.
+
+The corresponding six obsolete `system_instances` heartbeat rows were removed
+in one transaction after a table-only backup was written and hashed. The
+current `newapi-ticket-image-b36876d29` heartbeat row remains. Production
+MySQL, Redis, Caddy, unrelated services, customer data, billing records, usage
+logs, and all old YuAPI images were left in place. Container rollback now
+requires recreating an old container from its retained image and environment
+metadata before restoring the saved Caddy runtime JSON.
