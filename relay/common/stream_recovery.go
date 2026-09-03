@@ -306,7 +306,11 @@ func (info *RelayInfo) MarkStreamAuthoritativeUsage() {
 }
 
 func (info *RelayInfo) MarkStreamTerminalUsage() {
-	if info == nil || info.StreamRecovery == nil {
+	if info == nil {
+		return
+	}
+	info.StreamTerminalUsageSeen = true
+	if info.StreamRecovery == nil {
 		return
 	}
 

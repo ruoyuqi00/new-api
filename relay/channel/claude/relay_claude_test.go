@@ -25,6 +25,25 @@ func commonPointer[T any](value T) *T {
 	return &value
 }
 
+func TestHandleStreamFinalResponseMarksFallbackUsageEstimated(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-test"},
+	}
+	info.SetEstimatePromptTokens(400)
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+
+	HandleStreamFinalResponse(c, info, claudeInfo)
+
+	require.Equal(t, "estimated", claudeInfo.Usage.UsageSource)
+	require.Equal(t, "anthropic", claudeInfo.Usage.UsageSemantic)
+	require.Equal(t, 400, claudeInfo.Usage.PromptTokens)
+}
+
 type claudeStreamWriteSignal struct {
 	gin.ResponseWriter
 	wrote chan struct{}
@@ -275,9 +294,39 @@ func TestClaudeStreamHandlerPropagatesForegroundWriteFailure(t *testing.T) {
 
 	usage, relayErr := ClaudeStreamHandler(c, resp, info)
 
-	require.Nil(t, usage)
+	require.NotNil(t, usage)
+	require.Equal(t, 2, usage.PromptTokens)
+	require.Equal(t, 1, usage.CompletionTokens)
+	require.False(t, info.StreamTerminalUsageSeen)
+	require.Equal(t, relaycommon.StreamUsageStatePartial, info.GetStreamRecoverySnapshot().UsageState)
 	require.NotNil(t, relayErr)
 	require.ErrorContains(t, relayErr, "downstream write failed")
+}
+
+func TestClaudeStreamHandlerPreservesTerminalUsageAfterLaterStreamFailure(t *testing.T) {
+	configureClaudeStreamRecoveryTest(t)
+	c, _, info, _ := newClaudeStreamRecoveryTest(t)
+	messageStart := `{"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":2,"output_tokens":1}}}`
+	messageDelta := `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":2,"output_tokens":3}}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: " + messageStart + "\n\n" +
+				"data: " + messageDelta + "\n\n" +
+				"data: {malformed\n\n",
+		)),
+	}
+
+	usage, relayErr := ClaudeStreamHandler(c, resp, info)
+
+	require.NotNil(t, relayErr)
+	require.ErrorContains(t, relayErr, "invalid character")
+	require.NotNil(t, usage)
+	require.Equal(t, 2, usage.PromptTokens)
+	require.Equal(t, 3, usage.CompletionTokens)
+	require.Equal(t, 5, usage.TotalTokens)
+	require.Equal(t, "anthropic", usage.UsageSemantic)
+	require.Equal(t, relaycommon.StreamUsageStateExact, info.GetStreamRecoverySnapshot().UsageState)
 }
 
 func TestClaudeStreamHandlerConvertedDoesNotWriteAfterClientGone(t *testing.T) {

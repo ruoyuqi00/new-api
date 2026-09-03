@@ -884,6 +884,7 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
 		}
 		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
+		claudeInfo.Usage.UsageSource = fallback.UsageSource
 	}
 	if claudeInfo.Usage != nil {
 		claudeInfo.Usage.UsageSemantic = "anthropic"
@@ -923,7 +924,9 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		}
 	})
 	if err != nil {
-		return nil, err
+		// Preserve usage already received before a later stream parse/write
+		// failure so the caller can settle the authoritative terminal usage.
+		return claudeInfo.Usage, err
 	}
 
 	HandleStreamFinalResponse(c, info, claudeInfo)

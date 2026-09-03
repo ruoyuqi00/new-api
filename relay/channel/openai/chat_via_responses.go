@@ -260,12 +260,27 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		}
 		if streamResp.Response != nil && streamResp.Response.HasImageGenerationCall() {
 			imageGeneration = true
+			c.Set("image_generation_call", true)
 		}
 		if streamResp.Item != nil && streamResp.Item.Type == dto.ResponsesOutputTypeImageGenerationCall {
 			imageGeneration = true
+			c.Set("image_generation_call", true)
 		}
 
 		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" {
+			if streamResp.Response != nil && streamResp.Response.Usage != nil {
+				candidate := relayconvert.UsageFromResponsesUsage(streamResp.Response.Usage)
+				usageValid := service.ValidGPTTextUsage(candidate)
+				if imageGeneration {
+					usageValid = service.ValidUsage(candidate)
+				}
+				if usageValid {
+					candidate.UsageSource = "upstream"
+					state.Usage = candidate
+					info.StreamTerminalUsageSeen = true
+					info.MarkStreamTerminalUsage()
+				}
+			}
 			if streamResp.Response != nil {
 				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
 					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)

@@ -411,6 +411,19 @@ func SettleAcceptedTextBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	return postTextConsumeQuota(ctx, relayInfo, usage, []string{"accepted upstream stream ended before a confirmed terminal result"})
 }
 
+func shouldRefundUnconfirmedFailedStream(relayInfo *relaycommon.RelayInfo, authoritativeUsage bool) bool {
+	if relayInfo == nil || authoritativeUsage || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
+		return false
+	}
+	switch relayInfo.StreamStatus.EndReason {
+	case relaycommon.StreamEndReasonClientGone,
+		relaycommon.StreamEndReasonHandlerStop:
+		return true
+	default:
+		return false
+	}
+}
+
 func isAuthoritativeTextUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
 	if usage == nil || usage.UsageSource == "estimated" {
 		return false
@@ -479,6 +492,26 @@ func isGPTTextSettlementRequest(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	}
 	return path == "/v1/responses" || path == "/v1/responses/compact" ||
 		path == "/v1/chat/completions" || path == "/v1/completions"
+}
+
+func isFailedTextStreamRefundEligible(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if isGPTTextSettlementRequest(ctx, relayInfo) {
+		return true
+	}
+	if ctx != nil && ctx.GetBool("image_generation_call") {
+		return false
+	}
+	path := ""
+	if relayInfo != nil {
+		path = relayInfo.RequestURLPath
+	}
+	if path == "" && ctx != nil && ctx.Request != nil && ctx.Request.URL != nil {
+		path = ctx.Request.URL.Path
+	}
+	if queryIndex := strings.IndexByte(path, '?'); queryIndex >= 0 {
+		path = path[:queryIndex]
+	}
+	return path == "/v1/messages"
 }
 
 func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
@@ -599,7 +632,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			logger.LogWarn(ctx, "unconfirmed GPT text usage exceeded reservation; capping settlement at pre-consumed quota")
 		}
 	}
-	if !estimatedGPTTextUsage {
+	if !estimatedGPTTextUsage && (!authoritativeUsage || !isFailedTextStreamRefundEligible(ctx, relayInfo)) {
 		if quota, preserved := applyPreConsumedQuotaFloor(relayInfo, summary.Quota); preserved {
 			summary.Quota = quota
 			settledFromReservation = true
@@ -621,6 +654,14 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	if summary.ImageGenerationCallPrice > 0 {
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
+	}
+
+	refundUnconfirmedFailedStream := isFailedTextStreamRefundEligible(ctx, relayInfo) &&
+		shouldRefundUnconfirmedFailedStream(relayInfo, authoritativeUsage)
+	if refundUnconfirmedFailedStream {
+		summary.Quota = 0
+		settledFromReservation = false
+		extraContent = append(extraContent, "unconfirmed failed stream; pre-consumed quota refunded")
 	}
 
 	ambiguousSubmission := relayInfo.HasAmbiguousUpstreamSubmission()
@@ -680,6 +721,9 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		}
 		if settledFromReservation {
 			other["settled_from_reservation"] = true
+		}
+		if refundUnconfirmedFailedStream {
+			other["unconfirmed_stream_charge_refunded"] = true
 		}
 		recovery := relayInfo.GetStreamRecoverySnapshot()
 		if recovery.DrainResult != relaycommon.StreamDrainResultNone {

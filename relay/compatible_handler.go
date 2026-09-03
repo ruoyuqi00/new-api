@@ -250,7 +250,13 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 }
 
 func settleAcceptedStreamError(c *gin.Context, info *relaycommon.RelayInfo, usage any, relayErr *types.NewAPIError) *types.NewAPIError {
-	if relayErr == nil || info == nil || !info.GetStreamRecoverySnapshot().Accepted {
+	if relayErr == nil || info == nil || !info.IsStream {
+		return relayErr
+	}
+	snapshot := info.GetStreamRecoverySnapshot()
+	settleWithoutRecovery := info.StreamTerminalUsageSeen ||
+		info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonScannerErr
+	if !snapshot.Accepted && !settleWithoutRecovery {
 		return relayErr
 	}
 	textUsage, ok := usage.(*dto.Usage)

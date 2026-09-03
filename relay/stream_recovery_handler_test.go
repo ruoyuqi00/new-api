@@ -645,7 +645,131 @@ func TestAcceptedStreamErrorSettlementIsEstimatedAndSingleShot(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "[DONE]")
 }
 
-func TestResponsesAndClaudeAcceptedMalformedStreamsSettleEstimatedUsage(t *testing.T) {
+func TestAcceptedStreamErrorSettlementUsesAuthoritativeUsageWhenRecoveryDisabled(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = false
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	configureStreamRecoveryBillingTest(t)
+	require.NoError(t, model.DB.Create(&model.User{Id: 811, Username: "stream-user"}).Error)
+	require.NoError(t, model.DB.Create(&model.Channel{Id: 812, Name: "stream-channel"}).Error)
+
+	billing := &streamRecoveryBillingRecorder{preConsumed: 1250}
+	status := relaycommon.NewStreamStatus()
+	status.SetEndReason(relaycommon.StreamEndReasonHandlerStop, nil)
+	status.RecordError("upstream returned a failed terminal event")
+	info := &relaycommon.RelayInfo{
+		UserId: 811, TokenId: 813, OriginModelName: "gpt-test", UsingGroup: "default",
+		StartTime: time.Now(), IsStream: true, RelayFormat: types.RelayFormatOpenAI,
+		RelayMode: relayconstant.RelayModeResponses, RequestURLPath: "/v1/responses",
+		Billing: billing, FinalPreConsumedQuota: 1250, StreamStatus: status,
+		StreamTerminalMarkersRequired: true, StreamTerminalUsageSeen: true,
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 812, UpstreamModelName: "gpt-test"},
+	}
+	info.MarkStreamAccepted()
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	relayErr := types.NewError(errors.New("failed terminal event"), types.ErrorCodeBadResponse)
+
+	result := settleAcceptedStreamError(c, info, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSource: "upstream",
+	}, relayErr)
+
+	require.True(t, types.IsSkipRetryError(result))
+	require.Equal(t, []int{440}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", info.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 440, logs[0].Quota)
+	require.NotContains(t, logs[0].Other, `"usage_unconfirmed":true`)
+}
+
+func TestUnconfirmedClaudeClientGoneDoesNotSettleWhenRecoveryDisabled(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = false
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	configureStreamRecoveryBillingTest(t)
+
+	billing := &streamRecoveryBillingRecorder{preConsumed: 1250}
+	status := relaycommon.NewStreamStatus()
+	status.SetEndReason(relaycommon.StreamEndReasonClientGone, context.Canceled)
+	info := &relaycommon.RelayInfo{
+		UserId: 821, TokenId: 823, OriginModelName: "claude-test", UsingGroup: "default",
+		StartTime: time.Now(), IsStream: true, RelayFormat: types.RelayFormatClaude,
+		FinalRequestRelayFormat: types.RelayFormatClaude,
+		RelayMode:               relayconstant.RelayModeChatCompletions,
+		RequestURLPath:          "/v1/messages",
+		Billing:                 billing,
+		FinalPreConsumedQuota:   1250,
+		StreamStatus:            status,
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 822, UpstreamModelName: "claude-test"},
+	}
+	info.MarkStreamAccepted()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	relayErr := types.NewError(context.Canceled, types.ErrorCodeBadResponse)
+
+	result := settleAcceptedStreamError(c, info, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSemantic: "anthropic",
+	}, relayErr)
+
+	require.Same(t, relayErr, result)
+	require.Empty(t, billing.settled)
+	require.True(t, billing.NeedsRefund())
+	var logCount int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", info.UserId).Count(&logCount).Error)
+	require.Zero(t, logCount)
+}
+
+func TestScannerErrorSettlementUsesEstimateWhenRecoveryDisabled(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = false
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	configureStreamRecoveryBillingTest(t)
+	require.NoError(t, model.DB.Create(&model.User{Id: 831, Username: "stream-user"}).Error)
+	require.NoError(t, model.DB.Create(&model.Channel{Id: 832, Name: "stream-channel"}).Error)
+
+	billing := &streamRecoveryBillingRecorder{preConsumed: 1250}
+	status := relaycommon.NewStreamStatus()
+	status.SetEndReason(relaycommon.StreamEndReasonScannerErr, errors.New("upstream read failed"))
+	info := &relaycommon.RelayInfo{
+		UserId: 831, TokenId: 833, OriginModelName: "gpt-test", UsingGroup: "default",
+		StartTime: time.Now(), IsStream: true, RelayFormat: types.RelayFormatOpenAI,
+		RelayMode: relayconstant.RelayModeResponses, RequestURLPath: "/v1/responses",
+		Billing: billing, FinalPreConsumedQuota: 1250, StreamStatus: status,
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 832, UpstreamModelName: "gpt-test"},
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	relayErr := types.NewError(errors.New("upstream read failed"), types.ErrorCodeBadResponse)
+
+	result := settleAcceptedStreamError(c, info, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSource: "estimated",
+	}, relayErr)
+
+	require.True(t, types.IsSkipRetryError(result))
+	require.Equal(t, []int{440}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", info.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 440, logs[0].Quota)
+	require.Contains(t, logs[0].Other, `"usage_unconfirmed":true`)
+	require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+}
+
+func TestResponsesAndClaudeAcceptedMalformedStreamsSettleByUsageConfidence(t *testing.T) {
 	originalStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = originalStreamingTimeout })
@@ -669,7 +793,7 @@ func TestResponsesAndClaudeAcceptedMalformedStreamsSettleEstimatedUsage(t *testi
 			request: &dto.ClaudeRequest{Model: "claude-test", Stream: common.GetPointer(true), MaxTokens: common.GetPointer(uint(128))},
 			invoke:  ClaudeHelper,
 			wantErr: true,
-			want:    1250,
+			want:    0,
 		},
 	}
 	for _, test := range tests {
@@ -723,6 +847,9 @@ func TestResponsesAndClaudeAcceptedMalformedStreamsSettleEstimatedUsage(t *testi
 			require.Len(t, logs, 1)
 			require.Equal(t, 400, logs[0].PromptTokens)
 			require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
+			if test.wantErr {
+				require.Contains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+			}
 		})
 	}
 }

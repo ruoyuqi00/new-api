@@ -602,6 +602,80 @@ func TestChargeViolationFeeIfNeededPreservesGrokFallbackMetadata(t *testing.T) {
 	assert.Equal(t, CSAMViolationMarker, other["violation_fee_marker"])
 }
 
+func TestUnconfirmedFailedStreamRefundsNormalChargeButKeepsViolationFee(t *testing.T) {
+	truncate(t)
+
+	settings := model_setting.GetGrokSettings()
+	previousSettings := *settings
+	*settings = model_setting.GrokSettings{
+		ViolationDeductionEnabled: true,
+		ViolationDeductionAmount:  0.05,
+	}
+	t.Cleanup(func() { *settings = previousSettings })
+
+	const (
+		userID        = 951
+		tokenID       = 952
+		channelID     = 953
+		startingQuota = 200_000
+		preConsumed   = 1_250
+	)
+	seedUser(t, userID, startingQuota)
+	seedToken(t, tokenID, userID, "stream-violation-token", startingQuota)
+	seedChannel(t, channelID)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("token_name", "stream-violation-token")
+	c.Set("username", "stream-violation-user")
+	relayInfo := &relaycommon.RelayInfo{
+		TokenId: tokenID, TokenKey: "stream-violation-token", UserId: userID,
+		UsingGroup: "default", StartTime: time.Now(),
+		OriginModelName: "grok-test", RequestURLPath: "/v1/responses",
+		UserQuota: startingQuota, ForcePreConsume: true, IsStream: true,
+		StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonHandlerStop, true),
+		UserSetting:  dto.UserSetting{BillingPreference: "wallet_only"},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: preConsumed,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channelID},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
+	require.Nil(t, PreConsumeBilling(c, preConsumed, relayInfo))
+
+	require.NoError(t, SettleAcceptedTextBilling(c, relayInfo, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSource: "estimated",
+	}))
+	apiErr := types.NewErrorWithStatusCode(
+		errors.New(CSAMViolationMarker),
+		types.ErrorCodeViolationFeeGrokCSAM,
+		http.StatusBadRequest,
+	)
+	require.True(t, ChargeViolationFeeIfNeeded(c, relayInfo, apiErr))
+
+	feeQuota := calcViolationFeeQuota(0.05, 1)
+	var user model.User
+	require.NoError(t, model.DB.First(&user, userID).Error)
+	assert.Equal(t, startingQuota-feeQuota, user.Quota)
+	assert.Equal(t, feeQuota, user.UsedQuota)
+
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, tokenID).Error)
+	assert.Equal(t, startingQuota-feeQuota, token.RemainQuota)
+	assert.Equal(t, feeQuota, token.UsedQuota)
+
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", userID, model.LogTypeConsume).Order("id ASC").Find(&logs).Error)
+	require.Len(t, logs, 2)
+	assert.Zero(t, logs[0].Quota)
+	assert.Contains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+	assert.Equal(t, feeQuota, logs[1].Quota)
+	assert.Contains(t, logs[1].Other, `"violation_fee":true`)
+}
+
 func TestChargeInputModerationViolationChargesExactRequestQuota(t *testing.T) {
 	truncate(t)
 

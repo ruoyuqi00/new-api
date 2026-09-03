@@ -1051,6 +1051,275 @@ func TestGPTTextEstimatedSettlementUsesObservedTokensInsteadOfReservation(t *tes
 	}
 }
 
+func TestUnconfirmedFailedTextStreamsRefundReservation(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+
+	for _, reason := range []relaycommon.StreamEndReason{
+		relaycommon.StreamEndReasonClientGone,
+		relaycommon.StreamEndReasonHandlerStop,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			billing := &recordingTaskBillingSettler{preConsumed: 1250}
+			relayInfo := &relaycommon.RelayInfo{
+				UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+				RequestURLPath: "/v1/responses",
+				StartTime:      time.Now(),
+				IsStream:       true,
+				StreamStatus:   streamStatusForAffinityUsageTest(reason, true),
+				Billing:        billing,
+				ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
+				PriceData: types.PriceData{
+					ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+				},
+			}
+			relayInfo.EnableStreamRecovery()
+			relayInfo.MarkStreamAccepted()
+			t.Cleanup(relayInfo.FinishStreamRecovery)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+			err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{
+				PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSource: "estimated",
+			})
+
+			require.NoError(t, err)
+			require.Equal(t, []int{0}, billing.settled)
+			var logs []model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+			require.Len(t, logs, 1)
+			require.Zero(t, logs[0].Quota)
+			require.Contains(t, logs[0].Other, `"usage_unconfirmed":true`)
+			require.Contains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+
+			require.NoError(t, model.DB.Exec("UPDATE users SET used_quota = 0, request_count = 0 WHERE id = ?", relayInfo.UserId).Error)
+			require.NoError(t, model.DB.Exec("UPDATE channels SET used_quota = 0 WHERE id = ?", relayInfo.ChannelId).Error)
+			require.NoError(t, model.LOG_DB.Exec("DELETE FROM logs").Error)
+		})
+	}
+}
+
+func TestUnconfirmedScannerErrorKeepsEstimatedCharge(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+		RequestURLPath: "/v1/responses",
+		StartTime:      time.Now(),
+		IsStream:       true,
+		StreamStatus:   streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonScannerErr, true),
+		Billing:        billing,
+		ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSource: "estimated",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int{440}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 440, logs[0].Quota)
+	require.Contains(t, logs[0].Other, `"usage_unconfirmed":true`)
+	require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+}
+
+func TestFailedTextStreamWithAuthoritativeUsageStillChargesActualTokens(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+		RequestURLPath:                "/v1/responses",
+		StartTime:                     time.Now(),
+		IsStream:                      true,
+		StreamStatus:                  streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonClientGone, true),
+		StreamTerminalMarkersRequired: true,
+		StreamTerminalSuccess:         true,
+		StreamTerminalUsageSeen:       true,
+		Billing:                       billing,
+		ChannelMeta:                   &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	relayInfo.MarkStreamAuthoritativeUsage()
+	relayInfo.MarkStreamTerminalUsage()
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSource: "upstream",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int{440}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 440, logs[0].Quota)
+	require.NotContains(t, logs[0].Other, `"usage_unconfirmed":true`)
+	require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+}
+
+func TestFailedClaudeTextStreamsWithAuthoritativeUsageChargeActualTokens(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+
+	for _, reason := range []relaycommon.StreamEndReason{
+		relaycommon.StreamEndReasonClientGone,
+		relaycommon.StreamEndReasonHandlerStop,
+		relaycommon.StreamEndReasonScannerErr,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			billing := &recordingTaskBillingSettler{preConsumed: 1250}
+			relayInfo := &relaycommon.RelayInfo{
+				UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "claude-test",
+				RequestURLPath:                "/v1/messages",
+				FinalRequestRelayFormat:       types.RelayFormatClaude,
+				StartTime:                     time.Now(),
+				IsStream:                      true,
+				StreamStatus:                  streamStatusForAffinityUsageTest(reason, true),
+				StreamTerminalMarkersRequired: true,
+				StreamTerminalUsageSeen:       true,
+				Billing:                       billing,
+				ChannelMeta:                   &relaycommon.ChannelMeta{ChannelId: 201},
+				PriceData: types.PriceData{
+					ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+				},
+			}
+			relayInfo.EnableStreamRecovery()
+			relayInfo.MarkStreamAccepted()
+			relayInfo.MarkStreamAuthoritativeUsage()
+			relayInfo.MarkStreamTerminalUsage()
+			t.Cleanup(relayInfo.FinishStreamRecovery)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+			err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{
+				PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420,
+				UsageSource: "upstream", UsageSemantic: "anthropic",
+			})
+
+			require.NoError(t, err)
+			require.Equal(t, []int{440}, billing.settled)
+			var logs []model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+			require.Len(t, logs, 1)
+			require.Equal(t, 440, logs[0].Quota)
+			require.Contains(t, logs[0].Other, `"usage_semantic":"anthropic"`)
+			require.NotContains(t, logs[0].Other, `"usage_unconfirmed":true`)
+			require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+
+			require.NoError(t, model.DB.Exec("UPDATE users SET used_quota = 0, request_count = 0 WHERE id = ?", relayInfo.UserId).Error)
+			require.NoError(t, model.DB.Exec("UPDATE channels SET used_quota = 0 WHERE id = ?", relayInfo.ChannelId).Error)
+			require.NoError(t, model.LOG_DB.Exec("DELETE FROM logs").Error)
+		})
+	}
+}
+
+func TestUnconfirmedImageStreamKeepsExistingBilling(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "image-test",
+		RequestURLPath: "/v1/responses",
+		StartTime:      time.Now(),
+		IsStream:       true,
+		StreamStatus:   streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonHandlerStop, true),
+		Billing:        billing,
+		ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Set("image_generation_call", true)
+
+	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{UsageSource: "estimated"})
+
+	require.NoError(t, err)
+	require.Equal(t, []int{1250}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 1250, logs[0].Quota)
+	require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+}
+
+func TestAuthoritativeImageStreamKeepsReservationFloor(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "image-test",
+		RequestURLPath: "/v1/images/generations",
+		StartTime:      time.Now(),
+		IsStream:       true,
+		StreamStatus:   streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonHandlerStop, true),
+		Billing:        billing,
+		ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	relayInfo.MarkStreamAuthoritativeUsage()
+	relayInfo.MarkStreamTerminalUsage()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSource: "upstream",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int{1250}, billing.settled)
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 1250, logs[0].Quota)
+	require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+}
+
 func TestNonGPTEstimatedSettlementKeepsExistingReservationRule(t *testing.T) {
 	originalEnabled := constant.StreamUsageDrainEnabled
 	constant.StreamUsageDrainEnabled = true

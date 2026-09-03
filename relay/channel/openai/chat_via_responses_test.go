@@ -114,6 +114,57 @@ func TestOaiResponsesToChatStreamHandlerEstimatesIncompleteTerminal(t *testing.T
 	require.NotContains(t, recorder.Body.String(), "resp_private")
 }
 
+func TestOaiResponsesToChatStreamHandlerKeepsExactUsageFromFailedTerminal(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	oldDrainEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamingTimeout = 30
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+		constant.StreamUsageDrainEnabled = oldDrainEnabled
+	})
+
+	body := strings.Join([]string{
+		`data: {"type":"response.failed","response":{"id":"resp_1","model":"gpt-test","status":"failed","error":{"type":"server_error","code":"server_error","message":"failed after usage"},"usage":{"input_tokens":400,"output_tokens":20,"total_tokens":420}}}`,
+		``,
+	}, "\n")
+	c, _, resp, info := newResponsesChatTestContext(t, body, true)
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+	info.EnableStreamRecovery()
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	usage, relayErr := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.NotNil(t, relayErr)
+	require.NotNil(t, usage)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.Equal(t, 20, usage.CompletionTokens)
+	require.Equal(t, 420, usage.TotalTokens)
+	require.Equal(t, "upstream", usage.UsageSource)
+	require.True(t, info.StreamTerminalUsageSeen)
+	require.Equal(t, relaycommon.StreamUsageStateExact, info.GetStreamRecoverySnapshot().UsageState)
+}
+
+func TestOaiResponsesToChatStreamHandlerMarksImageGenerationBeforeFailure(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"image_generation_call","id":"img_1","status":"in_progress"}}`,
+		`data: {"type":"response.failed","response":{"id":"resp_1","model":"gpt-test","status":"failed","error":{"type":"server_error","code":"server_error","message":"image failed"}}}`,
+		``,
+	}, "\n")
+	c, _, resp, info := newResponsesChatTestContext(t, body, true)
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+
+	_, relayErr := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.NotNil(t, relayErr)
+	require.True(t, c.GetBool("image_generation_call"))
+}
+
 func TestOaiResponsesToChatBufferedStreamHandlerReturnsJSONFromSSE(t *testing.T) {
 	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
