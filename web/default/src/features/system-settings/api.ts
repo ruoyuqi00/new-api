@@ -88,6 +88,23 @@ export async function getCurrentLogCleanupTask() {
   return res.data
 }
 
+export async function getLatestLogCleanupTask() {
+  const res = await api.get<SystemTaskResponse<LogCleanupTask | null>>(
+    '/api/system-task/latest',
+    {
+      params: { type: 'log_cleanup' },
+    }
+  )
+  return res.data
+}
+
+export async function resumeLogCleanupTask() {
+  const res = await api.post<SystemTaskResponse<LogCleanupTask>>(
+    '/api/system-task/log-cleanup/resume'
+  )
+  return res.data
+}
+
 export async function startSensitiveInputCleanupTask() {
   const res = await api.post<SystemTaskResponse<SensitiveInputCleanupTask>>(
     '/api/system-task/sensitive-input-cleanup'

@@ -27,6 +27,10 @@ function stableStringify(obj) {
 
 const newKeys = {
   en: {
+    'Log cleanup resumed.': 'Log cleanup resumed.',
+    'Resume failed cleanup': 'Resume failed cleanup',
+    'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
+      'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.',
     'Any aspect ratio': 'Any aspect ratio',
     'Automatic detection': 'Automatic detection',
     'Controls whether non-square image requests can use this channel.':
@@ -94,12 +98,15 @@ const newKeys = {
     'Search tickets': 'Search tickets',
     'Send Reply': 'Send Reply',
     Subject: 'Subject',
-    'Subject and description are required': 'Subject and description are required',
-    'Summarize the issue in one sentence': 'Summarize the issue in one sentence',
+    'Subject and description are required':
+      'Subject and description are required',
+    'Summarize the issue in one sentence':
+      'Summarize the issue in one sentence',
     Support: 'Support',
     'Ticket Center': 'Ticket Center',
     'Support Tickets': 'Support Tickets',
-    'This ticket is closed. Contact support to reopen it.': 'This ticket is closed. Contact support to reopen it.',
+    'This ticket is closed. Contact support to reopen it.':
+      'This ticket is closed. Contact support to reopen it.',
     'Ticket could not be created': 'Ticket could not be created',
     'Ticket created': 'Ticket created',
     'Ticket not found': 'Ticket not found',
@@ -111,6 +118,10 @@ const newKeys = {
     '{{count}} files selected': '{{count}} files selected',
   },
   zh: {
+    'Log cleanup resumed.': '日志清理已恢复。',
+    'Resume failed cleanup': '恢复失败的清理',
+    'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
+      '上次清理在保存最终状态前意外中断。恢复该任务可以安全完成清理，不会重复调整用量统计。',
     'Any aspect ratio': '任意宽高比',
     'Automatic detection': '自动检测',
     'Controls whether non-square image requests can use this channel.':
@@ -162,7 +173,8 @@ const newKeys = {
     Attachments: '附件',
     'Close Ticket': '关闭工单',
     Closed: '已关闭',
-    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.': '描述问题，或提交人工退款审核申请。退款由管理员线下处理。',
+    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.':
+      '描述问题，或提交人工退款审核申请。退款由管理员线下处理。',
     'Describe the problem in detail': '请详细描述问题',
     'High Priority': '高优先级',
     'Manual Refund': '人工退款',
@@ -182,7 +194,8 @@ const newKeys = {
     Support: '客服',
     'Ticket Center': '工单中心',
     'Support Tickets': '工单中心',
-    'This ticket is closed. Contact support to reopen it.': '此工单已关闭，请联系管理员重新打开。',
+    'This ticket is closed. Contact support to reopen it.':
+      '此工单已关闭，请联系管理员重新打开。',
     'Ticket could not be created': '工单创建失败',
     'Ticket created': '工单已创建',
     'Ticket not found': '找不到工单',
@@ -194,6 +207,10 @@ const newKeys = {
     '{{count}} files selected': '已选择 {{count}} 个文件',
   },
   fr: {
+    'Log cleanup resumed.': 'Nettoyage des journaux repris.',
+    'Resume failed cleanup': 'Reprendre le nettoyage échoué',
+    'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
+      'Le nettoyage précédent s’est interrompu avant l’enregistrement de son état final. Reprenez-le pour le terminer sans appliquer deux fois les ajustements d’utilisation.',
     'Any aspect ratio': "Tout rapport d'aspect",
     'Automatic detection': 'Détection automatique',
     'Controls whether non-square image requests can use this channel.':
@@ -246,7 +263,8 @@ const newKeys = {
     Attachments: 'Pièces jointes',
     'Close Ticket': 'Fermer le ticket',
     Closed: 'Fermé',
-    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.': "Décrivez un problème ou demandez un examen de remboursement manuel. Les remboursements sont traités hors ligne par un administrateur.",
+    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.':
+      'Décrivez un problème ou demandez un examen de remboursement manuel. Les remboursements sont traités hors ligne par un administrateur.',
     'Describe the problem in detail': 'Décrivez le problème en détail',
     'High Priority': 'Priorité élevée',
     'Manual Refund': 'Remboursement manuel',
@@ -261,12 +279,14 @@ const newKeys = {
     'Search tickets': 'Rechercher des tickets',
     'Send Reply': 'Envoyer la réponse',
     Subject: 'Sujet',
-    'Subject and description are required': 'Le sujet et la description sont requis',
-    'Summarize the issue in one sentence': "Résumez le problème en une phrase",
+    'Subject and description are required':
+      'Le sujet et la description sont requis',
+    'Summarize the issue in one sentence': 'Résumez le problème en une phrase',
     Support: 'Support',
     'Ticket Center': 'Centre de tickets',
     'Support Tickets': 'Tickets de support',
-    'This ticket is closed. Contact support to reopen it.': 'Ce ticket est fermé. Contactez le support pour le rouvrir.',
+    'This ticket is closed. Contact support to reopen it.':
+      'Ce ticket est fermé. Contactez le support pour le rouvrir.',
     'Ticket could not be created': 'Impossible de créer le ticket',
     'Ticket created': 'Ticket créé',
     'Ticket not found': 'Ticket introuvable',
@@ -278,6 +298,10 @@ const newKeys = {
     '{{count}} files selected': '{{count}} fichiers sélectionnés',
   },
   ja: {
+    'Log cleanup resumed.': 'ログのクリーンアップを再開しました。',
+    'Resume failed cleanup': '失敗したクリーンアップを再開',
+    'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
+      '前回のクリーンアップは最終状態を保存する前に停止しました。再開しても使用量の調整は重複せず、安全に完了できます。',
     'Any aspect ratio': '任意のアスペクト比',
     'Automatic detection': '自動検出',
     'Controls whether non-square image requests can use this channel.':
@@ -329,7 +353,8 @@ const newKeys = {
     Attachments: '添付ファイル',
     'Close Ticket': 'チケットを閉じる',
     Closed: '終了',
-    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.': '問題を報告するか、手動返金の確認を依頼してください。返金は管理者がオフラインで処理します。',
+    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.':
+      '問題を報告するか、手動返金の確認を依頼してください。返金は管理者がオフラインで処理します。',
     'Describe the problem in detail': '問題を詳しく説明してください',
     'High Priority': '高優先度',
     'Manual Refund': '手動返金',
@@ -349,7 +374,8 @@ const newKeys = {
     Support: 'サポート',
     'Ticket Center': 'チケットセンター',
     'Support Tickets': 'サポートチケット',
-    'This ticket is closed. Contact support to reopen it.': 'このチケットは終了しています。再開するにはサポートに連絡してください。',
+    'This ticket is closed. Contact support to reopen it.':
+      'このチケットは終了しています。再開するにはサポートに連絡してください。',
     'Ticket could not be created': 'チケットを作成できませんでした',
     'Ticket created': 'チケットを作成しました',
     'Ticket not found': 'チケットが見つかりません',
@@ -361,6 +387,10 @@ const newKeys = {
     '{{count}} files selected': '{{count}}件のファイルを選択',
   },
   ru: {
+    'Log cleanup resumed.': 'Очистка журналов возобновлена.',
+    'Resume failed cleanup': 'Возобновить неудачную очистку',
+    'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
+      'Предыдущая очистка остановилась до сохранения итогового состояния. Возобновление безопасно завершит ее без повторной корректировки статистики использования.',
     'Any aspect ratio': 'Любое соотношение сторон',
     'Automatic detection': 'Автоматическое определение',
     'Controls whether non-square image requests can use this channel.':
@@ -412,7 +442,8 @@ const newKeys = {
     Attachments: 'Вложения',
     'Close Ticket': 'Закрыть тикет',
     Closed: 'Закрыт',
-    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.': 'Опишите проблему или запросите проверку ручного возврата. Возвраты обрабатываются администратором вне системы.',
+    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.':
+      'Опишите проблему или запросите проверку ручного возврата. Возвраты обрабатываются администратором вне системы.',
     'Describe the problem in detail': 'Подробно опишите проблему',
     'High Priority': 'Высокий приоритет',
     'Manual Refund': 'Ручной возврат',
@@ -428,11 +459,13 @@ const newKeys = {
     'Send Reply': 'Отправить ответ',
     Subject: 'Тема',
     'Subject and description are required': 'Укажите тему и описание',
-    'Summarize the issue in one sentence': 'Кратко опишите проблему одним предложением',
+    'Summarize the issue in one sentence':
+      'Кратко опишите проблему одним предложением',
     Support: 'Поддержка',
     'Ticket Center': 'Центр тикетов',
     'Support Tickets': 'Тикеты поддержки',
-    'This ticket is closed. Contact support to reopen it.': 'Тикет закрыт. Обратитесь в поддержку для повторного открытия.',
+    'This ticket is closed. Contact support to reopen it.':
+      'Тикет закрыт. Обратитесь в поддержку для повторного открытия.',
     'Ticket could not be created': 'Не удалось создать тикет',
     'Ticket created': 'Тикет создан',
     'Ticket not found': 'Тикет не найден',
@@ -444,6 +477,10 @@ const newKeys = {
     '{{count}} files selected': 'Выбрано файлов: {{count}}',
   },
   vi: {
+    'Log cleanup resumed.': 'Đã tiếp tục dọn dẹp nhật ký.',
+    'Resume failed cleanup': 'Tiếp tục dọn dẹp bị gián đoạn',
+    'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
+      'Lần dọn dẹp trước đã dừng trước khi lưu trạng thái cuối. Tiếp tục tác vụ để hoàn tất an toàn mà không điều chỉnh số liệu sử dụng hai lần.',
     'Any aspect ratio': 'Mọi tỷ lệ khung hình',
     'Automatic detection': 'Tự động phát hiện',
     'Controls whether non-square image requests can use this channel.':
@@ -495,7 +532,8 @@ const newKeys = {
     Attachments: 'Tệp đính kèm',
     'Close Ticket': 'Đóng yêu cầu',
     Closed: 'Đã đóng',
-    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.': 'Mô tả vấn đề hoặc yêu cầu quản trị viên xem xét hoàn tiền thủ công. Việc hoàn tiền được xử lý ngoại tuyến.',
+    'Describe an issue or request a manual refund review. Refunds are handled offline by an administrator.':
+      'Mô tả vấn đề hoặc yêu cầu quản trị viên xem xét hoàn tiền thủ công. Việc hoàn tiền được xử lý ngoại tuyến.',
     'Describe the problem in detail': 'Mô tả chi tiết vấn đề',
     'High Priority': 'Ưu tiên cao',
     'Manual Refund': 'Hoàn tiền thủ công',
@@ -515,7 +553,8 @@ const newKeys = {
     Support: 'Hỗ trợ',
     'Ticket Center': 'Trung tâm hỗ trợ',
     'Support Tickets': 'Yêu cầu hỗ trợ',
-    'This ticket is closed. Contact support to reopen it.': 'Yêu cầu này đã đóng. Hãy liên hệ hỗ trợ để mở lại.',
+    'This ticket is closed. Contact support to reopen it.':
+      'Yêu cầu này đã đóng. Hãy liên hệ hỗ trợ để mở lại.',
     'Ticket could not be created': 'Không thể tạo yêu cầu',
     'Ticket created': 'Đã tạo yêu cầu',
     'Ticket not found': 'Không tìm thấy yêu cầu',

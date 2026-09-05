@@ -251,6 +251,35 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 	return task, nil
 }
 
+func ResumeLatestFailedLogCleanupTask() (*model.SystemTask, error) {
+	activeTask, err := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup)
+	if err != nil {
+		return nil, err
+	}
+	if activeTask != nil {
+		return activeTask, nil
+	}
+
+	latestTask, err := model.GetLatestSystemTask(model.SystemTaskTypeLogCleanup)
+	if err != nil {
+		return nil, err
+	}
+	if latestTask == nil || latestTask.Status != model.SystemTaskStatusFailed {
+		return nil, errors.New("no failed log cleanup task to resume")
+	}
+
+	requeued, err := model.RequeueFailedLogCleanupTask(latestTask.TaskID)
+	if err != nil {
+		activeTask, activeErr := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup)
+		if activeErr == nil && activeTask != nil {
+			return activeTask, nil
+		}
+		return nil, err
+	}
+	notifySystemTaskRunner()
+	return requeued, nil
+}
+
 // EnqueueSystemTask creates an on-demand task of the given type. The returned
 // bool is true only when a new pending row was created; false means an active
 // task of the same type already exists and was returned.

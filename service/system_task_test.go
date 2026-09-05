@@ -338,3 +338,50 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	require.NotNil(t, second)
 	assert.NotEqual(t, first.TaskID, second.TaskID)
 }
+
+func TestResumeLatestFailedLogCleanupTaskPreservesAppliedUsageSnapshot(t *testing.T) {
+	truncate(t)
+
+	cutoff := common.GetTimestamp() - 3600
+	task, err := model.CreateSystemTask(
+		model.SystemTaskTypeLogCleanup,
+		LogCleanupPayload{TargetTimestamp: cutoff, BatchSize: 10},
+		LogCleanupState{
+			Progress:               100,
+			Remaining:              0,
+			UsageAdjustmentApplied: true,
+			UsageDelta: &model.LogCleanupUsageDelta{
+				UserQuota: map[int]int64{107: 900},
+			},
+		},
+	)
+	require.NoError(t, err)
+	_, claimed, err := model.ClaimSystemTask(
+		task.ID,
+		task.Type,
+		"expired-runner",
+		common.GetTimestamp()+60,
+	)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, model.FinishSystemTask(
+		task.TaskID,
+		"expired-runner",
+		model.SystemTaskStatusFailed,
+		nil,
+		"task lease expired",
+	))
+
+	resumed, err := ResumeLatestFailedLogCleanupTask()
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, task.TaskID, resumed.TaskID)
+	assert.Equal(t, model.SystemTaskStatusPending, resumed.Status)
+	assert.Empty(t, resumed.Error)
+
+	var state LogCleanupState
+	require.NoError(t, resumed.DecodeState(&state))
+	assert.True(t, state.UsageAdjustmentApplied)
+	require.NotNil(t, state.UsageDelta)
+	assert.Equal(t, int64(900), state.UsageDelta.UserQuota[107])
+}

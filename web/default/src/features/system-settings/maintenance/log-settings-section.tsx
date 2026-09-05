@@ -64,7 +64,9 @@ import { formatTimestampToDate } from '@/lib/format'
 
 import {
   getCurrentLogCleanupTask,
+  getLatestLogCleanupTask,
   getSystemTask,
+  resumeLogCleanupTask,
   startLogCleanupTask,
 } from '../api'
 import {
@@ -187,8 +189,19 @@ export function LogSettingsSection({
     async function fetchCurrentLogCleanupTask() {
       try {
         const res = await getCurrentLogCleanupTask()
-        if (!cancelled && res.success && res.data) {
+        if (cancelled || !res.success) return
+        if (res.data) {
           setLogCleanupTask(res.data)
+          return
+        }
+
+        const latestRes = await getLatestLogCleanupTask()
+        if (
+          !cancelled &&
+          latestRes.success &&
+          latestRes.data?.status === 'failed'
+        ) {
+          setLogCleanupTask(latestRes.data)
         }
       } catch {
         /* ignore */
@@ -213,6 +226,7 @@ export function LogSettingsSection({
   }, [purgeDate])
 
   const logCleanupActive = isActiveLogCleanupTask(logCleanupTask)
+  const logCleanupFailed = logCleanupTask?.status === 'failed'
   const logCleanupState = logCleanupTask?.state
   const logCleanupProgress = Math.min(
     100,
@@ -244,14 +258,21 @@ export function LogSettingsSection({
             const count = logCount + quotaDataCount
             toast.success(
               count > 0
-                ? t('{{logCount}} logs and {{quotaDataCount}} usage records removed.', {
-                    logCount,
-                    quotaDataCount,
-                  })
+                ? t(
+                    '{{logCount}} logs and {{quotaDataCount}} usage records removed.',
+                    {
+                      logCount,
+                      quotaDataCount,
+                    }
+                  )
                 : t('No log entries matched the selected time.')
             )
           } else if (res.data.status === 'failed') {
-            toast.error(res.data.error || t('Failed to clean logs'))
+            toast.error(
+              t(
+                'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.'
+              )
+            )
           }
         }
       } catch {
@@ -304,6 +325,22 @@ export function LogSettingsSection({
       const message =
         error instanceof Error ? error.message : t('Failed to clean logs')
       toast.error(message)
+    } finally {
+      setIsStartingLogCleanup(false)
+    }
+  }
+
+  const handleResumeLogCleanup = async () => {
+    setIsStartingLogCleanup(true)
+    try {
+      const res = await resumeLogCleanupTask()
+      if (!res.success || !res.data) {
+        throw new Error(res.message || t('Failed to clean logs'))
+      }
+      setLogCleanupTask(res.data)
+      toast.success(t('Log cleanup resumed.'))
+    } catch {
+      toast.error(t('Failed to clean logs'))
     } finally {
       setIsStartingLogCleanup(false)
     }
@@ -401,7 +438,9 @@ export function LogSettingsSection({
                 type='button'
                 variant='destructive'
                 onClick={handleRequestCleanLogs}
-                disabled={isStartingLogCleanup || logCleanupActive}
+                disabled={
+                  isStartingLogCleanup || logCleanupActive || logCleanupFailed
+                }
               >
                 {isStartingLogCleanup || logCleanupActive
                   ? t('Cleaning...')
@@ -420,14 +459,30 @@ export function LogSettingsSection({
                 </div>
                 <Progress value={logCleanupProgress} />
                 <div className='text-muted-foreground mt-2 text-xs'>
-                  {t('{{processed}} of {{total}} historical records processed.', {
-                    processed: logCleanupProcessed,
-                    total: logCleanupTotal,
-                  })}
+                  {t(
+                    '{{processed}} of {{total}} historical records processed.',
+                    {
+                      processed: logCleanupProcessed,
+                      total: logCleanupTotal,
+                    }
+                  )}
                 </div>
-                {logCleanupTask.status === 'failed' && logCleanupTask.error && (
-                  <div className='text-destructive mt-2 text-xs'>
-                    {logCleanupTask.error}
+                {logCleanupTask.status === 'failed' && (
+                  <div className='mt-3 space-y-3'>
+                    <p className='text-destructive text-xs'>
+                      {t(
+                        'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.'
+                      )}
+                    </p>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={handleResumeLogCleanup}
+                      disabled={isStartingLogCleanup}
+                    >
+                      {t('Resume failed cleanup')}
+                    </Button>
                   </div>
                 )}
               </div>

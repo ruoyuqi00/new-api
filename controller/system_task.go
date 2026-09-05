@@ -34,6 +34,20 @@ func CreateLogCleanupSystemTask(c *gin.Context) {
 	})
 }
 
+func ResumeLogCleanupSystemTask(c *gin.Context) {
+	task, err := service.ResumeLatestFailedLogCleanupTask()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    task.ToResponse(),
+	})
+}
+
 func CreateSensitiveInputCleanupSystemTask(c *gin.Context) {
 	task, err := service.StartSensitiveInputCleanupTask()
 	if err != nil {
@@ -59,6 +73,37 @@ func GetCurrentSystemTask(c *gin.Context) {
 	}
 
 	task, err := model.GetActiveSystemTask(taskType)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if task == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    task.ToResponse(),
+	})
+}
+
+func GetLatestSystemTask(c *gin.Context) {
+	taskType := c.Query("type")
+	if taskType == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "type is required",
+		})
+		return
+	}
+
+	task, err := model.GetLatestSystemTask(taskType)
 	if err != nil {
 		common.ApiError(c, err)
 		return
