@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestAggregateOldConsumeLogDeltasIgnoresNewAndNonConsumeRows(t *testing.T) {
@@ -128,6 +129,33 @@ func TestRequeueFailedLogCleanupPreservesAppliedState(t *testing.T) {
 	var state map[string]any
 	require.NoError(t, common.UnmarshalJsonStr(requeued.State, &state))
 	assert.Equal(t, true, state["usage_adjustment_applied"])
+}
+
+func TestUpdateSystemTaskStateAcceptsNoopUpdateWhileLeaseIsOwned(t *testing.T) {
+	truncateTables(t)
+
+	state := map[string]any{
+		"progress":                 100,
+		"remaining":                0,
+		"usage_adjustment_applied": true,
+	}
+	task, err := CreateSystemTask(SystemTaskTypeLogCleanup, LogCleanupPayloadForModelTest{}, state)
+	require.NoError(t, err)
+	_, claimed, err := ClaimSystemTask(task.ID, task.Type, "cleanup-runner", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	callbackName := "test:simulate_mysql_noop_rows_affected"
+	require.NoError(t, DB.Callback().Update().After("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "system_tasks" {
+			tx.RowsAffected = 0
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, DB.Callback().Update().Remove(callbackName))
+	})
+
+	require.NoError(t, UpdateSystemTaskState(task.TaskID, "cleanup-runner", state))
 }
 
 // LogCleanupPayloadForModelTest keeps this model-package test independent of

@@ -324,7 +324,20 @@ func UpdateSystemTaskState(taskID string, lockedBy string, state any) error {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return ErrSystemTaskLockLost
+		// MySQL reports zero affected rows when every assigned value already
+		// matches the row. A resumed task can legitimately persist an identical
+		// progress snapshot, so distinguish that no-op from an actual lease loss.
+		var ownedLeaseCount int64
+		err := DB.Model(&SystemTask{}).
+			Where("task_id = ? AND status = ? AND locked_by = ?", taskID, SystemTaskStatusRunning, lockedBy).
+			Where("EXISTS (SELECT 1 FROM system_task_locks WHERE system_task_locks.task_id = system_tasks.task_id AND system_task_locks.locked_by = ? AND system_task_locks.locked_until >= ?)", lockedBy, now).
+			Count(&ownedLeaseCount).Error
+		if err != nil {
+			return err
+		}
+		if ownedLeaseCount == 0 {
+			return ErrSystemTaskLockLost
+		}
 	}
 	return nil
 }
