@@ -20,7 +20,9 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  classifyYucoreGraphicsBackend,
   getYucoreMotionBudget,
+  readYucoreGraphicsBackend,
   resolveYucoreMotionProfile,
 } from './yucore-motion-performance'
 
@@ -38,37 +40,37 @@ describe('YuCore motion performance profile', () => {
     )
   })
 
-  test('selects reduced rendering for constrained CPUs and dense small screens', () => {
+  test('does not infer software rendering from CPU, memory, or screen density', () => {
     assert.equal(
       resolveYucoreMotionProfile({
-        deviceMemory: 8,
+        deviceMemory: 2,
         devicePixelRatio: 1,
-        hardwareConcurrency: 4,
+        hardwareConcurrency: 2,
         reducedMotion: false,
         viewportWidth: 1366,
       }),
-      'reduced'
+      'full'
     )
     assert.equal(
       resolveYucoreMotionProfile({
-        deviceMemory: 8,
+        deviceMemory: 2,
         devicePixelRatio: 3,
-        hardwareConcurrency: 8,
+        hardwareConcurrency: 2,
         reducedMotion: false,
         viewportWidth: 430,
       }),
-      'reduced'
+      'full'
     )
   })
 
-  test('keeps unknown hardware balanced and reserves full rendering for capable desktops', () => {
+  test('keeps dynamic rendering full when reduced motion is not requested', () => {
     assert.equal(
       resolveYucoreMotionProfile({
         devicePixelRatio: 1,
         reducedMotion: false,
         viewportWidth: 1440,
       }),
-      'balanced'
+      'full'
     )
     assert.equal(
       resolveYucoreMotionProfile({
@@ -102,5 +104,39 @@ describe('YuCore motion performance profile', () => {
 
     assert.ok(reduced.maxPixelRatio <= balanced.maxPixelRatio)
     assert.ok(balanced.maxPixelRatio <= full.maxPixelRatio)
+  })
+
+  test('classifies software renderers without reducing real GPU WebGL', () => {
+    assert.equal(classifyYucoreGraphicsBackend(false), 'unavailable')
+    assert.equal(
+      classifyYucoreGraphicsBackend(true, 'Google SwiftShader'),
+      'software'
+    )
+    assert.equal(
+      classifyYucoreGraphicsBackend(true, 'llvmpipe (LLVM 15.0.7)'),
+      'software'
+    )
+    assert.equal(
+      classifyYucoreGraphicsBackend(
+        true,
+        'ANGLE (NVIDIA GeForce RTX 3070 Direct3D11)'
+      ),
+      'hardware'
+    )
+    assert.equal(classifyYucoreGraphicsBackend(true), 'unknown')
+  })
+
+  test('treats a browser that rejects WebGL context creation as unavailable', () => {
+    const host = {
+      document: {
+        createElement: () => ({
+          getContext: () => {
+            throw new Error('webgl disabled')
+          },
+        }),
+      },
+    } as unknown as Window
+
+    assert.equal(readYucoreGraphicsBackend(host), 'unavailable')
   })
 })

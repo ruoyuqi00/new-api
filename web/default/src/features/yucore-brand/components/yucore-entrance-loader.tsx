@@ -23,6 +23,10 @@ import { cn } from '@/lib/utils'
 
 import { useYucoreTranslation } from '../i18n/use-yucore-translation'
 import { YucoreBootCanvas } from './yucore-boot-canvas'
+import {
+  readYucoreGraphicsBackend,
+  shouldUseYucoreDynamicGraphics,
+} from './yucore-motion-performance'
 import { YucoreSignalFieldWebgl } from './yucore-signal-field-webgl'
 import { YucoreWebglEarth } from './yucore-webgl-earth'
 
@@ -856,6 +860,9 @@ function createLoaderSphereVisuals() {
 export function YucoreEntranceLoader(props: YucoreEntranceLoaderProps) {
   const { t } = useYucoreTranslation()
   const { resolvedTheme } = useTheme()
+  const dynamicGraphicsEnabled = shouldUseYucoreDynamicGraphics(
+    readYucoreGraphicsBackend()
+  )
   const [mounted, setMounted] = useState(true)
   const [sequenceStage, setSequenceStage] = useState(0)
   const [particleVisuals, setParticleVisuals] = useState<ReturnType<
@@ -931,7 +938,8 @@ export function YucoreEntranceLoader(props: YucoreEntranceLoaderProps) {
 
   if (!mounted) return null
 
-  const particleEffectsMounted = particleVisuals && sequenceStage < 5
+  const particleEffectsMounted =
+    particleVisuals && sequenceStage < 5 && dynamicGraphicsEnabled
   const sphereEffectsMounted = sphereVisuals && sequenceStage >= 3
   const particleStageDurationMs =
     durationMs * (LOADER_PARTICLE_RELEASE_RATIO - LOADER_PARTICLE_PREWARM_RATIO)
@@ -947,6 +955,7 @@ export function YucoreEntranceLoader(props: YucoreEntranceLoaderProps) {
     <div
       className={cn(
         'yucore-entrance-loader yucore-entrance-loader-lite fixed inset-0 z-[100] overflow-hidden',
+        !dynamicGraphicsEnabled && 'yucore-graphics-static',
         resolvedTheme === 'light'
           ? 'bg-[#f8fcfb] text-[#183b44]'
           : 'bg-[#010203] text-white',
@@ -962,7 +971,9 @@ export function YucoreEntranceLoader(props: YucoreEntranceLoaderProps) {
       data-theme={resolvedTheme}
       data-sequence-stage={sequenceStage}
     >
-      <YucoreBootCanvas colorMode={resolvedTheme} durationMs={durationMs} />
+      {dynamicGraphicsEnabled && (
+        <YucoreBootCanvas colorMode={resolvedTheme} durationMs={durationMs} />
+      )}
       {particleEffectsMounted ? (
         <div
           className='yucore-loader-sequence-particle-layer absolute inset-0 z-[1]'
@@ -977,20 +988,22 @@ export function YucoreEntranceLoader(props: YucoreEntranceLoaderProps) {
           data-yucore-loader-layer='particles-webgl'
           aria-hidden='true'
         >
-          <YucoreSignalFieldWebgl
-            active
-            coreMode='ambient'
-            corePlacement='hero'
-            colorMode={resolvedTheme}
-            intensity='hero'
-            renderProfile='entrance'
-            className={cn(
-              'opacity-[0.52]',
-              resolvedTheme === 'light'
-                ? 'mix-blend-multiply'
-                : 'mix-blend-screen'
-            )}
-          />
+          {dynamicGraphicsEnabled && (
+            <YucoreSignalFieldWebgl
+              active
+              coreMode='ambient'
+              corePlacement='hero'
+              colorMode={resolvedTheme}
+              intensity='hero'
+              renderProfile='entrance'
+              className={cn(
+                'opacity-[0.52]',
+                resolvedTheme === 'light'
+                  ? 'mix-blend-multiply'
+                  : 'mix-blend-screen'
+              )}
+            />
+          )}
         </div>
       ) : null}
       <div className='yucore-loader-atmosphere absolute inset-0' />
@@ -1133,12 +1146,21 @@ export function YucoreEntranceLoader(props: YucoreEntranceLoaderProps) {
               <span className='yucore-loader-earth-ocean absolute inset-0 rounded-full' />
               <span className='yucore-loader-earth-land yucore-loader-earth-land-a absolute inset-[-4%]' />
               <span className='yucore-loader-earth-land yucore-loader-earth-land-b absolute inset-[-4%]' />
-              <YucoreWebglEarth
-                active
-                className='yucore-loader-earth-webgl'
-                colorMode={resolvedTheme}
-                density='loader'
-              />
+              {dynamicGraphicsEnabled ? (
+                <YucoreWebglEarth
+                  active
+                  className='yucore-loader-earth-webgl'
+                  colorMode={resolvedTheme}
+                  density='loader'
+                />
+              ) : (
+                <img
+                  className='yucore-loader-earth-static absolute inset-0 h-full w-full rounded-full object-cover'
+                  src='/yucore-earth-blue-marble.webp?v=cabfd92bfb306aff'
+                  alt=''
+                  draggable={false}
+                />
+              )}
               <span className='yucore-loader-earth-clouds absolute inset-[-3%] rounded-full' />
               <span className='yucore-loader-earth-grid absolute inset-0 rounded-full' />
               <span className='yucore-loader-earth-night absolute inset-0 rounded-full' />

@@ -902,6 +902,12 @@ For commercial licensing, please contact support@quantumnous.com
   transform: rotateX(74deg) rotateZ(-34deg);
 }
 
+.yucore-background-earth-static {
+  opacity: 0.88;
+  filter: saturate(1.16) contrast(1.08) brightness(0.82);
+  mix-blend-mode: screen;
+}
+
 .yucore-background-earth-core-hero {
   left: 50%;
   top: 29%;
@@ -1468,6 +1474,36 @@ For commercial licensing, please contact support@quantumnous.com
 .yucore-background-static *::after {
   animation-play-state: paused !important;
   will-change: auto !important;
+}
+
+.yucore-graphics-static [data-yucore-loader-layer] *,
+.yucore-graphics-static .yucore-loader-atmosphere,
+.yucore-graphics-static .yucore-loader-noise,
+.yucore-graphics-static .yucore-loader-vignette,
+.yucore-graphics-static .yucore-loader-scan,
+.yucore-graphics-static .yucore-loader-shutter,
+.yucore-graphics-static .yucore-loader-sphere,
+.yucore-graphics-static .yucore-loader-earth-land,
+.yucore-graphics-static .yucore-loader-earth-clouds,
+.yucore-graphics-static .yucore-loader-earth-grid,
+.yucore-graphics-static .yucore-loader-earth-night,
+.yucore-graphics-static .yucore-loader-earth-rim {
+  animation: none !important;
+  will-change: auto !important;
+}
+
+.yucore-loader-earth-static {
+  z-index: 3;
+  opacity: 0.84;
+  filter: saturate(1.16) contrast(1.08) brightness(0.84);
+  mix-blend-mode: screen;
+}
+
+.yucore-persistent-core-earth-static {
+  z-index: 3;
+  opacity: 0.74;
+  filter: saturate(1.12) contrast(1.06) brightness(0.82);
+  mix-blend-mode: screen;
 }
 
 .yucore-grid {

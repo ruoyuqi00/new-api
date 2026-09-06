@@ -27,6 +27,11 @@ function stableStringify(obj) {
 
 const newKeys = {
   en: {
+    'View response': 'View response',
+    'Test response': 'Test response',
+    'Response content': 'Response content',
+    'Response content was truncated to 8 KB.':
+      'Response content was truncated to 8 KB.',
     'Log cleanup resumed.': 'Log cleanup resumed.',
     'Resume failed cleanup': 'Resume failed cleanup',
     'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
@@ -118,6 +123,10 @@ const newKeys = {
     '{{count}} files selected': '{{count}} files selected',
   },
   zh: {
+    'View response': '查看回复',
+    'Test response': '测试回复',
+    'Response content': '回复内容',
+    'Response content was truncated to 8 KB.': '回复内容已截断至 8 KB。',
     'Log cleanup resumed.': '日志清理已恢复。',
     'Resume failed cleanup': '恢复失败的清理',
     'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
@@ -207,6 +216,11 @@ const newKeys = {
     '{{count}} files selected': '已选择 {{count}} 个文件',
   },
   fr: {
+    'View response': 'Voir la réponse',
+    'Test response': 'Réponse du test',
+    'Response content': 'Contenu de la réponse',
+    'Response content was truncated to 8 KB.':
+      'Le contenu de la réponse a été tronqué à 8 Ko.',
     'Log cleanup resumed.': 'Nettoyage des journaux repris.',
     'Resume failed cleanup': 'Reprendre le nettoyage échoué',
     'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
@@ -298,6 +312,11 @@ const newKeys = {
     '{{count}} files selected': '{{count}} fichiers sélectionnés',
   },
   ja: {
+    'View response': '応答を表示',
+    'Test response': 'テスト応答',
+    'Response content': '応答内容',
+    'Response content was truncated to 8 KB.':
+      '応答内容は8KBに切り詰められています。',
     'Log cleanup resumed.': 'ログのクリーンアップを再開しました。',
     'Resume failed cleanup': '失敗したクリーンアップを再開',
     'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
@@ -387,6 +406,11 @@ const newKeys = {
     '{{count}} files selected': '{{count}}件のファイルを選択',
   },
   ru: {
+    'View response': 'Показать ответ',
+    'Test response': 'Ответ теста',
+    'Response content': 'Содержимое ответа',
+    'Response content was truncated to 8 KB.':
+      'Содержимое ответа сокращено до 8 КБ.',
     'Log cleanup resumed.': 'Очистка журналов возобновлена.',
     'Resume failed cleanup': 'Возобновить неудачную очистку',
     'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':
@@ -477,6 +501,11 @@ const newKeys = {
     '{{count}} files selected': 'Выбрано файлов: {{count}}',
   },
   vi: {
+    'View response': 'Xem phản hồi',
+    'Test response': 'Phản hồi kiểm thử',
+    'Response content': 'Nội dung phản hồi',
+    'Response content was truncated to 8 KB.':
+      'Nội dung phản hồi đã được rút gọn còn 8 KB.',
     'Log cleanup resumed.': 'Đã tiếp tục dọn dẹp nhật ký.',
     'Resume failed cleanup': 'Tiếp tục dọn dẹp bị gián đoạn',
     'The previous cleanup stopped before its final status was saved. Resume it to finish safely without applying usage adjustments twice.':

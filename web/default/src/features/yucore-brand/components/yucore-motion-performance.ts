@@ -26,6 +26,12 @@ export type YucoreMotionCapabilities = {
   viewportWidth: number
 }
 
+export type YucoreGraphicsBackend =
+  | 'hardware'
+  | 'software'
+  | 'unknown'
+  | 'unavailable'
+
 export type YucoreMotionBudget = Readonly<{
   bootParticleCount: number
   bootShardCount: number
@@ -83,23 +89,9 @@ export function resolveYucoreMotionProfile(
 ): YucoreMotionProfile {
   if (capabilities.reducedMotion) return 'reduced'
 
-  const constrainedCpu =
-    capabilities.hardwareConcurrency !== undefined &&
-    capabilities.hardwareConcurrency <= 4
-  const constrainedMemory =
-    capabilities.deviceMemory !== undefined && capabilities.deviceMemory <= 4
-  const denseSmallScreen =
-    capabilities.viewportWidth < 720 && capabilities.devicePixelRatio >= 2.5
-  if (constrainedCpu || constrainedMemory || denseSmallScreen) return 'reduced'
-
-  const capableDesktop =
-    capabilities.viewportWidth >= 1024 &&
-    capabilities.devicePixelRatio <= 2 &&
-    capabilities.hardwareConcurrency !== undefined &&
-    capabilities.hardwareConcurrency >= 8 &&
-    capabilities.deviceMemory !== undefined &&
-    capabilities.deviceMemory >= 8
-  return capableDesktop ? 'full' : 'balanced'
+  // Hardware capability is decided from the actual WebGL renderer. CPU and
+  // memory hints alone cannot distinguish a real GPU from a software rasterizer.
+  return 'full'
 }
 
 export function getYucoreMotionBudget(
@@ -120,4 +112,68 @@ export function readYucoreMotionProfile(host: Window = window) {
     reducedMotion: host.matchMedia('(prefers-reduced-motion: reduce)').matches,
     viewportWidth: host.innerWidth,
   })
+}
+
+const SOFTWARE_RENDERER_PATTERNS = [
+  /swiftshader/i,
+  /llvmpipe/i,
+  /softpipe/i,
+  /software\s+(?:renderer|rasterizer)/i,
+  /microsoft\s+basic\s+render/i,
+  /basic\s+render\s+driver/i,
+]
+
+export function classifyYucoreGraphicsBackend(
+  webglAvailable: boolean,
+  renderer?: string
+): YucoreGraphicsBackend {
+  if (!webglAvailable) return 'unavailable'
+
+  const normalizedRenderer = renderer?.trim()
+  if (!normalizedRenderer) return 'unknown'
+  if (
+    SOFTWARE_RENDERER_PATTERNS.some((pattern) =>
+      pattern.test(normalizedRenderer)
+    )
+  ) {
+    return 'software'
+  }
+  return 'hardware'
+}
+
+export function shouldUseYucoreDynamicGraphics(backend: YucoreGraphicsBackend) {
+  return backend === 'hardware' || backend === 'unknown'
+}
+
+let cachedGraphicsBackend: YucoreGraphicsBackend | undefined
+
+export function readYucoreGraphicsBackend(
+  host?: Window
+): YucoreGraphicsBackend {
+  const target = host ?? (typeof window === 'undefined' ? undefined : window)
+  if (!target) return 'unknown'
+  if (!host && cachedGraphicsBackend) return cachedGraphicsBackend
+
+  const canvas = target.document.createElement('canvas')
+  let gl: WebGLRenderingContext | null = null
+  try {
+    gl = canvas.getContext('webgl', {
+      alpha: true,
+      failIfMajorPerformanceCaveat: false,
+    })
+  } catch {
+    gl = null
+  }
+  if (!gl) {
+    if (!host) cachedGraphicsBackend = 'unavailable'
+    return 'unavailable'
+  }
+
+  const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+  const renderer = debugInfo
+    ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+    : gl.getParameter(gl.RENDERER)
+  const backend = classifyYucoreGraphicsBackend(true, String(renderer ?? ''))
+  if (!host) cachedGraphicsBackend = backend
+  return backend
 }

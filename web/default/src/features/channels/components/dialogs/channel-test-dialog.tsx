@@ -114,6 +114,8 @@ type TestResult = {
   completedAt?: number
   error?: string
   errorCode?: string
+  responseContent?: string
+  responseTruncated?: boolean
 }
 
 type BatchProgress = {
@@ -219,10 +221,12 @@ type FailureStatusDisplay = {
   details?: string
 }
 
-type FailureDetailsState = {
+type TestDetailsState = {
   model: string
-  summary: string
+  kind: 'failure' | 'response'
+  summary?: string
   details: string
+  truncated?: boolean
 }
 
 function sleep(ms: number) {
@@ -344,8 +348,7 @@ function ChannelTestDialogContent({
   const [isDeleteFailedDialogOpen, setIsDeleteFailedDialogOpen] =
     useState(false)
   const [isDeletingFailed, setIsDeletingFailed] = useState(false)
-  const [failureDetails, setFailureDetails] =
-    useState<FailureDetailsState | null>(null)
+  const [testDetails, setTestDetails] = useState<TestDetailsState | null>(null)
   const [pagination, setPagination] = useState({
     pageIndex: 0,
     pageSize: 30,
@@ -374,7 +377,7 @@ function ChannelTestDialogContent({
     setRemovedModels(() => new Set())
     setIsDeleteFailedDialogOpen(false)
     setIsDeletingFailed(false)
-    setFailureDetails(null)
+    setTestDetails(null)
     setPagination({ pageIndex: 0, pageSize: 30 })
   }, [])
 
@@ -450,7 +453,7 @@ function ChannelTestDialogContent({
   }, [])
 
   const updateTestResult = useCallback((key: string, result: TestResult) => {
-    setFailureDetails((current) => (current?.model === key ? null : current))
+    setTestDetails((current) => (current?.model === key ? null : current))
     setTestResults((prev) => ({
       ...prev,
       [key]: result,
@@ -529,7 +532,14 @@ function ChannelTestDialogContent({
             stream: effectiveStreamTest || undefined,
             silent,
           },
-          (success, responseTime, error, errorCode) => {
+          (
+            success,
+            responseTime,
+            error,
+            errorCode,
+            responseContent,
+            responseTruncated
+          ) => {
             const completedAt = Date.now()
             finalResult = {
               status: success ? 'success' : 'error',
@@ -537,6 +547,8 @@ function ChannelTestDialogContent({
               completedAt,
               error,
               errorCode,
+              responseContent,
+              responseTruncated,
             }
             updateTestResult(model, finalResult)
           }
@@ -856,7 +868,7 @@ function ChannelTestDialogContent({
             <TestStatusCell
               result={result}
               model={model}
-              onOpenDetails={setFailureDetails}
+              onOpenDetails={setTestDetails}
             />
           )
         },
@@ -1150,11 +1162,11 @@ function ChannelTestDialogContent({
         confirmText={t('Delete')}
         handleConfirm={handleDeleteFailedModels}
       />
-      <FailureDetailsSheet
-        details={failureDetails}
+      <TestDetailsSheet
+        details={testDetails}
         onOpenChange={(sheetOpen) => {
           if (!sheetOpen) {
-            setFailureDetails(null)
+            setTestDetails(null)
           }
         }}
       />
@@ -1208,7 +1220,7 @@ function TestStatusCell({
 }: {
   result?: TestResult
   model: string
-  onOpenDetails: (details: FailureDetailsState) => void
+  onOpenDetails: (details: TestDetailsState) => void
 }) {
   const { t } = useTranslation()
 
@@ -1236,6 +1248,25 @@ function TestStatusCell({
             {formatResponseTime(result.responseTime, t)}
           </span>
         )}
+        {result.responseContent && (
+          <Button
+            variant='ghost'
+            size='sm'
+            className='h-7 w-fit px-2 text-xs'
+            aria-haspopup='dialog'
+            onClick={() =>
+              onOpenDetails({
+                model,
+                kind: 'response',
+                details: result.responseContent ?? '',
+                truncated: result.responseTruncated,
+              })
+            }
+          >
+            <Info className='mr-1 h-3 w-3 shrink-0' />
+            {t('View response')}
+          </Button>
+        )}
       </div>
     )
   }
@@ -1256,7 +1287,7 @@ function FailureStatusContent({
 }: {
   result: TestResult
   model: string
-  onOpenDetails: (details: FailureDetailsState) => void
+  onOpenDetails: (details: TestDetailsState) => void
 }) {
   const { t } = useTranslation()
   const errorText = result.error?.trim()
@@ -1297,7 +1328,9 @@ function FailureStatusContent({
             size='sm'
             className='h-7 w-fit px-2 text-xs'
             aria-haspopup='dialog'
-            onClick={() => onOpenDetails({ model, summary, details })}
+            onClick={() =>
+              onOpenDetails({ model, kind: 'failure', summary, details })
+            }
           >
             <Info className='mr-1 h-3 w-3 shrink-0' />
             {t('Details')}
@@ -1308,16 +1341,17 @@ function FailureStatusContent({
   )
 }
 
-function FailureDetailsSheet({
+function TestDetailsSheet({
   details,
   onOpenChange,
 }: {
-  details: FailureDetailsState | null
+  details: TestDetailsState | null
   onOpenChange: (open: boolean) => void
 }) {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
+  const isResponse = details?.kind === 'response'
 
   return (
     <Sheet open={Boolean(details)} onOpenChange={onOpenChange}>
@@ -1332,7 +1366,9 @@ function FailureDetailsSheet({
         {details && (
           <>
             <SheetHeader className={sideDrawerHeaderClassName('sm:px-5')}>
-              <SheetTitle className='pr-10'>{t('Details')}</SheetTitle>
+              <SheetTitle className='pr-10'>
+                {isResponse ? t('Test response') : t('Details')}
+              </SheetTitle>
               <SheetDescription className='pr-10 wrap-break-word'>
                 {details.model}
               </SheetDescription>
@@ -1344,18 +1380,25 @@ function FailureDetailsSheet({
                 </div>
                 <p className='text-sm font-medium break-all'>{details.model}</p>
               </section>
-              <section className='space-y-1'>
-                <div className='text-muted-foreground text-xs font-medium'>
-                  {t('Failed')}
-                </div>
-                <p className='text-muted-foreground text-sm leading-relaxed wrap-break-word'>
-                  {details.summary}
-                </p>
-              </section>
+              {details.summary && (
+                <section className='space-y-1'>
+                  <div className='text-muted-foreground text-xs font-medium'>
+                    {t('Failed')}
+                  </div>
+                  <p className='text-muted-foreground text-sm leading-relaxed wrap-break-word'>
+                    {details.summary}
+                  </p>
+                </section>
+              )}
               <section className='space-y-2'>
                 <div className='text-muted-foreground text-xs font-medium'>
-                  {t('Details')}
+                  {isResponse ? t('Response content') : t('Details')}
                 </div>
+                {isResponse && details.truncated && (
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Response content was truncated to 8 KB.')}
+                  </p>
+                )}
                 <pre className='bg-muted/30 text-muted-foreground m-0 max-w-full rounded-md border p-3 text-xs leading-relaxed wrap-break-word whitespace-pre-wrap'>
                   {details.details}
                 </pre>

@@ -21,6 +21,10 @@ import type { CSSProperties } from 'react'
 import { useTheme } from '@/context/theme-provider'
 import { cn } from '@/lib/utils'
 
+import {
+  readYucoreGraphicsBackend,
+  shouldUseYucoreDynamicGraphics,
+} from './yucore-motion-performance'
 import { YucoreWebglEarth } from './yucore-webgl-earth'
 
 interface YucorePersistentCoreProps {
@@ -171,6 +175,10 @@ export function YucorePersistentCore(props: YucorePersistentCoreProps) {
   if (!props.active) return null
 
   const animated = props.animated !== false
+  const dynamicGraphicsEnabled = shouldUseYucoreDynamicGraphics(
+    readYucoreGraphicsBackend()
+  )
+  const webglActive = props.webglActive ?? (animated && dynamicGraphicsEnabled)
 
   return (
     <div
@@ -178,6 +186,7 @@ export function YucorePersistentCore(props: YucorePersistentCoreProps) {
       className={cn(
         'yucore-persistent-core pointer-events-none fixed left-[68vw] top-[36svh] z-[2]',
         !animated && 'yucore-persistent-core-static',
+        !dynamicGraphicsEnabled && 'yucore-graphics-static',
         props.className
       )}
       data-active={props.active ? 'true' : 'false'}
@@ -187,13 +196,22 @@ export function YucorePersistentCore(props: YucorePersistentCoreProps) {
         <span className='yucore-persistent-core-ocean absolute inset-0 rounded-full' />
         <span className='yucore-persistent-core-land yucore-persistent-core-land-a absolute inset-[-3%]' />
         <span className='yucore-persistent-core-land yucore-persistent-core-land-b absolute inset-[-3%]' />
-        <YucoreWebglEarth
-          active={props.webglActive ?? animated}
-          className='yucore-persistent-core-webgl'
-          colorMode={resolvedTheme}
-          density='persistent'
-          timeOffsetSeconds={props.webglTimeOffsetSeconds}
-        />
+        {dynamicGraphicsEnabled ? (
+          <YucoreWebglEarth
+            active={webglActive}
+            className='yucore-persistent-core-webgl'
+            colorMode={resolvedTheme}
+            density='persistent'
+            timeOffsetSeconds={props.webglTimeOffsetSeconds}
+          />
+        ) : (
+          <img
+            className='yucore-persistent-core-earth-static absolute inset-0 h-full w-full rounded-full object-cover'
+            src='/yucore-earth-blue-marble.webp?v=cabfd92bfb306aff'
+            alt=''
+            draggable={false}
+          />
+        )}
         <span className='yucore-persistent-core-clouds absolute inset-[-2%] rounded-full' />
         <span className='yucore-persistent-core-grid absolute inset-0 rounded-full' />
         <span className='yucore-persistent-core-night absolute inset-0 rounded-full' />

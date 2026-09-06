@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -36,10 +37,14 @@ import (
 )
 
 type testResult struct {
-	context     *gin.Context
-	localErr    error
-	newAPIError *types.NewAPIError
+	context           *gin.Context
+	localErr          error
+	newAPIError       *types.NewAPIError
+	responseContent   string
+	responseTruncated bool
 }
+
+const maxChannelTestResponseContentBytes = 8 << 10
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
@@ -535,10 +540,13 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		Other:               other,
 	})
 	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
+	responseContent, responseTruncated := extractChannelTestResponseContent(respBody, isStream)
 	return testResult{
-		context:     c,
-		localErr:    nil,
-		newAPIError: nil,
+		context:           c,
+		localErr:          nil,
+		newAPIError:       nil,
+		responseContent:   responseContent,
+		responseTruncated: responseTruncated,
 	}
 }
 
@@ -620,6 +628,101 @@ func readTestResponseBody(body io.ReadCloser, isStream bool) ([]byte, error) {
 		return io.ReadAll(io.LimitReader(body, maxStreamLogBytes))
 	}
 	return io.ReadAll(body)
+}
+
+func appendChannelTestText(content *strings.Builder, value gjson.Result) {
+	if value.Type == gjson.String {
+		content.WriteString(value.String())
+		return
+	}
+	if !value.IsArray() {
+		return
+	}
+	value.ForEach(func(_, part gjson.Result) bool {
+		if part.Type == gjson.String {
+			content.WriteString(part.String())
+		} else {
+			text := part.Get("text")
+			if text.Type == gjson.String {
+				content.WriteString(text.String())
+			}
+		}
+		return true
+	})
+}
+
+func appendChannelTestResponseJSON(content *strings.Builder, payload []byte, isStream bool) {
+	if !gjson.ValidBytes(payload) {
+		return
+	}
+	if isStream {
+		appendChannelTestText(content, gjson.GetBytes(payload, "choices.0.delta.content"))
+		appendChannelTestText(content, gjson.GetBytes(payload, "choices.0.text"))
+		switch gjson.GetBytes(payload, "type").String() {
+		case "response.output_text.delta":
+			appendChannelTestText(content, gjson.GetBytes(payload, "delta"))
+		case "content_block_delta":
+			appendChannelTestText(content, gjson.GetBytes(payload, "delta.text"))
+		}
+		gjson.GetBytes(payload, "candidates.0.content.parts").ForEach(func(_, part gjson.Result) bool {
+			appendChannelTestText(content, part.Get("text"))
+			return true
+		})
+		return
+	}
+
+	appendChannelTestText(content, gjson.GetBytes(payload, "choices.0.message.content"))
+	appendChannelTestText(content, gjson.GetBytes(payload, "choices.0.text"))
+	gjson.GetBytes(payload, "output").ForEach(func(_, output gjson.Result) bool {
+		output.Get("content").ForEach(func(_, part gjson.Result) bool {
+			partType := part.Get("type").String()
+			if partType == "output_text" || partType == "text" {
+				appendChannelTestText(content, part.Get("text"))
+			}
+			return true
+		})
+		return true
+	})
+	gjson.GetBytes(payload, "content").ForEach(func(_, part gjson.Result) bool {
+		if part.Get("type").String() == "text" {
+			appendChannelTestText(content, part.Get("text"))
+		}
+		return true
+	})
+	gjson.GetBytes(payload, "candidates.0.content.parts").ForEach(func(_, part gjson.Result) bool {
+		appendChannelTestText(content, part.Get("text"))
+		return true
+	})
+}
+
+func extractChannelTestResponseContent(respBody []byte, isStream bool) (string, bool) {
+	var content strings.Builder
+	if isStream {
+		for _, line := range bytes.Split(respBody, []byte{'\n'}) {
+			line = bytes.TrimSpace(line)
+			if !bytes.HasPrefix(line, []byte("data:")) {
+				continue
+			}
+			payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+			if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+				continue
+			}
+			appendChannelTestResponseJSON(&content, payload, true)
+		}
+	} else {
+		appendChannelTestResponseJSON(&content, bytes.TrimSpace(respBody), false)
+	}
+
+	value := strings.TrimSpace(content.String())
+	if len(value) <= maxChannelTestResponseContentBytes {
+		return value, false
+	}
+
+	end := maxChannelTestResponseContentBytes - len("...")
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return strings.TrimSpace(value[:end]) + "...", true
 }
 
 func detectErrorFromTestResponseBody(respBody []byte) error {
@@ -964,9 +1067,11 @@ func TestChannel(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"time":    consumedTime,
+		"success":            true,
+		"message":            "",
+		"time":               consumedTime,
+		"response_content":   result.responseContent,
+		"response_truncated": result.responseTruncated,
 	})
 }
 

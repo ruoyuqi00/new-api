@@ -249,6 +249,76 @@ func TestValidateImageTestResponseDimensions(t *testing.T) {
 	require.ErrorContains(t, err, "requested image size 32x32, but upstream returned 16x16")
 }
 
+func TestExtractChannelTestResponseContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		isStream bool
+		want     string
+	}{
+		{
+			name: "openai chat",
+			body: `{"choices":[{"message":{"role":"assistant","content":"hello from chat"}}],"private":{"api_key":"secret"}}`,
+			want: "hello from chat",
+		},
+		{
+			name: "openai responses",
+			body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"hello from responses"}]}],"metadata":{"upstream_url":"https://private.example"}}`,
+			want: "hello from responses",
+		},
+		{
+			name: "anthropic",
+			body: `{"content":[{"type":"text","text":"hello from claude"}],"request_id":"private-request"}`,
+			want: "hello from claude",
+		},
+		{
+			name: "gemini",
+			body: `{"candidates":[{"content":{"parts":[{"text":"hello from gemini"}]}}],"modelVersion":"private-model-version"}`,
+			want: "hello from gemini",
+		},
+		{
+			name:     "openai chat stream",
+			body:     "data: {\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"stream\"}}]}\n\ndata: [DONE]\n\n",
+			isStream: true,
+			want:     "hello stream",
+		},
+		{
+			name:     "responses stream ignores terminal duplicate",
+			body:     "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\nevent: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"text\":\"partial\"}\n\n",
+			isStream: true,
+			want:     "partial",
+		},
+		{
+			name:     "anthropic stream",
+			body:     "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"claude stream\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+			isStream: true,
+			want:     "claude stream",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			content, truncated := extractChannelTestResponseContent([]byte(test.body), test.isStream)
+
+			require.Equal(t, test.want, content)
+			require.False(t, truncated)
+			require.NotContains(t, content, "secret")
+			require.NotContains(t, content, "private")
+		})
+	}
+}
+
+func TestExtractChannelTestResponseContentTruncatesSafely(t *testing.T) {
+	body := fmt.Sprintf(`{"choices":[{"message":{"content":%q}}]}`, strings.Repeat("界", 4096))
+
+	content, truncated := extractChannelTestResponseContent([]byte(body), false)
+
+	require.True(t, truncated)
+	require.LessOrEqual(t, len([]byte(content)), maxChannelTestResponseContentBytes)
+	require.True(t, strings.HasSuffix(content, "..."))
+	require.True(t, strings.ToValidUTF8(content, "") == content)
+}
+
 func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())

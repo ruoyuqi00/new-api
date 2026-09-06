@@ -21,6 +21,11 @@ import { lazy, Suspense } from 'react'
 import { useTheme } from '@/context/theme-provider'
 import { cn } from '@/lib/utils'
 
+import {
+  readYucoreGraphicsBackend,
+  shouldUseYucoreDynamicGraphics,
+} from './yucore-motion-performance'
+
 const LazyYucoreSignalFieldWebgl = lazy(() =>
   import('./yucore-signal-field-webgl').then((module) => ({
     default: module.YucoreSignalFieldWebgl,
@@ -50,7 +55,10 @@ export function YucoreBackground(props: YucoreBackgroundProps) {
   const intensity = props.intensity ?? 'calm'
   const active = props.active !== false
   const preparation = props.preparation ?? (active ? 'all' : 'none')
-  const signalPrepared = preparation !== 'none'
+  const dynamicGraphicsEnabled = shouldUseYucoreDynamicGraphics(
+    readYucoreGraphicsBackend()
+  )
+  const signalPrepared = preparation !== 'none' && dynamicGraphicsEnabled
   const earthPrepared = preparation === 'all'
 
   return (
@@ -58,7 +66,7 @@ export function YucoreBackground(props: YucoreBackgroundProps) {
       aria-hidden='true'
       className={cn(
         'pointer-events-none absolute inset-0 z-0 overflow-hidden',
-        signalPrepared
+        dynamicGraphicsEnabled && signalPrepared
           ? 'yucore-background-webgl-active'
           : 'yucore-background-static',
         props.className
@@ -109,13 +117,22 @@ export function YucoreBackground(props: YucoreBackgroundProps) {
               'yucore-background-earth-core-workbench'
           )}
         >
-          <Suspense fallback={null}>
-            <LazyYucoreWebglEarth
-              active={props.active}
-              colorMode={resolvedTheme}
-              density={intensity === 'hero' ? 'loader' : 'persistent'}
+          {dynamicGraphicsEnabled ? (
+            <Suspense fallback={null}>
+              <LazyYucoreWebglEarth
+                active={props.active}
+                colorMode={resolvedTheme}
+                density={intensity === 'hero' ? 'loader' : 'persistent'}
+              />
+            </Suspense>
+          ) : (
+            <img
+              className='yucore-background-earth-static absolute inset-0 h-full w-full rounded-full object-cover'
+              src='/yucore-earth-blue-marble.webp?v=cabfd92bfb306aff'
+              alt=''
+              draggable={false}
             />
-          </Suspense>
+          )}
         </div>
       )}
       <div

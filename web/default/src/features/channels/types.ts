@@ -185,6 +185,8 @@ export interface ChannelTestResponse {
   message?: string
   error_code?: string
   time?: number
+  response_content?: string
+  response_truncated?: boolean
   data?: {
     response_time?: number
     error?: string
