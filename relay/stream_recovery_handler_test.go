@@ -659,7 +659,7 @@ func TestAcceptedStreamErrorSettlementUsesAuthoritativeUsageWhenRecoveryDisabled
 	status.RecordError("upstream returned a failed terminal event")
 	info := &relaycommon.RelayInfo{
 		UserId: 811, TokenId: 813, OriginModelName: "gpt-test", UsingGroup: "default",
-		StartTime: time.Now(), IsStream: true, RelayFormat: types.RelayFormatOpenAI,
+		StartTime: time.Now(), IsStream: true, RelayFormat: types.RelayFormatOpenAIResponses,
 		RelayMode: relayconstant.RelayModeResponses, RequestURLPath: "/v1/responses",
 		Billing: billing, FinalPreConsumedQuota: 1250, StreamStatus: status,
 		StreamTerminalMarkersRequired: true, StreamTerminalUsageSeen: true,

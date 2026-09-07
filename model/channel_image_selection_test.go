@@ -56,6 +56,30 @@ func TestChannelSupportsImageRequestHonorsModelTierAndShape(t *testing.T) {
 	require.False(t, ChannelSupportsImageRequest(ratioOnly, "gpt-image-2", ImageSelectionRequirements{Size: "1536x1024", Tier: "2k"}))
 }
 
+func TestChannelSupportsImageRequestDerivesTierFromResolutionAliases(t *testing.T) {
+	oneK := &Channel{
+		Id:            2502,
+		Models:        "gpt-image-2-1k",
+		OtherSettings: `{"image_dimension_support":"any"}`,
+	}
+	require.False(t, ChannelSupportsImageRequest(oneK, "gpt-image-2", ImageSelectionRequirements{
+		Size:            "1536x1024",
+		Tier:            "2k",
+		ExactDimensions: true,
+	}))
+
+	twoAndFourK := &Channel{
+		Id:            2503,
+		Models:        "gpt-image-2-2k,gpt-image-2-4k,gpt-image-2",
+		OtherSettings: `{"image_dimension_support":"any"}`,
+	}
+	require.True(t, ChannelSupportsImageRequest(twoAndFourK, "gpt-image-2", ImageSelectionRequirements{
+		Size:            "1024x1536",
+		Tier:            "2k",
+		ExactDimensions: true,
+	}))
+}
+
 func TestValidateImageCapabilitySettings(t *testing.T) {
 	require.NoError(t, ValidateImageCapabilitySettings(dto.ChannelOtherSettings{ImageDimensionSupport: "any"}))
 	require.NoError(t, ValidateImageCapabilitySettings(dto.ChannelOtherSettings{ImageDimensionSupport: "pending"}))

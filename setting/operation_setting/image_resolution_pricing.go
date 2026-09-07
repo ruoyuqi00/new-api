@@ -278,6 +278,17 @@ func ResolveImageResolutionPrice(modelName, size string) (ImageResolutionPriceQu
 	}, true, nil
 }
 
+// CanonicalImageResolutionModel returns the public model name for image models
+// whose resolution aliases share one pricing policy.
+func CanonicalImageResolutionModel(modelName string) (string, bool) {
+	index := imageResolutionPriceIndexValue.Load()
+	if index == nil {
+		return "", false
+	}
+	pricingModel, _, configured := resolveImageResolutionPricingModel(index, modelName)
+	return pricingModel, configured
+}
+
 func GetImageResolutionPricingMetadata(modelName string) (ImageResolutionPricingMetadata, bool) {
 	index := imageResolutionPriceIndexValue.Load()
 	if index == nil {

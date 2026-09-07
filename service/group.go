@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -59,6 +60,9 @@ func GetGroupsEnabledModels(groups []string) []string {
 	seen := make(map[string]struct{})
 	for _, group := range groups {
 		for _, modelName := range model.GetGroupEnabledModels(group) {
+			if canonical, ok := operation_setting.CanonicalImageResolutionModel(modelName); ok {
+				modelName = canonical
+			}
 			if _, ok := seen[modelName]; ok {
 				continue
 			}

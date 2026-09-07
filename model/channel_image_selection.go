@@ -140,6 +140,7 @@ func ChannelImageCapabilityForModel(channel *Channel, modelName string) dto.Imag
 		return capability
 	}
 	settings := channel.GetOtherSettings()
+	canonical := normalizeImageCapabilityModel(modelName)
 	switch strings.ToLower(strings.TrimSpace(settings.ImageDimensionSupport)) {
 	case "any", "custom":
 		capability.MaxTier = string(operation_setting.ImageResolutionTier4K)
@@ -148,7 +149,9 @@ func ChannelImageCapabilityForModel(channel *Channel, modelName string) dto.Imag
 		capability.MaxTier = string(operation_setting.ImageResolutionTier4K)
 		capability.Shape = dto.ImageCapabilityShapeRatio
 	}
-	canonical := normalizeImageCapabilityModel(modelName)
+	if aliasTier, ok := channelImageAliasMaxTier(channel.Models, canonical); ok {
+		capability.MaxTier = string(aliasTier)
+	}
 	for configuredModel, modelCapability := range settings.ImageModelCapabilities {
 		if normalizeImageCapabilityModel(configuredModel) == canonical {
 			capability = modelCapability
@@ -156,6 +159,30 @@ func ChannelImageCapabilityForModel(channel *Channel, modelName string) dto.Imag
 		}
 	}
 	return capability
+}
+
+func channelImageAliasMaxTier(models, canonicalModel string) (operation_setting.ImageResolutionTier, bool) {
+	maxTier := operation_setting.ImageResolutionTier("")
+	for _, modelName := range strings.Split(models, ",") {
+		modelName = strings.ToLower(strings.TrimSpace(modelName))
+		if idx := strings.LastIndex(modelName, "/"); idx >= 0 {
+			modelName = modelName[idx+1:]
+		}
+		for _, tier := range []operation_setting.ImageResolutionTier{
+			operation_setting.ImageResolutionTier1K,
+			operation_setting.ImageResolutionTier2K,
+			operation_setting.ImageResolutionTier4K,
+		} {
+			suffix := "-" + string(tier)
+			if strings.TrimSuffix(modelName, suffix) != canonicalModel || !strings.HasSuffix(modelName, suffix) {
+				continue
+			}
+			if imageCapabilityTierRank(tier) > imageCapabilityTierRank(maxTier) {
+				maxTier = tier
+			}
+		}
+	}
+	return maxTier, maxTier != ""
 }
 
 func (requirements ImageSelectionRequirements) RequiresNonSquare() bool {

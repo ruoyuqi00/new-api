@@ -343,21 +343,61 @@ func TestListModelsIncludesPerCallExpressionModel(t *testing.T) {
 	require.NotEmpty(t, pricing.BillingExpr)
 }
 
-func TestPricingIncludesCanonicalImageResolutionPolicyForAlias(t *testing.T) {
+func TestPricingCollapsesImageResolutionAliasesIntoCanonicalModel(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.Create(&model.Ability{
-		Group: "default", Model: "gpt-image-2-1k", ChannelId: 1, Enabled: true,
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "gpt-image-2-1k", ChannelId: 1, Enabled: true},
+		{Group: "vip", Model: "gpt-image-2-4k", ChannelId: 2, Enabled: true},
 	}).Error)
 	model.InvalidatePricingCache()
 
-	pricing, ok := pricingByModelName(model.GetPricing())["gpt-image-2-1k"]
+	pricingByName := pricingByModelName(model.GetPricing())
+	pricing, ok := pricingByName["gpt-image-2"]
 	require.True(t, ok)
+	assert.NotContains(t, pricingByName, "gpt-image-2-1k")
+	assert.NotContains(t, pricingByName, "gpt-image-2-4k")
+	assert.ElementsMatch(t, []string{"default", "vip"}, pricing.EnableGroup)
 	require.NotNil(t, pricing.ImageResolutionPricing)
 	assert.Equal(t, "gpt-image-2", pricing.ImageResolutionPricing.PricingModel)
-	assert.Equal(t, operation_setting.ImageResolutionTier1K, pricing.ImageResolutionPricing.AliasMinimumTier)
+	assert.Empty(t, pricing.ImageResolutionPricing.AliasMinimumTier)
 	assert.Equal(t, operation_setting.ImageResolutionTier1K, pricing.ImageResolutionPricing.DefaultTier)
 	assert.InDelta(t, 0.01, pricing.ImageResolutionPricing.Prices[operation_setting.ImageResolutionTier1K], 1e-12)
 	assert.InDelta(t, 0.045, pricing.ImageResolutionPricing.Prices[operation_setting.ImageResolutionTier4K], 1e-12)
+}
+
+func TestListModelsCollapsesImageResolutionAliasesIntoCanonicalModel(t *testing.T) {
+	originalSelfUseMode := operation_setting.SelfUseModeEnabled
+	operation_setting.SelfUseModeEnabled = true
+	t.Cleanup(func() {
+		operation_setting.SelfUseModeEnabled = originalSelfUseMode
+	})
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.User{
+		Id:       1005,
+		Username: "image-model-list-user",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "gpt-image-2", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "gpt-image-2-1k", ChannelId: 2, Enabled: true},
+		{Group: "default", Model: "gpt-image-2-2k", ChannelId: 3, Enabled: true},
+		{Group: "default", Model: "gpt-image-2-4k", ChannelId: 4, Enabled: true},
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	ctx.Set("id", 1005)
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	ids := decodeListModelsResponse(t, recorder)
+	assert.Contains(t, ids, "gpt-image-2")
+	assert.NotContains(t, ids, "gpt-image-2-1k")
+	assert.NotContains(t, ids, "gpt-image-2-2k")
+	assert.NotContains(t, ids, "gpt-image-2-4k")
 }
 
 func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {

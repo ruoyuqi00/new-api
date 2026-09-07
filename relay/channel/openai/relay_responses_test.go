@@ -9,11 +9,19 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func mappedResponsesClientResponseInfo() *relaycommon.RelayInfo {
+	info := mappedClientResponseInfo()
+	info.RelayFormat = types.RelayFormatOpenAIResponses
+	return info
+}
 
 func TestNormalizeCompletedImageGenerationStatus(t *testing.T) {
 	input := []byte(`{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating","result":"image-data"}}`)
@@ -47,7 +55,7 @@ func TestOaiResponsesStreamHandlerParsesResponseDoneUsage(t *testing.T) {
 		)),
 	}
 
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	info.RelayMode = relayconstant.RelayModeResponses
 	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
@@ -69,7 +77,7 @@ func TestOaiResponsesStreamHandlerRejectsAmplifiedTerminalUsage(t *testing.T) {
 
 	ctx, recorder := clientResponseTestContext()
 	ctx.Request.URL.Path = "/v1/responses"
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	info.SetEstimatePromptTokens(400)
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -91,7 +99,7 @@ func TestOaiResponsesStreamHandlerRejectsAmplifiedTerminalUsage(t *testing.T) {
 func TestOaiResponsesHandlerLeavesImageUsageUnchanged(t *testing.T) {
 	ctx, recorder := clientResponseTestContext()
 	ctx.Request.URL.Path = "/v1/responses"
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	body := `{"id":"resp_image","model":"upstream-model","output":[{"type":"image_generation_call","id":"img_1","status":"completed","result":"data"}],"usage":{"input_tokens":10000001,"output_tokens":1,"total_tokens":10000002}}`
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
 
@@ -124,7 +132,7 @@ func TestOaiResponsesStreamHandlerEmitsFixedCodexPreludeFirstForGPT(t *testing.T
 				"data: [DONE]\n\n",
 		)),
 	}
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	info.OriginModelName = "gpt-test"
 
 	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
@@ -179,7 +187,7 @@ func TestOaiResponsesStreamHandlerUsesGPTCodexClientSignals(t *testing.T) {
 						"data: [DONE]\n\n",
 				)),
 			}
-			info := mappedClientResponseInfo()
+			info := mappedResponsesClientResponseInfo()
 			info.OriginModelName = "gpt-test"
 
 			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
@@ -205,7 +213,7 @@ func TestOaiResponsesStreamHandlerSuppressesUpstreamCodexRateLimitsForOrdinaryGP
 				"data: [DONE]\n\n",
 		)),
 	}
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	info.OriginModelName = "gpt-test"
 
 	_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
@@ -234,7 +242,7 @@ func TestOaiResponsesStreamHandlerLeavesNonGPTChannelUnchanged(t *testing.T) {
 				"data: [DONE]\n\n",
 		)),
 	}
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	info.OriginModelName = "claude-test"
 
 	_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
@@ -261,7 +269,7 @@ func TestOaiResponsesStreamHandlerEmitsFailureForEOFWithoutTerminalEvent(t *test
 		)),
 	}
 
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	info.RelayMode = relayconstant.RelayModeResponses
 	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
@@ -290,7 +298,7 @@ func TestOaiResponsesStreamHandlerSanitizesUpstreamTerminalFailure(t *testing.T)
 			}
 			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
 
-			info := mappedClientResponseInfo()
+			info := mappedResponsesClientResponseInfo()
 			info.RelayMode = relayconstant.RelayModeResponses
 			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
@@ -335,7 +343,7 @@ func TestOaiResponsesStreamHandlerTreatsEmptyUsageAsUnconfirmed(t *testing.T) {
 		)),
 	}
 
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	info.SetEstimatePromptTokens(1234)
 	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
@@ -365,7 +373,7 @@ func TestOaiResponsesStreamHandlerClientGoneDoesNotWriteSyntheticFailure(t *test
 		)),
 	}
 
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 	_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
 	require.Nil(t, relayErr)
@@ -429,7 +437,7 @@ func TestOaiResponsesStreamHandlerDoesNotDuplicateTerminalEvent(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader(tt.body)),
 			}
 
-			info := mappedClientResponseInfo()
+			info := mappedResponsesClientResponseInfo()
 			info.RelayMode = relayconstant.RelayModeResponses
 			usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 
@@ -463,7 +471,7 @@ func TestOaiResponsesStreamHandlerPreservesPublishedResponseIDOnFailure(t *testi
 		)),
 	}
 
-	_, relayErr := OaiResponsesStreamHandler(ctx, mappedClientResponseInfo(), resp)
+	_, relayErr := OaiResponsesStreamHandler(ctx, mappedResponsesClientResponseInfo(), resp)
 
 	require.Nil(t, relayErr)
 	publicBody := recorder.Body.String()
@@ -481,7 +489,7 @@ func TestOaiResponsesHandlerCapturesAffinityResponseID(t *testing.T) {
 			`{"id":"resp_buffered","object":"response","status":"completed","model":"upstream-model","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
 		)),
 	}
-	info := mappedClientResponseInfo()
+	info := mappedResponsesClientResponseInfo()
 
 	_, relayErr := OaiResponsesHandler(ctx, info, resp)
 
@@ -539,7 +547,7 @@ func TestOaiResponsesStreamHandlerCapturesObservedAffinityResponseID(t *testing.
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(tt.body)),
 			}
-			info := mappedClientResponseInfo()
+			info := mappedResponsesClientResponseInfo()
 
 			_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
 

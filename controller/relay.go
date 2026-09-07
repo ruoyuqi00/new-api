@@ -80,6 +80,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var (
 		newAPIError *types.NewAPIError
 		ws          *websocket.Conn
+		relayInfo   *relaycommon.RelayInfo
 	)
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
@@ -93,7 +94,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	defer func() {
-		if newAPIError != nil {
+		if newAPIError != nil && shouldWriteRelayErrorBody(relayInfo) {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
@@ -122,7 +123,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
@@ -284,6 +285,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if relayInfo.HasAmbiguousUpstreamSubmission() {
 			if billingErr := service.SettleAmbiguousTextBilling(c, relayInfo); billingErr != nil {
 				logger.LogError(c, "failed to retain billing for ambiguous upstream submission: "+billingErr.Error())
+			} else if _, terminalErr := relay.EmitEstimatedBillingTerminal(c, relayInfo); terminalErr != nil {
+				logger.LogError(c, "failed to emit estimated billing terminal: "+terminalErr.Error())
 			}
 		} else {
 			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
@@ -308,6 +311,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func shouldWriteRelayErrorBody(relayInfo *relaycommon.RelayInfo) bool {
+	return relayInfo == nil || !relayInfo.StreamEstimatedTerminalSent
 }
 
 var upgrader = websocket.Upgrader{

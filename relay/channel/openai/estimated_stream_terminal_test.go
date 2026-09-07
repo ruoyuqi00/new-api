@@ -61,7 +61,7 @@ func TestEmitEstimatedGPTStreamTerminalResponsesUsesIncompleteUsage(t *testing.T
 	info := mappedClientResponseInfo()
 	info.IsStream = true
 	info.RelayMode = relayconstant.RelayModeResponses
-	info.RelayFormat = types.RelayFormatOpenAI
+	info.RelayFormat = types.RelayFormatOpenAIResponses
 
 	err := EmitEstimatedGPTStreamTerminal(c, info, estimatedGPTUsageForTest(), "resp_gateway", 0, "gpt-test", "", 8)
 
@@ -75,6 +75,20 @@ func TestEmitEstimatedGPTStreamTerminalResponsesUsesIncompleteUsage(t *testing.T
 	require.Contains(t, body, `"sequence_number":8`)
 	require.NotContains(t, body, "upstream-secret")
 	require.NotContains(t, body, "Authorization")
+}
+
+func TestEmitEstimatedGPTStreamTerminalResponsesCompactionUsesIncompleteUsage(t *testing.T) {
+	c, recorder := estimatedGPTStreamContext(t, "/v1/responses/compact")
+	info := mappedClientResponseInfo()
+	info.IsStream = true
+	info.RelayMode = relayconstant.RelayModeResponsesCompact
+	info.RelayFormat = types.RelayFormatOpenAIResponsesCompaction
+
+	err := EmitEstimatedGPTStreamTerminal(c, info, estimatedGPTUsageForTest(), "resp_gateway", 0, "gpt-test", "", 0)
+
+	require.NoError(t, err)
+	require.Contains(t, recorder.Body.String(), "event: response.incomplete")
+	require.Contains(t, recorder.Body.String(), `"input_tokens":1200`)
 }
 
 func TestEmitEstimatedGPTStreamTerminalSkipsDetachedClient(t *testing.T) {
@@ -179,7 +193,7 @@ func TestOaiResponsesStreamHandlerEmitsEstimatedIncompleteAfterMissingUsage(t *t
 	info := mappedClientResponseInfo()
 	info.IsStream = true
 	info.RelayMode = relayconstant.RelayModeResponses
-	info.RelayFormat = types.RelayFormatOpenAI
+	info.RelayFormat = types.RelayFormatOpenAIResponses
 	info.SetEstimatePromptTokens(1200)
 	resp := &http.Response{
 		StatusCode: http.StatusOK,

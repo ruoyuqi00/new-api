@@ -112,6 +112,12 @@ func TestShouldRetryRelayOutcomeStopsAfterAmbiguousWrittenSubmission(t *testing.
 	require.False(t, shouldRefundRelayFailure(relayInfo))
 }
 
+func TestShouldWriteRelayErrorBodySkipsAfterEstimatedTerminal(t *testing.T) {
+	require.True(t, shouldWriteRelayErrorBody(nil))
+	require.True(t, shouldWriteRelayErrorBody(&relaycommon.RelayInfo{}))
+	require.False(t, shouldWriteRelayErrorBody(&relaycommon.RelayInfo{StreamEstimatedTerminalSent: true}))
+}
+
 func TestAcceptedStreamNeverRetriesOrRefunds(t *testing.T) {
 	oldEnabled := constant.StreamUsageDrainEnabled
 	constant.StreamUsageDrainEnabled = true

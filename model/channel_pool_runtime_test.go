@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -282,4 +283,117 @@ func TestGetRandomSatisfiedChannelWithOptionsFindsLegacyImageAliasForCanonicalMo
 	require.NoError(t, err)
 	require.NotNil(t, selected)
 	assert.Equal(t, channel.Id, selected.Id)
+}
+
+func TestGetRandomSatisfiedChannelWithOptionsUsesOnlyCompatibleImageAliasTier(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+
+	square := &Channel{Id: 702, Priority: int64Ptr(120)}
+	oneK := &Channel{
+		Id:            703,
+		Models:        "gpt-image-2-1k",
+		Priority:      int64Ptr(100),
+		OtherSettings: `{"image_dimension_support":"any"}`,
+	}
+	channelSyncLock.Lock()
+	group2model2channels["image-group"] = map[string][]int{
+		"gpt-image-2":    {square.Id},
+		"gpt-image-2-1k": {oneK.Id},
+	}
+	channelsIDM[square.Id] = square
+	channelsIDM[oneK.Id] = oneK
+	channelSyncLock.Unlock()
+
+	selected, err := GetRandomSatisfiedChannelWithOptions("image-group", "gpt-image-2", 0, "", ChannelSelectionOptions{
+		ImageModelName: "gpt-image-2",
+		ImageRequirements: &ImageSelectionRequirements{
+			CanonicalModel:  "gpt-image-2",
+			Size:            "650x1024",
+			Tier:            "1k",
+			Width:           650,
+			Height:          1024,
+			ExactDimensions: true,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, oneK.Id, selected.Id)
+
+	selected, err = GetRandomSatisfiedChannelWithOptions("image-group", "gpt-image-2", 0, "", ChannelSelectionOptions{
+		ImageModelName: "gpt-image-2",
+		ImageRequirements: &ImageSelectionRequirements{
+			CanonicalModel:  "gpt-image-2",
+			Size:            "1536x1024",
+			Tier:            "2k",
+			Width:           1536,
+			Height:          1024,
+			ExactDimensions: true,
+		},
+	})
+	require.NoError(t, err)
+	assert.Nil(t, selected)
+}
+
+func TestGetRandomSatisfiedChannelWithOptionsRoutesCanonicalImageByResolutionTier(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+
+	oneK := &Channel{
+		Id:       704,
+		Models:   "gpt-image-2",
+		Priority: int64Ptr(120),
+		OtherSettings: `{"image_dimension_support":"any","image_model_capabilities":` +
+			`{"gpt-image-2":{"max_tier":"1k","shape":"exact"}}}`,
+	}
+	twoAndFourK := &Channel{
+		Id:            705,
+		Models:        "gpt-image-2,gpt-image-2-2k,gpt-image-2-4k",
+		Priority:      int64Ptr(100),
+		OtherSettings: `{"image_dimension_support":"any"}`,
+	}
+	channelSyncLock.Lock()
+	group2model2channels["gpt-image-2"] = map[string][]int{
+		"gpt-image-2":    {oneK.Id, twoAndFourK.Id},
+		"gpt-image-2-2k": {twoAndFourK.Id},
+		"gpt-image-2-4k": {twoAndFourK.Id},
+	}
+	channelsIDM[oneK.Id] = oneK
+	channelsIDM[twoAndFourK.Id] = twoAndFourK
+	channelSyncLock.Unlock()
+
+	tests := []struct {
+		name   string
+		size   string
+		tier   operation_setting.ImageResolutionTier
+		width  int
+		height int
+		wantID int
+	}{
+		{name: "one k portrait", size: "650x1024", tier: operation_setting.ImageResolutionTier1K, width: 650, height: 1024, wantID: oneK.Id},
+		{name: "two k landscape", size: "1536x1024", tier: operation_setting.ImageResolutionTier2K, width: 1536, height: 1024, wantID: twoAndFourK.Id},
+		{name: "four k portrait", size: "2160x3840", tier: operation_setting.ImageResolutionTier4K, width: 2160, height: 3840, wantID: twoAndFourK.Id},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selected, err := GetRandomSatisfiedChannelWithOptions("gpt-image-2", "gpt-image-2", 0, "/v1/images/generations", ChannelSelectionOptions{
+				ImageModelName: "gpt-image-2",
+				ImageRequirements: &ImageSelectionRequirements{
+					CanonicalModel:  "gpt-image-2",
+					Size:            tt.size,
+					Tier:            tt.tier,
+					Width:           tt.width,
+					Height:          tt.height,
+					ExactDimensions: true,
+				},
+			})
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			assert.Equal(t, tt.wantID, selected.Id)
+		})
+	}
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
 }

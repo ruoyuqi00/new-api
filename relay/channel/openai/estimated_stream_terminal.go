@@ -24,10 +24,19 @@ func EmitEstimatedGPTStreamTerminal(c *gin.Context, info *relaycommon.RelayInfo,
 	if c == nil || c.Request == nil || c.Request.Context().Err() != nil || info == nil || usage == nil {
 		return nil
 	}
-	if info.IsStreamDetached() || info.RelayFormat != types.RelayFormatOpenAI {
+	if info.IsStreamDetached() {
 		return nil
 	}
 	if info.RelayMode != relayconstant.RelayModeChatCompletions && info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
+		return nil
+	}
+	if info.RelayMode == relayconstant.RelayModeChatCompletions && info.RelayFormat != types.RelayFormatOpenAI {
+		return nil
+	}
+	if info.RelayMode == relayconstant.RelayModeResponses && info.RelayFormat != types.RelayFormatOpenAIResponses {
+		return nil
+	}
+	if info.RelayMode == relayconstant.RelayModeResponsesCompact && info.RelayFormat != types.RelayFormatOpenAIResponsesCompaction {
 		return nil
 	}
 

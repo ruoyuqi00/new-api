@@ -193,10 +193,14 @@ func updatePricing() {
 	modelGroupsMap := make(map[string]*types.Set[string])
 
 	for _, ability := range enableAbilities {
-		groups, ok := modelGroupsMap[ability.Model]
+		modelName := ability.Model
+		if canonical, configured := operation_setting.CanonicalImageResolutionModel(modelName); configured {
+			modelName = canonical
+		}
+		groups, ok := modelGroupsMap[modelName]
 		if !ok {
 			groups = types.NewSet[string]()
-			modelGroupsMap[ability.Model] = groups
+			modelGroupsMap[modelName] = groups
 		}
 		groups.Add(ability.Group)
 	}
@@ -206,14 +210,18 @@ func updatePricing() {
 
 	// 先根据已有能力填充原生端点
 	for _, ability := range enableAbilities {
-		endpoints := modelSupportEndpointsStr[ability.Model]
+		modelName := ability.Model
+		if canonical, configured := operation_setting.CanonicalImageResolutionModel(modelName); configured {
+			modelName = canonical
+		}
+		endpoints := modelSupportEndpointsStr[modelName]
 		channelTypes := common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
 		for _, channelType := range channelTypes {
 			if !common.StringsContains(endpoints, string(channelType)) {
 				endpoints = append(endpoints, string(channelType))
 			}
 		}
-		modelSupportEndpointsStr[ability.Model] = endpoints
+		modelSupportEndpointsStr[modelName] = endpoints
 	}
 
 	// 再补充模型自定义端点：若配置有效则替换默认端点，不做合并
