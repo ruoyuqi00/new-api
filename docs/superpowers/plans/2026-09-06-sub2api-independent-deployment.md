@@ -4,9 +4,18 @@
 
 **Goal:** Mirror official Sub2API main into ruoyuqi00/sub2api-provider-adapters:sub2api, deploy a fresh isolated account-pool service at sub2.yuaiapi.com, and connect it to YuAPI only over a private Docker network.
 
-**Architecture:** The source mirror remains an unrelated Git history and contains no deployment secrets. The server runs a new Compose project with fresh PostgreSQL, Redis, and application volumes, a loopback-only administration listener on 127.0.0.1:18473, and an external Docker network named yuapi-backplane for YuAPI-to-Sub2API traffic. Existing YuAPI account-pool code and production channels remain intact until the new pool contains accounts and passes grey-release tests.
+**Architecture:** The source mirror remains an unrelated Git history and contains no deployment secrets. The server runs a new Compose project with fresh PostgreSQL, Redis, and application volumes, a loopback-only administration listener on 127.0.0.1:18473, and the existing external Docker data plane `sub2api_sub2api-network` for YuAPI-to-Sub2API traffic. Existing YuAPI account-pool code and production channels remain intact until the new pool contains accounts and passes grey-release tests.
 
-**Tech Stack:** Git/GitHub, Go, Docker Buildx, Docker Compose, PostgreSQL 18, Redis 8, Caddy/Cloudflare, YuAPI/NewAPI Go relay adapter.
+**Tech Stack:** Git/GitHub, Go, Docker Buildx, Docker Compose, PostgreSQL 18, Redis 8, Caddy/Cloudflare, and the existing YuAPI/NewAPI OpenAI relay adapter.
+
+**Execution note (2026-09-07):** Production inventory found that the corrected
+server already uses `sub2api_sub2api-network` as its stable YuAPI/edge data
+plane. The new application therefore joined that existing network with alias
+`sub2api-internal`; PostgreSQL and Redis remain isolated. Because the deployed
+Sub2API group is OpenAI-compatible, YuAPI uses its existing OpenAI channel
+adapter. No YuAPI source, image, container, database service, or Redis service
+was rebuilt or restarted. The detailed implemented state is recorded in
+`docs/YUAPI_SUB2API_INDEPENDENT_POOL_DEPLOYMENT_2026-09-07.md`.
 
 **Spec:** docs/superpowers/specs/2026-09-06-sub2api-independent-deployment-design.md
 
@@ -19,11 +28,11 @@
 - New directory is /opt/yuapi-sub2api-v2; Compose project is yuapi-sub2api-v2.
 - New app listener is 127.0.0.1:18473:8080; PostgreSQL and Redis expose no host ports.
 - New containers are yuapi-sub2api-v2-app, yuapi-sub2api-v2-postgres, and yuapi-sub2api-v2-redis.
-- New private network is yuapi-sub2api-v2-internal; shared external network is yuapi-backplane; app alias is sub2api-internal.
+- New private network is yuapi-sub2api-v2-internal; the shared external network is the pre-existing sub2api_sub2api-network; app alias is sub2api-internal.
 - Public administration is https://sub2.yuaiapi.com; unknown paths and all model gateway paths remain denied by a positive edge allowlist.
 - Root-only server .env has mode 0600; secrets never enter Git or logs.
 - Registration, password recovery, OAuth sign-up, and payment are disabled; the administrator enables TOTP after first login.
-- The YuAPI Sub2API channel is created disabled with no abilities until accounts and grey-release tests pass.
+- The YuAPI OpenAI channel is created disabled with no enabled abilities until accounts and grey-release tests pass.
 - Do not claim success until the design spec verification matrix has been run and recorded.
 
 ---
@@ -74,10 +83,10 @@ git -C $mirror ls-remote ruoyu refs/heads/sub2api
 git -C $mirror show --no-patch --format='%H %cI %s' refs/heads/main
 ~~~
 
-### Task 2: Restore SSH Access and Inventory the Production Server
+### Task 2: Verify SSH Access and Inventory the Production Server
 
 **Files:**
-- Read: server inventory at 154.219.122.197
+- Read: server inventory at 199.231.85.194
 - Read: exact edge-proxy configuration path returned by Docker/systemd inventory
 - Read: /opt/newapi and /opt/sub2api Compose metadata
 
@@ -89,7 +98,7 @@ git -C $mirror show --no-patch --format='%H %cI %s' refs/heads/main
 
 ~~~powershell
 $key = Join-Path $env:USERPROFILE '.ssh\yuaet_codex_ed25519'
-ssh -vvv -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 root@154.219.122.197 true
+ssh -vvv -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 root@199.231.85.194 true
 ~~~
 
 Expected: exit code 0. If the server closes before an SSH banner, stop and request the correct SSH user/key, firewall allowlist, or console access.
@@ -126,15 +135,13 @@ test ! -e /opt/yuapi-sub2api-v2
 
 Expected: every assertion succeeds. Any collision is a stop condition.
 
-- [ ] Step 4: Audit the shared backplane before reusing it
+- [ ] Step 4: Audit the existing shared data plane before reusing it
 
 ~~~bash
-if docker network inspect yuapi-backplane >/dev/null 2>&1; then
-  docker network inspect yuapi-backplane --format '{{.Name}}|{{json .Labels}}|{{json .Containers}}'
-fi
+docker network inspect sub2api_sub2api-network --format '{{.Name}}|{{json .Labels}}|{{json .Containers}}'
 ~~~
 
-If yuapi-backplane exists and its labels or attached containers are not the approved YuAPI data-plane resources, stop instead of attaching Sub2API to it. If it is absent, create it in Task 4.
+Confirm that `sub2api_sub2api-network` is the existing YuAPI/edge data plane. Do not remove, rename, or recreate it. Stop if it is absent or is not attached to the approved production resources.
 
 ### Task 3: Clone and Build the Pinned Sub2API Image
 
@@ -232,9 +239,7 @@ services:
       redis: {condition: service_healthy}
     networks:
       internal: {}
-      edge:
-        aliases: [sub2api-edge]
-      backplane:
+      data_plane:
         aliases: [sub2api-internal]
     healthcheck:
       test: ['CMD', 'wget', '-q', '-T', '5', '-O', '/dev/null', 'http://localhost:8080/health']
@@ -283,24 +288,22 @@ volumes:
 networks:
   internal:
     name: yuapi-sub2api-v2-internal
-  edge:
-    name: yuapi-sub2api-v2-edge
-  backplane:
-    name: yuapi-backplane
+  data_plane:
+    name: sub2api_sub2api-network
     external: true
 ~~~
 
 When writing the file, use a shell that expands the defined deployment variables; keep Compose runtime dollar signs escaped where needed. Do not copy the official Compose container_name sub2api or bind 0.0.0.0:8080.
 
-- [ ] Step 3: Create the external backplane only after checking it
+- [ ] Step 3: Validate the existing external data plane and start the new stack
 
 ~~~bash
-docker network inspect yuapi-backplane >/dev/null 2>&1 || docker network create --driver bridge yuapi-backplane
+docker network inspect sub2api_sub2api-network >/dev/null
 docker compose -f /opt/yuapi-sub2api-v2/docker-compose.yml --env-file /opt/yuapi-sub2api-v2/.env config >/opt/yuapi-sub2api-v2/compose.rendered.yml
 docker compose -p yuapi-sub2api-v2 -f /opt/yuapi-sub2api-v2/docker-compose.yml --env-file /opt/yuapi-sub2api-v2/.env up -d
 ~~~
 
-If the edge proxy is containerized, connect only that existing proxy container to yuapi-sub2api-v2-edge after recording its current networks; do not connect it to the private database network or yuapi-backplane.
+The containerized edge proxy and YuAPI already use `sub2api_sub2api-network`; do not change their network membership and never attach either to the private database network.
 
 - [ ] Step 4: Verify fresh state and persistence
 
@@ -369,7 +372,7 @@ caddy validate --config "$EDGE_CONFIG"
 
 - [ ] Step 2: Add the sub2.yuaiapi.com virtual host
 
-Use the existing proxy syntax and include mechanism. Proxy only /, /assets/*, /admin/*, /login*, /api/v1/auth/login, /api/v1/auth/login/2fa, /api/v1/auth/refresh, /api/v1/auth/logout, /api/v1/auth/me, /api/v1/user/*, /api/v1/settings/public, /api/v1/admin/*, /health, and /setup/status to 127.0.0.1:18473 when the edge proxy runs on the host. If the edge proxy is a container, attach it to yuapi-sub2api-v2-edge and proxy to yuapi-sub2api-v2-app:8080 instead. Add a final handler returning 404 for every other path, including registration, password-recovery, and OAuth sign-up endpoints. Do not proxy /v1, /v1beta, /responses, /models, /chat/completions, /embeddings, /images, /videos, /backend-api, /messages, /alpha, /antigravity, /tts, /stt, /custom-voices, /realtime, /web_search, or /x_search. Use the existing certificate automation or a Cloudflare Origin Certificate for this host, keep the key root-only, and set Cloudflare SSL/TLS mode to Full (strict).
+Use the existing proxy syntax and include mechanism. Proxy only /, /home, /assets/*, /admin/*, /login*, /profile/*, /legal/*, /api/v1/auth/login, /api/v1/auth/login/2fa, /api/v1/auth/refresh, /api/v1/auth/logout, /api/v1/auth/me, /api/v1/user/*, /api/v1/settings/public, /api/v1/admin/*, /health, and /setup/status. The edge proxy is containerized and already shares `sub2api_sub2api-network`, so proxy to `sub2api-internal:8080` without changing its network membership. Add a final handler returning 404 for every other path, including registration, password-recovery, and OAuth sign-up endpoints. Do not proxy /v1, /v1beta, /responses, /models, /chat/completions, /embeddings, /images, /videos, /backend-api, /messages, /alpha, /antigravity, /tts, /stt, /custom-voices, /realtime, /web_search, or /x_search. Use the existing certificate automation or a Cloudflare Origin Certificate for this host, keep the key root-only, and set Cloudflare SSL/TLS mode to Full (strict).
 
 Use this host block, replacing the upstream only when Task 2 proves the edge proxy is containerized:
 
@@ -377,22 +380,22 @@ Use this host block, replacing the upstream only when Task 2 proves the edge pro
 sub2.yuaiapi.com {
   @control path /api/v1/auth/login /api/v1/auth/login/2fa /api/v1/auth/refresh /api/v1/auth/logout /api/v1/auth/me /api/v1/user/* /api/v1/settings/public /api/v1/admin/* /health /setup/status
   handle @control {
-    reverse_proxy 127.0.0.1:18473
+    reverse_proxy sub2api-internal:8080
   }
 
   @ui {
     method GET HEAD
-    path / /login /login/* /admin /admin/* /profile /profile/* /assets/* /logo.svg /favicon.ico
+    path / /home /login /login/* /admin /admin/* /profile /profile/* /legal/* /assets/* /logo.svg /favicon.ico
   }
   handle @ui {
-    reverse_proxy 127.0.0.1:18473
+    reverse_proxy sub2api-internal:8080
   }
 
   respond 404
 }
 ~~~
 
-For a containerized edge proxy, replace both upstreams with sub2api-edge:8080 after attaching only that proxy container to yuapi-sub2api-v2-edge.
+Do not attach Caddy to the private database network. If its single-file bind mount points to a replaced inode, recreate only the edge container after recording and restoring its existing network memberships; do not restart YuAPI.
 
 - [ ] Step 3: Validate, reload, and verify Cloudflare TLS
 
@@ -409,47 +412,47 @@ Expected: root returns 200/3xx without 525; model gateway probes return 403/404.
 ### Task 7: Connect YuAPI Without Enabling Traffic
 
 **Files:**
-- Modify only if required: constant/api_type.go, constant/channel.go, common/api_type.go, common/endpoint_defaults.go, relay/relay_adaptor.go, relay/common/relay_info.go
-- Create only if required: relay/channel/sub2api/adaptor.go, relay/channel/sub2api/constants.go, relay/channel/sub2api/adaptor_test.go
-- Modify frontend only if required: web/default/src/features/channels/constants.ts, web/default/src/features/channels/lib/channel-type-config.ts, web/default/src/features/channels/lib/channel-utils.ts, and locale keys through web/default/scripts/add-missing-keys.mjs
+- Modify: one disabled channel through the existing YuAPI administration API
+- Modify: no YuAPI source, image, Compose file, container, database service, or Redis service
 
 **Interfaces:**
 - Consumes: http://sub2api-internal:8080, the new Sub2API API key, and current YuAPI ruoyu/main
-- Produces: a disabled YuAPI Sub2API channel with no active abilities
+- Produces: a disabled standard OpenAI channel with no active abilities
 
-- [ ] Step 1: Audit whether the running YuAPI image already has APITypeSub2API
+- [ ] Step 1: Verify existing OpenAI compatibility and private DNS
 
 ~~~bash
-git grep -n 'APITypeSub2API\|ChannelTypeSub2API\|relay/channel/sub2api' -- ':!docs' || true
-docker exec "$YUAPI_CONTAINER" sh -c 'getent hosts sub2api-internal || true'
+docker exec "$YUAPI_CONTAINER" sh -c 'getent hosts sub2api-internal && wget -q -O- http://sub2api-internal:8080/health'
+# Request /v1/models with the root-only internal key without printing the key.
 ~~~
 
-If all required symbols exist, do not modify YuAPI source. If they do not, continue with the minimal adapter patch.
+The configured Sub2API group uses the OpenAI contract, including `/v1/models`,
+chat completions, and Responses. The existing YuAPI OpenAI adapter is therefore
+sufficient and no dedicated adapter or source deployment is required.
 
-- [ ] Step 2: Port only the minimal compatible adapter when required
+- [ ] Step 2: Keep the unused dedicated-adapter contingency out of production
 
-Use the proven files from commit 2d23cdf2915432632e37637198a72c752d642bcf as the reference, adapting imports to the current ruoyu/main DTOs. Preserve OpenAI/Responses/Claude/Gemini headers, use channel.DoApiRequest, dynamically fetch models, and return explicit endpoint not supported for audio/rerank. Add ChannelTypeSub2API=59 and APITypeSub2API after the existing Advanced Custom values, register the adaptor, and mark ChannelTypeSub2API in streamSupportedChannels only after stream_options behavior is verified. Do not port that commit's billing, alpha-search, concurrency, or unrelated UI changes. Add focused URL/header regression tests with require.NoError and assert.Equal.
+Do not port commit `2d23cdf2915432632e37637198a72c752d642bcf`; its dedicated adapter is unnecessary for the OpenAI group and is bundled with unrelated billing and relay work. Future non-OpenAI groups must be implemented as separate protocol-specific groups, keys, and YuAPI channels.
 
-- [ ] Step 3: Run focused YuAPI tests before building
+- [ ] Step 3: Verify that no YuAPI source diff exists
 
 ~~~powershell
-go test ./relay/channel/sub2api ./relay ./router ./common
 git diff --check
 ~~~
 
-Expected: focused tests pass; no production database or routing settings change in this code task.
+Expected: no adapter files or production build changes.
 
-- [ ] Step 4: Synchronize the default frontend channel label if the current UI needs it
+- [ ] Step 4: Keep the existing OpenAI channel label
 
-Run the i18n skill's script-only workflow from web/default: add the Sub2API key through web/default/scripts/add-missing-keys.mjs with the brand name kept as Sub2API in en, zh, fr, ja, ru, and vi; run node scripts/add-missing-keys.mjs and bun run i18n:sync; then run the targeted TypeScript and lint checks for the changed channel files. Never edit locale JSON files directly.
+Name the channel `Sub2API Internal Pool`; no new frontend label or locale key is needed.
 
-- [ ] Step 5: Build and deploy YuAPI only if the adapter was required
+- [ ] Step 5: Do not rebuild or restart YuAPI
 
-Use the existing YuAPI production Compose procedure, pin the image tag to the new commit, and join the existing newapi service to yuapi-backplane without changing its existing networks. Back up the YuAPI Compose file before editing it. Stop if any existing public virtual host, database, Redis, channel, or user-group setting changes.
+Record the current YuAPI container ID, start time, and health before and after channel creation. They must remain unchanged.
 
 - [ ] Step 6: Create the disabled channel and internal key
 
-In the YuAPI admin panel, create a Sub2API channel with base URL http://sub2api-internal:8080, the new internal API key, status disabled, no abilities, and a lower grey-release priority. Do not remove or disable existing YuAPI account-pool code or channels.
+In the YuAPI admin panel, create a standard OpenAI channel named `Sub2API Internal Pool` with base URL `http://sub2api-internal:8080`, the new internal API key, manual-disabled status, and lower grey-release priority. Confirm every generated ability is disabled. Do not remove or disable existing YuAPI account-pool code or channels.
 
 ### Task 8: Verify Private Routing, Public Denials, and Existing YuAPI Health
 
@@ -489,7 +492,7 @@ Expected: UI/control paths behave as designed; registration/recovery/OAuth signu
 docker exec "$YUAPI_CONTAINER" sh -c 'getent hosts sub2api-internal && wget -q -O- http://sub2api-internal:8080/health'
 ~~~
 
-Expected: DNS resolves only on yuapi-backplane and health returns {"status":"ok"}. A container not attached to yuapi-backplane must fail to resolve the alias.
+Expected: DNS resolves on the existing `sub2api_sub2api-network` data plane and health returns `{"status":"ok"}`. PostgreSQL and Redis remain absent from that shared network.
 
 - [ ] Step 4: Confirm empty-pool behavior and existing YuAPI smoke traffic
 
@@ -509,15 +512,15 @@ Expected: all three services become healthy, admin settings persist, and no old 
 
 ~~~bash
 docker compose -p yuapi-sub2api-v2 -f /opt/yuapi-sub2api-v2/docker-compose.yml --env-file /opt/yuapi-sub2api-v2/.env config --quiet
-docker network inspect yuapi-backplane --format '{{json .Containers}}'
+docker network inspect sub2api_sub2api-network --format '{{json .Containers}}'
 ~~
 
-Record these rollback actions without running them on a successful deployment: disable the new YuAPI channel; restore the Caddy backup captured in Task 6 and validate/reload Caddy; run docker compose stop for yuapi-sub2api-v2; disconnect YuAPI or the edge proxy from newly introduced networks only after proving no other approved service uses them. Never run docker compose down -v and never touch /opt/sub2api.
+Record these rollback actions without running them on a successful deployment: disable the new YuAPI channel; restore the Caddy backup captured in Task 6 and validate/reload Caddy; run docker compose stop for yuapi-sub2api-v2. Never disconnect or remove the pre-existing `sub2api_sub2api-network`, never run docker compose down -v, and never touch /opt/sub2api.
 
 ### Task 9: Document Operations and Commit the Implementation Record
 
 **Files:**
-- Create: docs/YUAPI_SUB2API_INDEPENDENT_POOL_DEPLOYMENT_2026-09-06.md
+- Create: docs/YUAPI_SUB2API_INDEPENDENT_POOL_DEPLOYMENT_2026-09-07.md
 - Modify: no existing production source or historical status record until deployment actually succeeds
 
 **Interfaces:**
@@ -532,7 +535,7 @@ Include official SHA, user branch SHA, image tag, Compose project, container/net
 
 ~~~powershell
 git diff --check
-Select-String -Path docs/YUAPI_SUB2API_INDEPENDENT_POOL_DEPLOYMENT_2026-09-06.md -Pattern 'password=|api[_-]?key=|secret=|token=|TOTP_ENCRYPTION_KEY|POSTGRES_PASSWORD|REDIS_PASSWORD' -CaseSensitive:$false
+Select-String -Path docs/YUAPI_SUB2API_INDEPENDENT_POOL_DEPLOYMENT_2026-09-07.md -Pattern 'password=|api[_-]?key=|secret=|token=|TOTP_ENCRYPTION_KEY|POSTGRES_PASSWORD|REDIS_PASSWORD' -CaseSensitive:$false
 ~~~
 
 Expected: the scan returns no credential values; remove any variable values before committing.
@@ -540,9 +543,9 @@ Expected: the scan returns no credential values; remove any variable values befo
 - [ ] Step 3: Commit only the approved YuAPI changes and redacted record
 
 ~~~powershell
-git add -- docs/YUAPI_SUB2API_INDEPENDENT_POOL_DEPLOYMENT_2026-09-06.md
-git add -- constant/api_type.go constant/channel.go common/api_type.go common/endpoint_defaults.go relay/relay_adaptor.go relay/channel/sub2api web
-git commit -m 'feat: deploy isolated sub2api account pool'
+git add -- docs/YUAPI_SUB2API_INDEPENDENT_POOL_DEPLOYMENT_2026-09-07.md
+git add -- docs/superpowers/specs/2026-09-06-sub2api-independent-deployment-design.md docs/superpowers/plans/2026-09-06-sub2api-independent-deployment.md
+git commit -m 'docs: record isolated sub2api account pool deployment'
 ~~~
 
 Never stage .env, server Compose overlays, credential files, generated frontend artifacts, or unrelated pre-existing worktree changes.
