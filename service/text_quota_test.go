@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -67,6 +68,10 @@ func TestNormalizeTextSettlementUsageOnlyAddsPlaceholderForEstimatedGPTText(t *t
 	require.Equal(t, 1, gotEstimated.CompletionTokens)
 	require.Equal(t, 401, gotEstimated.TotalTokens)
 	require.Equal(t, "estimated", gotEstimated.UsageSource)
+	require.Equal(t, 400, gotEstimated.PromptCacheHitTokens)
+	require.Equal(t, 400, gotEstimated.PromptTokensDetails.CachedTokens)
+	require.NotNil(t, gotEstimated.InputTokensDetails)
+	require.Equal(t, 400, gotEstimated.InputTokensDetails.CachedTokens)
 }
 
 func TestClaudeMessagesUnconfirmedUsageDoesNotCharge(t *testing.T) {
@@ -995,9 +1000,9 @@ func TestAmbiguousGPTTextBillingSettlesEstimatedUsage(t *testing.T) {
 				UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
 				StartTime:   time.Now(),
 				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
-				PriceData:   types.PriceData{ModelRatio: 1, CompletionRatio: 1, QuotaToPreConsume: 1250, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+				PriceData:   types.PriceData{ModelRatio: 1, CompletionRatio: 1, CacheRatio: 0.1, QuotaToPreConsume: 1250, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
 			},
-			want:       1250,
+			want:       321,
 			wantPrompt: 3200,
 		},
 		{
@@ -1009,15 +1014,15 @@ func TestAmbiguousGPTTextBillingSettlesEstimatedUsage(t *testing.T) {
 				PriceData:   types.PriceData{QuotaToPreConsume: 1250},
 				TieredBillingSnapshot: &billingexpr.BillingSnapshot{
 					BillingMode:              "tiered_expr",
-					ExprString:               `tier("estimated", p)`,
-					ExprHash:                 billingexpr.ExprHashString(`tier("estimated", p)`),
+					ExprString:               `tier("estimated", cr * 0.1 + c)`,
+					ExprHash:                 billingexpr.ExprHashString(`tier("estimated", cr * 0.1 + c)`),
 					GroupRatio:               1,
 					QuotaPerUnit:             1_000_000,
 					EstimatedQuotaAfterGroup: 875,
 					EstimatedTier:            "selected-at-reservation",
 				},
 			},
-			want:       875,
+			want:       321,
 			wantPrompt: 3200,
 		},
 	}
@@ -1047,10 +1052,12 @@ func TestAmbiguousGPTTextBillingSettlesEstimatedUsage(t *testing.T) {
 			require.Equal(t, 1, logs[0].CompletionTokens)
 			require.Contains(t, logs[0].Other, "usage_unconfirmed")
 			require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
+			require.Contains(t, logs[0].Other, `"cache_tokens":3200`)
+			require.Contains(t, logs[0].Other, `"estimated_cache_assumed":true`)
 			if tt.info.TieredBillingSnapshot != nil {
 				require.Contains(t, logs[0].Other, `"billing_mode":"tiered_expr"`)
 				require.Contains(t, logs[0].Other, `"estimated_tier":"estimated"`)
-				require.Contains(t, logs[0].Other, `"settled_from_reservation":true`)
+				require.NotContains(t, logs[0].Other, `"settled_from_reservation":true`)
 			}
 			require.Contains(t, logs[0].Other, `"settled_from_estimate":true`)
 
@@ -1129,7 +1136,7 @@ func TestAcceptedStreamBillingDoesNotRecordConsumptionWhenSettlementFails(t *tes
 	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{})
 
 	require.Error(t, err)
-	require.Equal(t, []int{401}, billing.settled)
+	require.Equal(t, []int{1}, billing.settled)
 	var logs []model.Log
 	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
 	require.Empty(t, logs)
@@ -1163,7 +1170,7 @@ func TestGPTTextEstimatedSettlementUsesObservedTokensInsteadOfReservation(t *tes
 				CompletionTokens: 20,
 				UsageSource:      "estimated",
 			},
-			want: 440,
+			want: 80,
 		},
 		{
 			name:  "zero token estimate",
@@ -1179,7 +1186,7 @@ func TestGPTTextEstimatedSettlementUsesObservedTokensInsteadOfReservation(t *tes
 				CompletionTokens: 20,
 				UsageSource:      "estimated",
 			},
-			want: 440,
+			want: 80,
 		},
 		{
 			name: "unconfirmed cache details are not treated as authoritative",
@@ -1193,7 +1200,7 @@ func TestGPTTextEstimatedSettlementUsesObservedTokensInsteadOfReservation(t *tes
 				},
 				InputTokensDetails: &dto.InputTokenDetails{CachedTokens: 111},
 			},
-			want: 440,
+			want: 80,
 		},
 	}
 
@@ -1207,7 +1214,7 @@ func TestGPTTextEstimatedSettlementUsesObservedTokensInsteadOfReservation(t *tes
 				Billing:        billing,
 				ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
 				PriceData: types.PriceData{
-					ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+					ModelRatio: 1, CompletionRatio: 2, CacheRatio: 0.1, QuotaToPreConsume: 1250,
 					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 				},
 			}
@@ -1225,7 +1232,8 @@ func TestGPTTextEstimatedSettlementUsesObservedTokensInsteadOfReservation(t *tes
 			require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
 			require.Len(t, logs, 1)
 			require.Equal(t, tt.want, logs[0].Quota)
-			require.Contains(t, logs[0].Other, `"cache_tokens":0`)
+			require.Contains(t, logs[0].Other, fmt.Sprintf(`"cache_tokens":%d`, tt.usage.PromptTokens))
+			require.Contains(t, logs[0].Other, `"estimated_cache_assumed":true`)
 			require.NotContains(t, logs[0].Other, `"settled_from_reservation":true`)
 
 			require.NoError(t, model.DB.Exec("UPDATE users SET used_quota = 0, request_count = 0 WHERE id = ?", relayInfo.UserId).Error)
@@ -1233,6 +1241,40 @@ func TestGPTTextEstimatedSettlementUsesObservedTokensInsteadOfReservation(t *tes
 			require.NoError(t, model.LOG_DB.Exec("DELETE FROM logs").Error)
 		})
 	}
+}
+
+func TestGPTTextEstimatedSettlementCountsAsAffinityCacheHit(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "gpt-test",
+		RequestURLPath:          "/v1/responses",
+		FinalRequestRelayFormat: types.RelayFormatOpenAIResponses,
+		StartTime:               time.Now(),
+		Billing:                 billing,
+		ChannelMeta:             &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, CacheRatio: 0.1, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	defer relayInfo.FinishStreamRecovery()
+	ctx := buildChannelAffinityStatsContextForTest("estimated_cache", "default", "estimated-cache-fp")
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	require.NoError(t, SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420, UsageSource: "estimated",
+	}))
+
+	stats := GetChannelAffinityUsageCacheStats("estimated_cache", "default", "estimated-cache-fp")
+	require.EqualValues(t, 1, stats.Total)
+	require.EqualValues(t, 1, stats.Hit)
+	require.EqualValues(t, 400, stats.CachedTokens)
+	require.Zero(t, stats.Unknown)
 }
 
 func TestUnconfirmedFailedTextStreamsRefundReservation(t *testing.T) {
@@ -1299,7 +1341,7 @@ func TestUnconfirmedScannerErrorKeepsEstimatedCharge(t *testing.T) {
 		Billing:        billing,
 		ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
 		PriceData: types.PriceData{
-			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			ModelRatio: 1, CompletionRatio: 2, CacheRatio: 0.1, QuotaToPreConsume: 1250,
 			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 		},
 	}
@@ -1314,11 +1356,13 @@ func TestUnconfirmedScannerErrorKeepsEstimatedCharge(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, []int{440}, billing.settled)
+	require.Equal(t, []int{80}, billing.settled)
 	var logs []model.Log
 	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
 	require.Len(t, logs, 1)
-	require.Equal(t, 440, logs[0].Quota)
+	require.Equal(t, 80, logs[0].Quota)
+	require.Contains(t, logs[0].Other, `"cache_tokens":400`)
+	require.Contains(t, logs[0].Other, `"estimated_cache_assumed":true`)
 	require.Contains(t, logs[0].Other, `"usage_unconfirmed":true`)
 	require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
 }
@@ -1718,7 +1762,7 @@ func TestGPTTextSettlementDropsInvalidUpstreamTokenFields(t *testing.T) {
 		PromptTokens: 10_000_001, CompletionTokens: 1, TotalTokens: 10_000_002,
 	}, nil)
 
-	require.Equal(t, []int{401}, billing.settled)
+	require.Equal(t, []int{1}, billing.settled)
 }
 
 func TestIncompleteResponsesUsageAlwaysUsesPreConsumedQuotaFloor(t *testing.T) {

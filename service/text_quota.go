@@ -510,6 +510,9 @@ func NormalizeEstimatedGPTTextUsage(usage *dto.Usage) *dto.Usage {
 	if usage.PromptTokens > 0 && usage.CompletionTokens < 1 {
 		usage.CompletionTokens = 1
 	}
+	usage.PromptCacheHitTokens = usage.PromptTokens
+	usage.PromptTokensDetails = dto.InputTokenDetails{CachedTokens: usage.PromptTokens}
+	usage.InputTokensDetails = &dto.InputTokenDetails{CachedTokens: usage.PromptTokens}
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	usage.UsageSource = "estimated"
 	return usage
@@ -616,12 +619,9 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		usage = normalizeTextSettlementUsage(relayInfo, usage, authoritativeUsage, estimatedGPTTextUsage)
 	}
 	if estimatedGPTTextUsage {
-		usage.PromptCacheHitTokens = 0
-		usage.PromptTokensDetails = dto.InputTokenDetails{}
 		usage.CompletionTokenDetails = dto.OutputTokenDetails{}
 		usage.InputTokens = 0
 		usage.OutputTokens = 0
-		usage.InputTokensDetails = nil
 		usage.ClaudeCacheCreation5mTokens = 0
 		usage.ClaudeCacheCreation1hTokens = 0
 		usage.Cost = nil
@@ -635,10 +635,12 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			relayInfo.PreservePreConsumedQuota = false
 			extraContent = append(extraContent, "unconfirmed Claude Messages usage; pre-consumed quota refunded")
 		} else {
-			extraContent = append(extraContent, "authoritative terminal usage unavailable; tokens estimated locally")
+			extraContent = append(extraContent, "authoritative terminal usage unavailable; tokens estimated locally; estimated input treated as cache read")
 		}
 	}
-	if shouldObserveConfirmedChannelAffinityUsage(ctx, relayInfo, originUsage) {
+	if estimatedGPTTextUsage {
+		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
+	} else if shouldObserveConfirmedChannelAffinityUsage(ctx, relayInfo, originUsage) {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
 	} else {
 		ObserveChannelAffinityUsageCacheUnknownFromContext(ctx)
@@ -653,6 +655,14 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		var tieredUsedVars map[string]bool
 		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
 			tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
+		}
+		if estimatedGPTTextUsage {
+			forcedCacheVars := make(map[string]bool, len(tieredUsedVars)+1)
+			for key, used := range tieredUsedVars {
+				forcedCacheVars[key] = used
+			}
+			forcedCacheVars["cr"] = true
+			tieredUsedVars = forcedCacheVars
 		}
 		params := BuildTieredTokenParams(usage, summary.IsClaudeUsageSemantic, tieredUsedVars)
 		var tieredOk bool
@@ -787,6 +797,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		other["usage_source"] = "estimated"
 		if estimatedGPTTextUsage {
 			other["settled_from_estimate"] = true
+			other["estimated_cache_assumed"] = true
 		}
 		if settledFromReservation {
 			other["settled_from_reservation"] = true

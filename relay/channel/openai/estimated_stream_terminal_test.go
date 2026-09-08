@@ -52,6 +52,7 @@ func TestEmitEstimatedGPTStreamTerminalChatUsesLengthAndUsage(t *testing.T) {
 	require.Contains(t, body, `"finish_reason":"length"`)
 	require.Contains(t, body, `"prompt_tokens":1200`)
 	require.Contains(t, body, `"completion_tokens":25`)
+	require.Contains(t, body, `"cached_tokens":1200`)
 	require.Contains(t, body, "[DONE]")
 	require.NotContains(t, body, "upstream-secret")
 }
@@ -72,6 +73,7 @@ func TestEmitEstimatedGPTStreamTerminalResponsesUsesIncompleteUsage(t *testing.T
 	require.Contains(t, body, `"input_tokens":1200`)
 	require.Contains(t, body, `"output_tokens":25`)
 	require.Contains(t, body, `"total_tokens":1225`)
+	require.Contains(t, body, `"cached_tokens":1200`)
 	require.Contains(t, body, `"sequence_number":8`)
 	require.NotContains(t, body, "upstream-secret")
 	require.NotContains(t, body, "Authorization")
