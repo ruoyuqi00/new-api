@@ -83,3 +83,21 @@ func TestGenerateTextOtherInfoIncludesImageResolutionAuditWithoutUpstreamSecrets
 	assert.NotContains(t, other, "upstream_url")
 	assert.NotContains(t, other, "api_key")
 }
+
+func TestGenerateTextOtherInfoIncludesClaudeThinkingConfiguration(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+	now := time.Now()
+	info := &relaycommon.RelayInfo{
+		StartTime:          now,
+		FirstResponseTime:  now,
+		ReasoningEffort:    "max",
+		ClaudeThinkingType: "adaptive",
+		ChannelMeta:        &relaycommon.ChannelMeta{},
+	}
+
+	other := GenerateTextOtherInfo(c, info, 5, 0.7, 5, 0, 0, 0, -1)
+
+	assert.Equal(t, "max", other["reasoning_effort"])
+	assert.Equal(t, "adaptive", other["thinking_type"])
+}

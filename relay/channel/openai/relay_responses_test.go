@@ -111,6 +111,104 @@ func TestOaiResponsesHandlerLeavesImageUsageUnchanged(t *testing.T) {
 	require.False(t, info.PreservePreConsumedQuota)
 }
 
+func TestOaiResponsesHandlerBillsOnlyExecutedCurrentWebSearchTools(t *testing.T) {
+	ctx, _ := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedResponsesClientResponseInfo()
+	info.ResponsesUsageInfo = &relaycommon.ResponsesUsageInfo{
+		BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+			dto.BuildInToolWebSearch: {ToolName: dto.BuildInToolWebSearch},
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"resp_1","model":"upstream-model","tools":[{"type":"web_search"}],"output":[{"type":"web_search_call","id":"ws_1","status":"completed"}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`,
+		)),
+	}
+
+	_, relayErr := OaiResponsesHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, 1, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearch].CallCount)
+}
+
+func TestOaiResponsesHandlerDoesNotBillDeclaredButUnusedTools(t *testing.T) {
+	ctx, _ := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedResponsesClientResponseInfo()
+	info.ResponsesUsageInfo = &relaycommon.ResponsesUsageInfo{
+		BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+			dto.BuildInToolWebSearch: {ToolName: dto.BuildInToolWebSearch},
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"resp_1","model":"upstream-model","tools":[{"type":"web_search"}],"output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`,
+		)),
+	}
+
+	_, relayErr := OaiResponsesHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Zero(t, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearch].CallCount)
+}
+
+func TestOaiResponsesStreamHandlerDeduplicatesExecutedWebSearchTool(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, _ := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedResponsesClientResponseInfo()
+	info.ResponsesUsageInfo = &relaycommon.ResponsesUsageInfo{
+		BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+			dto.BuildInToolWebSearch: {ToolName: dto.BuildInToolWebSearch},
+		},
+	}
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed"}}`,
+		`data: {"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"upstream-model","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
+
+	_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, 1, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearch].CallCount)
+}
+
+func TestOaiResponsesStreamHandlerCountsToolFromTerminalOutput(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, _ := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedResponsesClientResponseInfo()
+	info.ResponsesUsageInfo = &relaycommon.ResponsesUsageInfo{
+		BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+			dto.BuildInToolFileSearch: {ToolName: dto.BuildInToolFileSearch},
+		},
+	}
+	body := strings.Join([]string{
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"upstream-model","output":[{"type":"file_search_call","id":"fs_1","status":"completed"}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
+
+	_, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, 1, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolFileSearch].CallCount)
+}
+
 func TestOaiResponsesStreamHandlerEmitsFixedCodexPreludeFirstForGPT(t *testing.T) {
 	oldStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30

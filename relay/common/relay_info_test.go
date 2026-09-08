@@ -1,13 +1,28 @@
 package common
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestObserveClaudeThinkingConfigPreservesRequestedEffortAndType(t *testing.T) {
+	info := &RelayInfo{}
+	request := &dto.ClaudeRequest{
+		OutputConfig: json.RawMessage(`{"effort":"max"}`),
+		Thinking:     &dto.Thinking{Type: "adaptive"},
+	}
+
+	info.ObserveClaudeThinkingConfig(request)
+
+	require.Equal(t, "max", info.ReasoningEffort)
+	require.Equal(t, "adaptive", info.ClaudeThinkingType)
+}
 
 func TestInitChannelMetaResetsResponseModelAuditForRetry(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

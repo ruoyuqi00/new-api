@@ -175,6 +175,10 @@ export interface LogOtherData {
   usage_unconfirmed?: boolean
   settled_from_reservation?: boolean
   reasoning_effort?: string
+  thinking_type?: string
+  thinking_tokens?: number
+  text_output_tokens?: number
+  thinking_tokens_included_in_output?: boolean
   image?: boolean
   image_ratio?: number
   image_output?: number

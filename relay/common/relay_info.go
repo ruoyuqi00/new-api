@@ -111,10 +111,55 @@ type BuildInToolInfo struct {
 	ToolName          string
 	CallCount         int
 	SearchContextSize string
+	ExecutedCallIDs   map[string]struct{}
 }
 
 type ResponsesUsageInfo struct {
 	BuiltInTools map[string]*BuildInToolInfo
+}
+
+func (info *RelayInfo) RecordResponsesBuiltInToolCall(callType, callID string) bool {
+	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
+		return false
+	}
+
+	toolNames := []string{callType}
+	switch callType {
+	case dto.BuildInCallWebSearchCall:
+		toolNames = []string{dto.BuildInToolWebSearch, dto.BuildInToolWebSearchPreview}
+	case dto.BuildInCallFileSearchCall:
+		toolNames = []string{dto.BuildInToolFileSearch}
+	}
+
+	for _, toolName := range toolNames {
+		tool, exists := info.ResponsesUsageInfo.BuiltInTools[toolName]
+		if !exists || tool == nil {
+			continue
+		}
+		if callID != "" {
+			if tool.ExecutedCallIDs == nil {
+				tool.ExecutedCallIDs = make(map[string]struct{})
+			}
+			if _, exists := tool.ExecutedCallIDs[callID]; exists {
+				return false
+			}
+			tool.ExecutedCallIDs[callID] = struct{}{}
+		}
+		tool.CallCount++
+		return true
+	}
+	return false
+}
+
+func (info *RelayInfo) ObserveClaudeThinkingConfig(request *dto.ClaudeRequest) {
+	if info == nil || request == nil {
+		return
+	}
+	info.ReasoningEffort = request.GetEfforts()
+	info.ClaudeThinkingType = ""
+	if request.Thinking != nil {
+		info.ClaudeThinkingType = request.Thinking.Type
+	}
 }
 
 type ChannelMeta struct {
@@ -172,6 +217,7 @@ type RelayInfo struct {
 	IsFirstRequest         bool
 	AudioUsage             bool
 	ReasoningEffort        string
+	ClaudeThinkingType     string
 	UserSetting            dto.UserSetting
 	UserEmail              string
 	UserQuota              int
@@ -520,11 +566,12 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 		for _, tool := range request.GetToolsMap() {
 			toolType := common.Interface2String(tool["type"])
 			info.ResponsesUsageInfo.BuiltInTools[toolType] = &BuildInToolInfo{
-				ToolName:  toolType,
-				CallCount: 0,
+				ToolName:        toolType,
+				CallCount:       0,
+				ExecutedCallIDs: make(map[string]struct{}),
 			}
 			switch toolType {
-			case dto.BuildInToolWebSearchPreview:
+			case dto.BuildInToolWebSearchPreview, dto.BuildInToolWebSearch:
 				searchContextSize := common.Interface2String(tool["search_context_size"])
 				if searchContextSize == "" {
 					searchContextSize = "medium"

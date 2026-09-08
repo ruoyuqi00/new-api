@@ -49,7 +49,9 @@ import {
   getParamOverrideActionLabel,
   parseAuditLine,
   decodeBillingExprB64,
+  getThinkingTokenBreakdown,
   getTieredBillingSummary,
+  getToolFeeBreakdown,
   getViolationFeeDisplay,
   hasAnyCacheTokens,
   isViolationFeeLog,
@@ -295,17 +297,43 @@ function BillingBreakdown(props: {
     }
   }
 
-  if (other.web_search && other.web_search_call_count) {
+  const webSearchFee = getToolFeeBreakdown(
+    other.web_search_call_count,
+    other.web_search_price,
+    effectiveGR
+  )
+  if (other.web_search && webSearchFee) {
     rows.push({
-      label: t('Web Search'),
-      value: `${other.web_search_call_count}x${other.web_search_price ? ` (${fmtPrice(other.web_search_price)})` : ''}`,
+      label: t('Web Search Calls'),
+      value: webSearchFee.callCount.toLocaleString(),
+    })
+    rows.push({
+      label: t('Web Search Unit Price'),
+      value: `${fmtPrice(webSearchFee.pricePerThousand)}/1K`,
+    })
+    rows.push({
+      label: t('Web Search Fee'),
+      value: fmtPrice(webSearchFee.feeUSD),
     })
   }
 
-  if (other.file_search && other.file_search_call_count) {
+  const fileSearchFee = getToolFeeBreakdown(
+    other.file_search_call_count,
+    other.file_search_price,
+    effectiveGR
+  )
+  if (other.file_search && fileSearchFee) {
     rows.push({
-      label: t('File Search'),
-      value: `${other.file_search_call_count}x${other.file_search_price ? ` (${fmtPrice(other.file_search_price)})` : ''}`,
+      label: t('File Search Calls'),
+      value: fileSearchFee.callCount.toLocaleString(),
+    })
+    rows.push({
+      label: t('File Search Unit Price'),
+      value: `${fmtPrice(fileSearchFee.pricePerThousand)}/1K`,
+    })
+    rows.push({
+      label: t('File Search Fee'),
+      value: fmtPrice(fileSearchFee.feeUSD),
     })
   }
 
@@ -364,6 +392,7 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
   const cacheWrite5m = other.cache_creation_tokens_5m || 0
   const cacheWrite1h = other.cache_creation_tokens_1h || 0
   const hasTokens = promptTokens > 0 || completionTokens > 0
+  const thinkingBreakdown = getThinkingTokenBreakdown(completionTokens, other)
 
   if (!hasTokens) return null
 
@@ -374,6 +403,25 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
     label: t('Output Tokens'),
     value: completionTokens.toLocaleString(),
   })
+
+  if (thinkingBreakdown) {
+    rows.push({
+      label: t('Thinking Tokens'),
+      value: thinkingBreakdown.thinkingTokens.toLocaleString(),
+    })
+    rows.push({
+      label: t('Text Output Tokens'),
+      value: thinkingBreakdown.textOutputTokens.toLocaleString(),
+    })
+    if (thinkingBreakdown.includedInOutput) {
+      rows.push({
+        label: t('Thinking Billing'),
+        value: t(
+          'Thinking tokens are included in output tokens and are not billed twice.'
+        ),
+      })
+    }
+  }
 
   if (cacheRead > 0) {
     rows.push({
@@ -1042,6 +1090,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 copyable={false}
               />
             }
+          />
+        )}
+
+        {other?.thinking_type && (
+          <DetailRow
+            label={t('Thinking Type')}
+            value={other.thinking_type}
+            mono
           />
         )}
 

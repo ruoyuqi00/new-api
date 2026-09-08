@@ -287,6 +287,68 @@ export function hasAnyCacheTokens(
   )
 }
 
+export interface ThinkingTokenBreakdown {
+  outputTokens: number
+  thinkingTokens: number
+  textOutputTokens: number
+  includedInOutput: boolean
+}
+
+export function getThinkingTokenBreakdown(
+  outputTokens: number,
+  other: LogOtherData | null | undefined
+): ThinkingTokenBreakdown | null {
+  const total = Math.max(0, outputTokens || 0)
+  const reportedThinking = Math.max(0, other?.thinking_tokens || 0)
+  if (reportedThinking === 0) return null
+
+  const thinkingTokens = Math.min(total, reportedThinking)
+  const reportedText = other?.text_output_tokens
+  const textOutputTokens =
+    reportedText == null
+      ? total - thinkingTokens
+      : Math.min(total - thinkingTokens, Math.max(0, reportedText))
+
+  return {
+    outputTokens: total,
+    thinkingTokens,
+    textOutputTokens,
+    includedInOutput: other?.thinking_tokens_included_in_output === true,
+  }
+}
+
+export interface ToolFeeBreakdown {
+  callCount: number
+  pricePerThousand: number
+  effectiveGroupRatio: number
+  feeUSD: number
+}
+
+export function getToolFeeBreakdown(
+  callCount: number | undefined,
+  pricePerThousand: number | undefined,
+  effectiveGroupRatio: number | undefined
+): ToolFeeBreakdown | null {
+  if (
+    !callCount ||
+    callCount <= 0 ||
+    !pricePerThousand ||
+    pricePerThousand <= 0
+  ) {
+    return null
+  }
+  const ratio =
+    effectiveGroupRatio != null && Number.isFinite(effectiveGroupRatio)
+      ? effectiveGroupRatio
+      : 1
+  return {
+    callCount,
+    pricePerThousand,
+    effectiveGroupRatio: ratio,
+    feeUSD: (callCount * pricePerThousand * ratio) / 1000,
+  }
+}
+
 export function getTieredBillingSummary(
   other: LogOtherData | null
 ): TieredBillingSummary | null {

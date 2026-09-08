@@ -673,6 +673,24 @@ func TestBuildOpenAIStyleUsageFromClaudeUsageDefaultsAggregateCacheCreationTo5m(
 	require.Equal(t, 0, openAIUsage.ClaudeCacheCreation1hTokens)
 }
 
+func TestFormatClaudeResponseInfoPreservesThinkingBreakdownInsideOutputTokens(t *testing.T) {
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+	claudeResponse := &dto.ClaudeResponse{
+		Type: "message_delta",
+		Usage: &dto.ClaudeUsage{
+			OutputTokens: 10_000,
+			OutputTokensDetails: &dto.ClaudeOutputTokensDetails{
+				ThinkingTokens: 8_000,
+			},
+		},
+	}
+
+	require.True(t, FormatClaudeResponseInfo(claudeResponse, nil, claudeInfo))
+	require.Equal(t, 10_000, claudeInfo.Usage.CompletionTokens)
+	require.Equal(t, 8_000, claudeInfo.Usage.CompletionTokenDetails.ReasoningTokens)
+	require.Equal(t, 10_000, claudeInfo.Usage.TotalTokens)
+}
+
 func TestRequestOpenAI2ClaudeMessage_ClaudeOpus48HighUsesAdaptiveThinking(t *testing.T) {
 	request := dto.GeneralOpenAIRequest{
 		Model:       "claude-opus-4-8-high",

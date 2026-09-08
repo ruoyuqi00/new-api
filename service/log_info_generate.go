@@ -47,6 +47,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
 	}
+	if relayInfo.ClaudeThinkingType != "" {
+		other["thinking_type"] = relayInfo.ClaudeThinkingType
+	}
 	if relayInfo.IsModelMapped {
 		other["is_model_mapped"] = true
 		forwardedModelName := relayInfo.ForwardedModelName

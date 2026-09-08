@@ -539,6 +539,59 @@ func TestComposeTieredTextQuotaKeepsToolCallSurcharges(t *testing.T) {
 	require.Equal(t, 14000, quota)
 }
 
+func TestCalculateTextQuotaSummaryBillsCurrentWebSearchTool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-4.1",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 0.2},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				dto.BuildInToolWebSearch: {CallCount: 1},
+			},
+		},
+		StartTime: time.Now(),
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2,
+	})
+
+	require.Equal(t, 1, summary.WebSearchCallCount)
+	require.Equal(t, 10.0, summary.WebSearchPrice)
+	require.Equal(t, int64(1_000), summary.ToolCallSurchargeQuota.Round(0).IntPart())
+}
+
+func TestCalculateTextQuotaSummaryDoesNotDoubleBillThinkingBreakdown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "claude-fable-5-1",
+		PriceData: types.PriceData{
+			ModelRatio:      5,
+			CompletionRatio: 5,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+	baseUsage := &dto.Usage{
+		PromptTokens: 1_000, CompletionTokens: 10_000, TotalTokens: 11_000,
+		UsageSemantic: "anthropic",
+	}
+	thinkingUsage := *baseUsage
+	thinkingUsage.CompletionTokenDetails.ReasoningTokens = 8_000
+
+	withoutBreakdown := calculateTextQuotaSummary(ctx, relayInfo, baseUsage)
+	withBreakdown := calculateTextQuotaSummary(ctx, relayInfo, &thinkingUsage)
+
+	require.Equal(t, withoutBreakdown.Quota, withBreakdown.Quota)
+	require.Equal(t, 10_000, withBreakdown.CompletionTokens)
+}
+
 func TestCalculateTextQuotaSummaryImageGenerationOnlyBillingForGPTImage2(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

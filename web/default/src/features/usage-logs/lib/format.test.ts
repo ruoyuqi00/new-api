@@ -22,7 +22,9 @@ import { describe, test } from 'node:test'
 import type { UsageLog } from '../data/schema'
 import {
   formatModelName,
+  getThinkingTokenBreakdown,
   getTieredBillingSummary,
+  getToolFeeBreakdown,
   getViolationFeeDisplay,
 } from './format'
 
@@ -178,5 +180,53 @@ describe('getTieredBillingSummary', () => {
 
     assert.equal(result?.tier.label, 'short')
     assert.equal(result?.tier.fixedPrice, 0.05)
+  })
+})
+
+describe('getThinkingTokenBreakdown', () => {
+  test('treats thinking as an included subset of authoritative output', () => {
+    assert.deepEqual(
+      getThinkingTokenBreakdown(10_000, {
+        thinking_tokens: 8_000,
+        text_output_tokens: 2_000,
+        thinking_tokens_included_in_output: true,
+      }),
+      {
+        outputTokens: 10_000,
+        thinkingTokens: 8_000,
+        textOutputTokens: 2_000,
+        includedInOutput: true,
+      }
+    )
+  })
+
+  test('clamps malformed thinking details without inflating output', () => {
+    assert.deepEqual(
+      getThinkingTokenBreakdown(100, {
+        thinking_tokens: 120,
+        thinking_tokens_included_in_output: true,
+      }),
+      {
+        outputTokens: 100,
+        thinkingTokens: 100,
+        textOutputTokens: 0,
+        includedInOutput: true,
+      }
+    )
+  })
+})
+
+describe('getToolFeeBreakdown', () => {
+  test('calculates the additional fee from executed calls and effective ratio', () => {
+    assert.deepEqual(getToolFeeBreakdown(2, 10, 0.15), {
+      callCount: 2,
+      pricePerThousand: 10,
+      effectiveGroupRatio: 0.15,
+      feeUSD: 0.003,
+    })
+  })
+
+  test('omits declared tools when no call executed', () => {
+    assert.equal(getToolFeeBreakdown(0, 10, 0.15), null)
   })
 })

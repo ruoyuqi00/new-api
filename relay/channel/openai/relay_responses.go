@@ -117,14 +117,8 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
 		return &usage, nil
 	}
-	// 解析 Tools 用量
-	for _, tool := range responsesResponse.Tools {
-		buildToolinfo, ok := info.ResponsesUsageInfo.BuiltInTools[common.Interface2String(tool["type"])]
-		if !ok || buildToolinfo == nil {
-			logger.LogError(c, fmt.Sprintf("BuiltInTools not found for tool type: %v", tool["type"]))
-			continue
-		}
-		buildToolinfo.CallCount++
+	for _, output := range responsesResponse.Output {
+		info.RecordResponsesBuiltInToolCall(output.Type, output.ID)
 	}
 	return &usage, nil
 }
@@ -198,6 +192,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			if streamResponse.Response.HasImageGenerationCall() {
 				imageGenerationSeen = true
+			}
+			for _, output := range streamResponse.Response.Output {
+				info.RecordResponsesBuiltInToolCall(output.Type, output.ID)
 			}
 			if streamResponse.Response.Usage != nil && !streamResponse.Response.HasImageGenerationCall() {
 				candidate := &dto.Usage{
@@ -353,12 +350,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					imageGenerationSeen = true
 				}
 				switch streamResponse.Item.Type {
-				case dto.BuildInCallWebSearchCall:
-					if info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
-						if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {
-							webSearchTool.CallCount++
-						}
-					}
+				case dto.BuildInCallWebSearchCall, dto.BuildInCallFileSearchCall:
+					info.RecordResponsesBuiltInToolCall(streamResponse.Item.Type, streamResponse.Item.ID)
 				case dto.ResponsesOutputTypeImageGenerationCall:
 					c.Set("image_generation_call", true)
 					c.Set("image_generation_call_quality", streamResponse.Item.Quality)

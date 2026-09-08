@@ -90,9 +90,15 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 	var surcharge decimal.Decimal
 
 	if relayInfo.ResponsesUsageInfo != nil {
-		if webSearchTool, exists := relayInfo.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool.CallCount > 0 {
+		webSearchPriceKey := dto.BuildInToolWebSearch
+		webSearchTool := relayInfo.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearch]
+		if webSearchTool == nil {
+			webSearchTool = relayInfo.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]
+			webSearchPriceKey = dto.BuildInToolWebSearchPreview
+		}
+		if webSearchTool != nil && webSearchTool.CallCount > 0 {
 			summary.WebSearchCallCount = webSearchTool.CallCount
-			summary.WebSearchPrice = operation_setting.GetToolPriceForModel("web_search_preview", summary.ModelName)
+			summary.WebSearchPrice = operation_setting.GetToolPriceForModel(webSearchPriceKey, summary.ModelName)
 			surcharge = surcharge.Add(decimal.NewFromFloat(summary.WebSearchPrice).
 				Mul(decimal.NewFromInt(int64(webSearchTool.CallCount))).
 				Div(decimal.NewFromInt(1000)).
@@ -735,6 +741,15 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		other["usage_semantic"] = "anthropic"
 	} else {
 		other = GenerateTextOtherInfo(ctx, relayInfo, summary.ModelRatio, summary.GroupRatio, summary.CompletionRatio, summary.CacheTokens, summary.CacheRatio, summary.ModelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+	}
+	if usage != nil && usage.CompletionTokenDetails.ReasoningTokens > 0 {
+		other["thinking_tokens"] = usage.CompletionTokenDetails.ReasoningTokens
+		textOutputTokens := usage.CompletionTokens - usage.CompletionTokenDetails.ReasoningTokens
+		if textOutputTokens < 0 {
+			textOutputTokens = 0
+		}
+		other["text_output_tokens"] = textOutputTokens
+		other["thinking_tokens_included_in_output"] = true
 	}
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason
