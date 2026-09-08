@@ -782,12 +782,14 @@ func TestResponsesAndClaudeAcceptedMalformedStreamsSettleByUsageConfidence(t *te
 		invoke  func(*gin.Context, *relaycommon.RelayInfo) *types.NewAPIError
 		wantErr bool
 		want    int
+		prompt  int
 	}{
 		{
 			name: "responses", path: "/v1/responses", channel: constant.ChannelTypeOpenAI,
 			request: &dto.OpenAIResponsesRequest{Model: "gpt-test", Stream: common.GetPointer(true)},
 			invoke:  ResponsesHelper,
 			want:    401,
+			prompt:  400,
 		},
 		{
 			name: "claude", path: "/v1/messages", channel: constant.ChannelTypeAnthropic,
@@ -795,6 +797,7 @@ func TestResponsesAndClaudeAcceptedMalformedStreamsSettleByUsageConfidence(t *te
 			invoke:  ClaudeHelper,
 			wantErr: true,
 			want:    0,
+			prompt:  0,
 		},
 	}
 	for _, test := range tests {
@@ -846,10 +849,11 @@ func TestResponsesAndClaudeAcceptedMalformedStreamsSettleByUsageConfidence(t *te
 			var logs []model.Log
 			require.NoError(t, model.LOG_DB.Where("user_id = ?", userID).Find(&logs).Error)
 			require.Len(t, logs, 1)
-			require.Equal(t, 400, logs[0].PromptTokens)
+			require.Equal(t, test.prompt, logs[0].PromptTokens)
 			require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
-			if test.wantErr {
-				require.Contains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
+			if test.name == "claude" {
+				require.Contains(t, logs[0].Other, `"unconfirmed_usage_charge_refunded":true`)
+				require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
 			}
 		})
 	}

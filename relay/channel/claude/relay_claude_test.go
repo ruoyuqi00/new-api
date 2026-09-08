@@ -44,6 +44,33 @@ func TestHandleStreamFinalResponseMarksFallbackUsageEstimated(t *testing.T) {
 	require.Equal(t, 400, claudeInfo.Usage.PromptTokens)
 }
 
+func TestHandleStreamFinalResponsePreservesAuthoritativeZeroOutputUsage(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	info := &relaycommon.RelayInfo{
+		IsStream:                true,
+		RelayFormat:             types.RelayFormatClaude,
+		StreamTerminalUsageSeen: true,
+		ChannelMeta:             &relaycommon.ChannelMeta{UpstreamModelName: "claude-test"},
+	}
+	info.SetEstimatePromptTokens(999)
+	claudeInfo := &ClaudeResponseInfo{
+		Done: true,
+		Usage: &dto.Usage{
+			PromptTokens: 400, TotalTokens: 400,
+			UsageSource: "anthropic", UsageSemantic: "anthropic",
+		},
+	}
+
+	HandleStreamFinalResponse(c, info, claudeInfo)
+
+	require.Equal(t, "anthropic", claudeInfo.Usage.UsageSource)
+	require.Equal(t, 400, claudeInfo.Usage.PromptTokens)
+	require.Zero(t, claudeInfo.Usage.CompletionTokens)
+	require.Equal(t, 400, claudeInfo.Usage.TotalTokens)
+}
+
 type claudeStreamWriteSignal struct {
 	gin.ResponseWriter
 	wrote chan struct{}

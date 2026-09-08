@@ -405,6 +405,12 @@ func SettleAmbiguousTextBilling(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return nil
 	}
 	relayInfo.PreservePreConsumedQuota = true
+	if isClaudeMessagesSettlementRequest(ctx, relayInfo) {
+		return postTextConsumeQuota(ctx, relayInfo, &dto.Usage{
+			UsageSource:   "estimated",
+			UsageSemantic: "anthropic",
+		}, []string{"upstream submission status unknown"})
+	}
 	usage := ResponseText2Usage(ctx, "", relayInfo.UpstreamModelName, relayInfo.GetEstimatePromptTokens())
 	return postTextConsumeQuota(ctx, relayInfo, usage, []string{"upstream submission status unknown; usage estimated locally"})
 }
@@ -435,6 +441,14 @@ func isAuthoritativeTextUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		return false
 	}
 	if isGPTTextSettlementRequest(ctx, relayInfo) && !ValidGPTTextUsage(usage) {
+		return false
+	}
+	if isClaudeMessagesSettlementRequest(ctx, relayInfo) &&
+		usage.UsageSource == "" && usage.UsageSemantic == "" &&
+		usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 &&
+		usage.InputTokens == 0 && usage.OutputTokens == 0 &&
+		usage.PromptTokensDetails.CachedTokens == 0 &&
+		usage.PromptTokensDetails.CacheCreationTokensTotal() == 0 {
 		return false
 	}
 	if relayInfo == nil {
@@ -526,13 +540,7 @@ func isGPTTextSettlementRequest(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		path == "/v1/chat/completions" || path == "/v1/completions"
 }
 
-func isFailedTextStreamRefundEligible(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
-	if isGPTTextSettlementRequest(ctx, relayInfo) {
-		return true
-	}
-	if ctx != nil && ctx.GetBool("image_generation_call") {
-		return false
-	}
+func isClaudeMessagesSettlementRequest(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
 	path := ""
 	if relayInfo != nil {
 		path = relayInfo.RequestURLPath
@@ -544,6 +552,16 @@ func isFailedTextStreamRefundEligible(ctx *gin.Context, relayInfo *relaycommon.R
 		path = path[:queryIndex]
 	}
 	return path == "/v1/messages"
+}
+
+func isFailedTextStreamRefundEligible(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if isGPTTextSettlementRequest(ctx, relayInfo) {
+		return true
+	}
+	if ctx != nil && ctx.GetBool("image_generation_call") {
+		return false
+	}
+	return isClaudeMessagesSettlementRequest(ctx, relayInfo)
 }
 
 func shouldObserveConfirmedChannelAffinityUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
@@ -576,6 +594,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	originUsage := usage
 	authoritativeUsage := isAuthoritativeTextUsage(ctx, relayInfo, originUsage)
 	estimatedGPTTextUsage := !authoritativeUsage && isGPTTextSettlementRequest(ctx, relayInfo)
+	unconfirmedClaudeMessagesUsage := !authoritativeUsage && isClaudeMessagesSettlementRequest(ctx, relayInfo)
 	perCallExpression := relayInfo.TieredBillingSnapshot != nil &&
 		relayInfo.TieredBillingSnapshot.BillingMode == billingexpr.BillingModePerCallExpr
 	if estimatedGPTTextUsage && relayInfo.GetEstimatePromptTokens() <= 0 &&
@@ -591,7 +610,11 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			}
 		}
 	}
-	usage = normalizeTextSettlementUsage(relayInfo, usage, authoritativeUsage, estimatedGPTTextUsage)
+	if unconfirmedClaudeMessagesUsage {
+		usage = &dto.Usage{UsageSource: "estimated", UsageSemantic: "anthropic"}
+	} else {
+		usage = normalizeTextSettlementUsage(relayInfo, usage, authoritativeUsage, estimatedGPTTextUsage)
+	}
 	if estimatedGPTTextUsage {
 		usage.PromptCacheHitTokens = 0
 		usage.PromptTokensDetails = dto.InputTokenDetails{}
@@ -605,10 +628,15 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	if !authoritativeUsage {
 		recovery := relayInfo.GetStreamRecoverySnapshot()
-		if relayInfo.HasAmbiguousUpstreamSubmission() || recovery.Accepted {
+		if !unconfirmedClaudeMessagesUsage && (relayInfo.HasAmbiguousUpstreamSubmission() || recovery.Accepted) {
 			relayInfo.PreservePreConsumedQuota = true
 		}
-		extraContent = append(extraContent, "authoritative terminal usage unavailable; tokens estimated locally")
+		if unconfirmedClaudeMessagesUsage {
+			relayInfo.PreservePreConsumedQuota = false
+			extraContent = append(extraContent, "unconfirmed Claude Messages usage; pre-consumed quota refunded")
+		} else {
+			extraContent = append(extraContent, "authoritative terminal usage unavailable; tokens estimated locally")
+		}
 	}
 	if shouldObserveConfirmedChannelAffinityUsage(ctx, relayInfo, originUsage) {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
@@ -652,7 +680,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 
 	settledFromReservation := false
-	if perCallExpression && !authoritativeUsage && summary.TotalTokens == 0 {
+	if perCallExpression && !authoritativeUsage && !unconfirmedClaudeMessagesUsage && summary.TotalTokens == 0 {
 		summary.Quota = frozenTextReservationQuota(relayInfo)
 		tieredResult = nil
 		settledFromReservation = true
@@ -664,7 +692,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			logger.LogWarn(ctx, "unconfirmed GPT text usage exceeded reservation; capping settlement at pre-consumed quota")
 		}
 	}
-	if !estimatedGPTTextUsage && (!authoritativeUsage || !isFailedTextStreamRefundEligible(ctx, relayInfo)) {
+	if !estimatedGPTTextUsage && !unconfirmedClaudeMessagesUsage && (!authoritativeUsage || !isFailedTextStreamRefundEligible(ctx, relayInfo)) {
 		if quota, preserved := applyPreConsumedQuotaFloor(relayInfo, summary.Quota); preserved {
 			summary.Quota = quota
 			settledFromReservation = true
@@ -688,7 +716,7 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
 
-	refundUnconfirmedFailedStream := isFailedTextStreamRefundEligible(ctx, relayInfo) &&
+	refundUnconfirmedFailedStream := !unconfirmedClaudeMessagesUsage && isFailedTextStreamRefundEligible(ctx, relayInfo) &&
 		shouldRefundUnconfirmedFailedStream(relayInfo, authoritativeUsage)
 	if refundUnconfirmedFailedStream {
 		summary.Quota = 0
@@ -765,6 +793,9 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		}
 		if refundUnconfirmedFailedStream {
 			other["unconfirmed_stream_charge_refunded"] = true
+		}
+		if unconfirmedClaudeMessagesUsage {
+			other["unconfirmed_usage_charge_refunded"] = true
 		}
 		recovery := relayInfo.GetStreamRecoverySnapshot()
 		if recovery.DrainResult != relaycommon.StreamDrainResultNone {

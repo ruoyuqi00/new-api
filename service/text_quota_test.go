@@ -69,6 +69,115 @@ func TestNormalizeTextSettlementUsageOnlyAddsPlaceholderForEstimatedGPTText(t *t
 	require.Equal(t, "estimated", gotEstimated.UsageSource)
 }
 
+func TestClaudeMessagesUnconfirmedUsageDoesNotCharge(t *testing.T) {
+	tests := []struct {
+		name   string
+		settle func(*gin.Context, *relaycommon.RelayInfo) error
+	}{
+		{
+			name: "ordinary response with estimated usage",
+			settle: func(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) error {
+				return postTextConsumeQuota(ctx, relayInfo, &dto.Usage{
+					PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420,
+					UsageSource: "estimated", UsageSemantic: "anthropic",
+				}, nil)
+			},
+		},
+		{
+			name: "ordinary response without usage fields",
+			settle: func(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) error {
+				return postTextConsumeQuota(ctx, relayInfo, &dto.Usage{}, nil)
+			},
+		},
+		{
+			name: "accepted stream without terminal usage",
+			settle: func(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) error {
+				relayInfo.IsStream = true
+				relayInfo.EnableStreamRecovery()
+				relayInfo.MarkStreamAccepted()
+				defer relayInfo.FinishStreamRecovery()
+				return SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{
+					PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420,
+					UsageSource: "estimated", UsageSemantic: "anthropic",
+				})
+			},
+		},
+		{
+			name: "ambiguous upstream submission",
+			settle: func(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) error {
+				relayInfo.SetEstimatePromptTokens(400)
+				attempt := relayInfo.BeginUpstreamRequestAttempt()
+				attempt.MarkRequestWritten()
+				attempt.MarkAmbiguousIfPotentiallySent()
+				return SettleAmbiguousTextBilling(ctx, relayInfo)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			truncate(t)
+			seedUser(t, 101, 0)
+			seedChannel(t, 201)
+			billing := &recordingTaskBillingSettler{preConsumed: 1250}
+			relayInfo := &relaycommon.RelayInfo{
+				UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "claude-test",
+				RequestURLPath: "/v1/messages", FinalRequestRelayFormat: types.RelayFormatClaude,
+				StartTime: time.Now(), Billing: billing,
+				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
+				PriceData: types.PriceData{
+					ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+				},
+			}
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+			require.NoError(t, tt.settle(ctx, relayInfo))
+			require.Equal(t, []int{0}, billing.settled)
+
+			var logs []model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+			require.Len(t, logs, 1)
+			require.Zero(t, logs[0].Quota)
+			require.Contains(t, logs[0].Other, `"usage_unconfirmed":true`)
+			require.Contains(t, logs[0].Other, `"unconfirmed_usage_charge_refunded":true`)
+			require.Contains(t, logs[0].Content, "unconfirmed Claude Messages usage; pre-consumed quota refunded")
+		})
+	}
+}
+
+func TestClaudeMessagesAuthoritativeUsageStillChargesActualTokens(t *testing.T) {
+	truncate(t)
+	seedUser(t, 101, 0)
+	seedChannel(t, 201)
+	billing := &recordingTaskBillingSettler{preConsumed: 1250}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 101, TokenId: 301, UsingGroup: "default", OriginModelName: "claude-test",
+		RequestURLPath: "/v1/messages", FinalRequestRelayFormat: types.RelayFormatClaude,
+		StartTime: time.Now(), Billing: billing,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 2, QuotaToPreConsume: 1250,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	require.NoError(t, postTextConsumeQuota(ctx, relayInfo, &dto.Usage{
+		PromptTokens: 400, CompletionTokens: 20, TotalTokens: 420,
+		UsageSource: "upstream", UsageSemantic: "anthropic",
+	}, nil))
+	require.Equal(t, []int{440}, billing.settled)
+
+	var logs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.Equal(t, 440, logs[0].Quota)
+	require.NotContains(t, logs[0].Other, `"unconfirmed_usage_charge_refunded":true`)
+}
+
 func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 	tests := []struct {
 		name       string
