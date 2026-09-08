@@ -40,7 +40,7 @@ func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, 
 	}
 	if !service.ValidGPTTextUsage(&usage) {
 		info.PreservePreConsumedQuota = true
-		usage = *service.ResponseText2Usage(c, "", info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage = *service.NormalizeEstimatedGPTTextUsage(service.ResponseText2Usage(c, "", info.UpstreamModelName, info.GetEstimatePromptTokens()))
 		compactResp.Usage = &dto.Usage{
 			InputTokens:  usage.PromptTokens,
 			OutputTokens: usage.CompletionTokens,

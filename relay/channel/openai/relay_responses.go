@@ -98,7 +98,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	if !usageConfirmed && !isImageGeneration {
 		info.PreservePreConsumedQuota = true
-		usage = *service.ResponseText2Usage(c, service.ExtractOutputTextFromResponses(&responsesResponse), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage = *service.NormalizeEstimatedGPTTextUsage(service.ResponseText2Usage(c, service.ExtractOutputTextFromResponses(&responsesResponse), info.UpstreamModelName, info.GetEstimatePromptTokens()))
 		if sanitized, setErr := sjson.SetBytes(responseBody, "usage", map[string]int{
 			"input_tokens":  usage.PromptTokens,
 			"output_tokens": usage.CompletionTokens,

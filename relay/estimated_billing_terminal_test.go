@@ -44,8 +44,8 @@ func TestEmitEstimatedBillingTerminalForAmbiguousResponsesStream(t *testing.T) {
 	require.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
 	require.Contains(t, recorder.Body.String(), "event: response.incomplete")
 	require.Contains(t, recorder.Body.String(), `"input_tokens":1200`)
-	require.Contains(t, recorder.Body.String(), `"output_tokens":0`)
-	require.Contains(t, recorder.Body.String(), `"total_tokens":1200`)
+	require.Contains(t, recorder.Body.String(), `"output_tokens":1`)
+	require.Contains(t, recorder.Body.String(), `"total_tokens":1201`)
 }
 
 func TestEmitEstimatedBillingTerminalSkipsMedia(t *testing.T) {

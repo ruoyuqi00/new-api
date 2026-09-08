@@ -633,15 +633,16 @@ func TestAcceptedStreamErrorSettlementIsEstimatedAndSingleShot(t *testing.T) {
 	result := settleAcceptedStreamError(c, info, nil, relayErr)
 
 	require.True(t, types.IsSkipRetryError(result))
-	require.Equal(t, []int{400}, billing.settled)
+	require.Equal(t, []int{401}, billing.settled)
 	var logs []model.Log
 	require.NoError(t, model.LOG_DB.Where("user_id = ?", info.UserId).Find(&logs).Error)
 	require.Len(t, logs, 1)
 	require.Equal(t, 400, logs[0].PromptTokens)
-	require.Zero(t, logs[0].CompletionTokens)
+	require.Equal(t, 1, logs[0].CompletionTokens)
 	require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
 	require.Contains(t, recorder.Body.String(), `"finish_reason":"length"`)
 	require.Contains(t, recorder.Body.String(), `"prompt_tokens":400`)
+	require.Contains(t, recorder.Body.String(), `"completion_tokens":1`)
 	require.Contains(t, recorder.Body.String(), "[DONE]")
 }
 
@@ -786,7 +787,7 @@ func TestResponsesAndClaudeAcceptedMalformedStreamsSettleByUsageConfidence(t *te
 			name: "responses", path: "/v1/responses", channel: constant.ChannelTypeOpenAI,
 			request: &dto.OpenAIResponsesRequest{Model: "gpt-test", Stream: common.GetPointer(true)},
 			invoke:  ResponsesHelper,
-			want:    400,
+			want:    401,
 		},
 		{
 			name: "claude", path: "/v1/messages", channel: constant.ChannelTypeAnthropic,

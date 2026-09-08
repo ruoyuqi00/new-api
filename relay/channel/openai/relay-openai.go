@@ -407,6 +407,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			TotalTokens:      info.GetEstimatePromptTokens() + completionTokens,
 			UsageSource:      "estimated",
 		}
+		simpleResponse.Usage = *service.NormalizeEstimatedGPTTextUsage(&simpleResponse.Usage)
 		info.PreservePreConsumedQuota = true
 		usageModified = true
 	}

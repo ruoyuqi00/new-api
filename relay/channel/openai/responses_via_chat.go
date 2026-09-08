@@ -47,7 +47,7 @@ func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if !service.ValidGPTTextUsage(usage) {
 		info.PreservePreConsumedQuota = true
 		text := service.ExtractOutputTextFromResponses(responsesResp)
-		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage = service.NormalizeEstimatedGPTTextUsage(service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens()))
 		responsesResp.Usage = relayconvert.UsageFromChatUsage(usage)
 	}
 
@@ -129,7 +129,7 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 	usage := state.Usage
 	if !service.ValidGPTTextUsage(usage) {
-		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage = service.NormalizeEstimatedGPTTextUsage(service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens()))
 		state.Usage = relayconvert.UsageFromChatUsage(usage)
 	}
 

@@ -47,6 +47,28 @@ func TestGPTTextUsageValidationDoesNotChangeImageSettlement(t *testing.T) {
 	require.True(t, isAuthoritativeTextUsage(ctx, info, usage))
 }
 
+func TestNormalizeTextSettlementUsageOnlyAddsPlaceholderForEstimatedGPTText(t *testing.T) {
+	authoritative := &dto.Usage{
+		PromptTokens: 400,
+		TotalTokens:  400,
+		UsageSource:  "upstream",
+	}
+
+	gotAuthoritative := normalizeTextSettlementUsage(nil, authoritative, true, true)
+	require.Equal(t, 0, gotAuthoritative.CompletionTokens)
+	require.Equal(t, 400, gotAuthoritative.TotalTokens)
+	require.Equal(t, "upstream", gotAuthoritative.UsageSource)
+
+	gotEstimated := normalizeTextSettlementUsage(nil, &dto.Usage{
+		PromptTokens: 400,
+		TotalTokens:  400,
+		UsageSource:  "estimated",
+	}, false, true)
+	require.Equal(t, 1, gotEstimated.CompletionTokens)
+	require.Equal(t, 401, gotEstimated.TotalTokens)
+	require.Equal(t, "estimated", gotEstimated.UsageSource)
+}
+
 func TestShouldObserveConfirmedChannelAffinityUsage(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -860,7 +882,7 @@ func TestAmbiguousGPTTextBillingSettlesEstimatedUsage(t *testing.T) {
 			require.Len(t, logs, 1)
 			require.Equal(t, tt.want, logs[0].Quota)
 			require.Equal(t, tt.wantPrompt, logs[0].PromptTokens)
-			require.Zero(t, logs[0].CompletionTokens)
+			require.Equal(t, 1, logs[0].CompletionTokens)
 			require.Contains(t, logs[0].Other, "usage_unconfirmed")
 			require.Contains(t, logs[0].Other, `"usage_source":"estimated"`)
 			if tt.info.TieredBillingSnapshot != nil {
@@ -945,7 +967,7 @@ func TestAcceptedStreamBillingDoesNotRecordConsumptionWhenSettlementFails(t *tes
 	err := SettleAcceptedTextBilling(ctx, relayInfo, &dto.Usage{})
 
 	require.Error(t, err)
-	require.Equal(t, []int{400}, billing.settled)
+	require.Equal(t, []int{401}, billing.settled)
 	var logs []model.Log
 	require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
 	require.Empty(t, logs)
@@ -1534,7 +1556,7 @@ func TestGPTTextSettlementDropsInvalidUpstreamTokenFields(t *testing.T) {
 		PromptTokens: 10_000_001, CompletionTokens: 1, TotalTokens: 10_000_002,
 	}, nil)
 
-	require.Equal(t, []int{400}, billing.settled)
+	require.Equal(t, []int{401}, billing.settled)
 }
 
 func TestIncompleteResponsesUsageAlwaysUsesPreConsumedQuotaFloor(t *testing.T) {

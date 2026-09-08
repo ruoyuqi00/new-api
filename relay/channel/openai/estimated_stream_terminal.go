@@ -10,6 +10,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -62,15 +63,7 @@ func EmitEstimatedGPTStreamTerminal(c *gin.Context, info *relaycommon.RelayInfo,
 		createdAt = time.Now().Unix()
 	}
 
-	publicUsage := *usage
-	publicUsage.UsageSource = "estimated"
-	if publicUsage.PromptTokens < 0 {
-		publicUsage.PromptTokens = 0
-	}
-	if publicUsage.CompletionTokens < 0 {
-		publicUsage.CompletionTokens = 0
-	}
-	publicUsage.TotalTokens = publicUsage.PromptTokens + publicUsage.CompletionTokens
+	publicUsage := *service.NormalizeEstimatedGPTTextUsage(usage)
 
 	if info.RelayMode == relayconstant.RelayModeResponses || info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		if err := emitEstimatedResponsesTerminal(c, publicID, publicModel, createdAt, publicUsage, sequenceNumber); err != nil {

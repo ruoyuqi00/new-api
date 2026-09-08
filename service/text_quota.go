@@ -459,10 +459,36 @@ func normalizeTextSettlementUsage(relayInfo *relaycommon.RelayInfo, usage *dto.U
 		if relayInfo != nil {
 			promptTokens = relayInfo.GetEstimatePromptTokens()
 		}
-		return &dto.Usage{PromptTokens: promptTokens, TotalTokens: promptTokens, UsageSource: "estimated"}
+		usage = &dto.Usage{PromptTokens: promptTokens, TotalTokens: promptTokens, UsageSource: "estimated"}
+	}
+	if gptText {
+		if usage.PromptTokens <= 0 && relayInfo != nil {
+			usage.PromptTokens = relayInfo.GetEstimatePromptTokens()
+		}
+		return NormalizeEstimatedGPTTextUsage(usage)
 	}
 	if usage.PromptTokens <= 0 && relayInfo != nil {
 		usage.PromptTokens = relayInfo.GetEstimatePromptTokens()
+	}
+	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	usage.UsageSource = "estimated"
+	return usage
+}
+
+// NormalizeEstimatedGPTTextUsage keeps gateway-estimated billing and the
+// downstream terminal usage on the same minimally billable token snapshot.
+func NormalizeEstimatedGPTTextUsage(usage *dto.Usage) *dto.Usage {
+	if usage == nil {
+		usage = &dto.Usage{}
+	} else {
+		clone := *usage
+		usage = &clone
+	}
+	if usage.PromptTokens < 0 {
+		usage.PromptTokens = 0
+	}
+	if usage.PromptTokens > 0 && usage.CompletionTokens < 1 {
+		usage.CompletionTokens = 1
 	}
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	usage.UsageSource = "estimated"

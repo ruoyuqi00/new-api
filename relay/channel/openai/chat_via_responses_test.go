@@ -247,6 +247,34 @@ func TestOaiChatToResponsesStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 	)
 }
 
+func TestOaiChatToResponsesStreamHandlerEstimatedEmptyOutputUsesBillingPlaceholder(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info.SetEstimatePromptTokens(400)
+
+	usage, relayErr := OaiChatToResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Equal(t, 1, usage.CompletionTokens)
+	require.Equal(t, 401, usage.TotalTokens)
+	require.Contains(t, recorder.Body.String(), `event: response.completed`)
+	require.Contains(t, recorder.Body.String(), `"output_tokens":1`)
+}
+
 func requireOrderedSubstrings(t *testing.T, s string, parts ...string) {
 	t.Helper()
 

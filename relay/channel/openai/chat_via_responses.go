@@ -59,7 +59,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if !usageValid {
 		info.PreservePreConsumedQuota = true
 		text := service.ExtractOutputTextFromResponses(&responsesResp)
-		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage = service.NormalizeEstimatedGPTTextUsage(service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens()))
 		chatResp.Usage = *usage
 	}
 
@@ -170,7 +170,7 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 	if !usageValid {
 		info.PreservePreConsumedQuota = true
 		text := service.ExtractOutputTextFromResponses(finalResponse)
-		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage = service.NormalizeEstimatedGPTTextUsage(service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens()))
 		chatResp.Usage = *usage
 	}
 
@@ -213,7 +213,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 
 	sendChatChunk := func(chunk dto.ChatCompletionsStreamResponse) bool {
-		if info.IsStreamDetached() {
+		if c.Request.Context().Err() != nil || info.IsStreamDetached() {
 			return true
 		}
 		if len(chunk.Choices) == 0 && chunk.Usage == nil {

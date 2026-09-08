@@ -99,6 +99,93 @@ func TestOpenaiHandlerReplacesAmplifiedUsageWithEstimate(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), "9000000")
 }
 
+func TestOpenaiHandlerEstimatedEmptyOutputUsesBillingPlaceholder(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	info := mappedClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_1","model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"length"}]}`,
+		)),
+	}
+
+	usage, relayErr := OpenaiHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.Equal(t, 1, usage.CompletionTokens)
+	require.Equal(t, 401, usage.TotalTokens)
+	require.Contains(t, recorder.Body.String(), `"completion_tokens":1`)
+}
+
+func TestOpenaiHandlerPreservesAuthoritativeZeroOutputUsage(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	info := mappedClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+	info.SetEstimatePromptTokens(999)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_1","model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":400,"completion_tokens":0,"total_tokens":400}}`,
+		)),
+	}
+
+	usage, relayErr := OpenaiHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.Zero(t, usage.CompletionTokens)
+	require.Equal(t, 400, usage.TotalTokens)
+	require.False(t, info.PreservePreConsumedQuota)
+	require.Contains(t, recorder.Body.String(), `"completion_tokens":0`)
+}
+
+func TestOaiResponsesHandlerEstimatedEmptyOutputUsesBillingPlaceholder(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedResponsesClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeResponses
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_1","model":"upstream-model","status":"incomplete","output":[]}`)),
+	}
+
+	usage, relayErr := OaiResponsesHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "estimated", usage.UsageSource)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.Equal(t, 1, usage.CompletionTokens)
+	require.Equal(t, 401, usage.TotalTokens)
+	require.Contains(t, recorder.Body.String(), `"output_tokens":1`)
+}
+
+func TestOaiResponsesHandlerPreservesAuthoritativeZeroOutputUsage(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedResponsesClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeResponses
+	info.SetEstimatePromptTokens(999)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_1","model":"upstream-model","status":"completed","output":[],"usage":{"input_tokens":400,"output_tokens":0,"total_tokens":400}}`)),
+	}
+
+	usage, relayErr := OaiResponsesHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, "upstream", usage.UsageSource)
+	require.Equal(t, 400, usage.PromptTokens)
+	require.Zero(t, usage.CompletionTokens)
+	require.Equal(t, 400, usage.TotalTokens)
+	require.False(t, info.PreservePreConsumedQuota)
+	require.Contains(t, recorder.Body.String(), `"output_tokens":0`)
+}
+
 func TestOpenaiLegacyCompletionsReplacesAmplifiedUsageWithEstimate(t *testing.T) {
 	ctx, recorder := clientResponseTestContext()
 	ctx.Request.URL.Path = "/v1/completions"
@@ -138,6 +225,24 @@ func TestOaiChatToResponsesHandlerReturnsPublicModelForMappedResponse(t *testing
 	require.Equal(t, "public-model", body["model"])
 }
 
+func TestOaiChatToResponsesHandlerEstimatedEmptyOutputUsesBillingPlaceholder(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	info := mappedResponsesClientResponseInfo()
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl_1","model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"length"}]}`)),
+	}
+
+	usage, relayErr := OaiChatToResponsesHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, 1, usage.CompletionTokens)
+	require.Equal(t, 401, usage.TotalTokens)
+	require.Contains(t, recorder.Body.String(), `"output_tokens":1`)
+}
+
 func TestOaiResponsesToChatHandlerReturnsPublicModelForMappedResponse(t *testing.T) {
 	ctx, recorder := clientResponseTestContext()
 	resp := &http.Response{
@@ -151,6 +256,23 @@ func TestOaiResponsesToChatHandlerReturnsPublicModelForMappedResponse(t *testing
 	var body map[string]any
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
 	require.Equal(t, "public-model", body["model"])
+}
+
+func TestOaiResponsesToChatHandlerEstimatedEmptyOutputUsesBillingPlaceholder(t *testing.T) {
+	ctx, recorder := clientResponseTestContext()
+	info := mappedClientResponseInfo()
+	info.SetEstimatePromptTokens(400)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_1","model":"upstream-model","status":"incomplete","output":[]}`)),
+	}
+
+	usage, relayErr := OaiResponsesToChatHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, 1, usage.CompletionTokens)
+	require.Equal(t, 401, usage.TotalTokens)
+	require.Contains(t, recorder.Body.String(), `"completion_tokens":1`)
 }
 
 func TestOaiResponsesStreamHandlerReturnsPublicModelForMappedEvent(t *testing.T) {
