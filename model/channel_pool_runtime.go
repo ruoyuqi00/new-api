@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,161 @@ type ChannelSelectionOptions struct {
 	SkipChannelIDs    map[int]struct{}
 	ImageRequirements *ImageSelectionRequirements
 	ImageModelName    string
+}
+
+type TextProtocol string
+
+const (
+	TextProtocolUnknown TextProtocol = ""
+	TextProtocolOpenAI  TextProtocol = "openai"
+	TextProtocolClaude  TextProtocol = "claude"
+)
+
+func PreferredTextProtocolForRequestPath(requestPath string) TextProtocol {
+	path := strings.SplitN(requestPath, "?", 2)[0]
+	switch {
+	case path == "/v1/messages":
+		return TextProtocolClaude
+	case strings.HasSuffix(path, "/chat/completions"), path == "/v1/responses", strings.HasPrefix(path, "/v1/responses/"):
+		return TextProtocolOpenAI
+	default:
+		return TextProtocolUnknown
+	}
+}
+
+func ChannelNativeTextProtocol(channel *Channel) TextProtocol {
+	if channel == nil {
+		return TextProtocolUnknown
+	}
+	switch channel.Type {
+	case constant.ChannelTypeAnthropic:
+		return TextProtocolClaude
+	case constant.ChannelTypeOpenAI:
+		return TextProtocolOpenAI
+	default:
+		return TextProtocolUnknown
+	}
+}
+
+func filterChannelsByNativeRequestProtocol(channels []int, requestPath string) []int {
+	if len(channels) == 0 || requestPath == "" {
+		return channels
+	}
+	preferred := PreferredTextProtocolForRequestPath(requestPath)
+	if preferred == TextProtocolUnknown {
+		return channels
+	}
+	hasPreferred := false
+	for _, channelID := range channels {
+		if channel, ok := channelsIDM[channelID]; ok && ChannelNativeTextProtocol(channel) == preferred {
+			hasPreferred = true
+			break
+		}
+	}
+	if !hasPreferred {
+		return channels
+	}
+	filtered := make([]int, 0, len(channels))
+	for _, channelID := range channels {
+		channel, ok := channelsIDM[channelID]
+		if !ok || ChannelNativeTextProtocol(channel) != oppositeTextProtocol(preferred) {
+			filtered = append(filtered, channelID)
+		}
+	}
+	return filtered
+}
+
+func filterAbilitiesByNativeRequestProtocol(abilities []Ability, requestPath string) []Ability {
+	if len(abilities) == 0 || PreferredTextProtocolForRequestPath(requestPath) == TextProtocolUnknown {
+		return abilities
+	}
+	channelIDs := make([]int, 0, len(abilities))
+	seen := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, ok := seen[ability.ChannelId]; ok {
+			continue
+		}
+		seen[ability.ChannelId] = struct{}{}
+		channelIDs = append(channelIDs, ability.ChannelId)
+	}
+	var channels []*Channel
+	if err := DB.Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+		return abilities
+	}
+	channelByID := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		channelByID[channel.Id] = channel
+	}
+	preferred := PreferredTextProtocolForRequestPath(requestPath)
+	hasPreferred := false
+	for _, ability := range abilities {
+		if ChannelNativeTextProtocol(channelByID[ability.ChannelId]) == preferred {
+			hasPreferred = true
+			break
+		}
+	}
+	if !hasPreferred {
+		return abilities
+	}
+	filtered := make([]Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		if ChannelNativeTextProtocol(channelByID[ability.ChannelId]) != oppositeTextProtocol(preferred) {
+			filtered = append(filtered, ability)
+		}
+	}
+	return filtered
+}
+
+func oppositeTextProtocol(protocol TextProtocol) TextProtocol {
+	if protocol == TextProtocolOpenAI {
+		return TextProtocolClaude
+	}
+	if protocol == TextProtocolClaude {
+		return TextProtocolOpenAI
+	}
+	return TextProtocolUnknown
+}
+
+func ChannelProtocolAffinityAllowed(channel *Channel, group string, modelName string, requestPath string) bool {
+	preferred := PreferredTextProtocolForRequestPath(requestPath)
+	protocol := ChannelNativeTextProtocol(channel)
+	if preferred == TextProtocolUnknown || protocol == TextProtocolUnknown || protocol == preferred {
+		return true
+	}
+
+	modelNames := channelSelectionModelNames(modelName, ChannelSelectionOptions{})
+	if common.MemoryCacheEnabled {
+		channelSyncLock.RLock()
+		defer channelSyncLock.RUnlock()
+		for _, name := range modelNames {
+			for _, channelID := range group2model2channels[group][name] {
+				candidate, ok := channelsIDM[channelID]
+				if ok && ChannelNativeTextProtocol(candidate) == preferred && ChannelPoolCandidateAvailable(candidate, group, modelName) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	var abilities []Ability
+	if err := DB.Where(commonGroupCol+" = ? and model IN ? and enabled = ?", group, modelNames, true).Find(&abilities).Error; err != nil {
+		return true
+	}
+	channelIDs := make([]int, 0, len(abilities))
+	for _, ability := range abilities {
+		channelIDs = append(channelIDs, ability.ChannelId)
+	}
+	var candidates []*Channel
+	if err := DB.Where("id IN ? AND status = ?", channelIDs, common.ChannelStatusEnabled).Find(&candidates).Error; err != nil {
+		return true
+	}
+	for _, candidate := range candidates {
+		if ChannelNativeTextProtocol(candidate) == preferred && ChannelPoolCandidateAvailable(candidate, group, modelName) {
+			return false
+		}
+	}
+	return true
 }
 
 const (

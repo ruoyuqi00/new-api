@@ -144,6 +144,7 @@ func GetChannelWithOptions(group string, model string, retry int, requestPath st
 	abilities = filterAbilitiesByRequestPath(abilities, requestPath)
 	abilities = filterAbilitiesBySelectionOptions(abilities, options)
 	abilities = filterAbilitiesByChannelPoolAvailability(abilities, group, model)
+	abilities = filterAbilitiesByNativeRequestProtocol(abilities, requestPath)
 	channel := Channel{}
 	if len(abilities) > 0 {
 		priorities := make(map[int]struct{})

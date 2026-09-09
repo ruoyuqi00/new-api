@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/assert"
@@ -261,6 +262,211 @@ func TestGetChannelWithOptionsSelectsHighestPriorityAfterExcludingFailedChannel(
 	require.NoError(t, err)
 	require.NotNil(t, selected)
 	assert.Equal(t, channels[1].Id, selected.Id)
+}
+
+func TestGetRandomSatisfiedChannelPrefersNativeTextProtocolBeforePriority(t *testing.T) {
+	tests := []struct {
+		name              string
+		requestPath       string
+		openAIPriority    int64
+		anthropicPriority int64
+		wantType          int
+	}{
+		{
+			name:              "OpenAI chat prefers OpenAI channel",
+			requestPath:       "/v1/chat/completions",
+			openAIPriority:    10,
+			anthropicPriority: 100,
+			wantType:          constant.ChannelTypeOpenAI,
+		},
+		{
+			name:              "OpenAI responses compact prefers OpenAI channel",
+			requestPath:       "/v1/responses/compact",
+			openAIPriority:    10,
+			anthropicPriority: 100,
+			wantType:          constant.ChannelTypeOpenAI,
+		},
+		{
+			name:              "Claude messages prefers Anthropic channel",
+			requestPath:       "/v1/messages",
+			openAIPriority:    100,
+			anthropicPriority: 10,
+			wantType:          constant.ChannelTypeAnthropic,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetChannelPoolRuntimeForTest(t)
+			resetChannelPoolSelectionCacheForTest(t)
+
+			openAIChannel := &Channel{Id: 801, Type: constant.ChannelTypeOpenAI, Priority: &tt.openAIPriority}
+			anthropicChannel := &Channel{Id: 802, Type: constant.ChannelTypeAnthropic, Priority: &tt.anthropicPriority}
+			channelSyncLock.Lock()
+			group2model2channels["domestic"] = map[string][]int{"domestic-model": {openAIChannel.Id, anthropicChannel.Id}}
+			channelsIDM[openAIChannel.Id] = openAIChannel
+			channelsIDM[anthropicChannel.Id] = anthropicChannel
+			channelSyncLock.Unlock()
+
+			selected, err := GetRandomSatisfiedChannel("domestic", "domestic-model", 0, tt.requestPath)
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			assert.Equal(t, tt.wantType, selected.Type)
+		})
+	}
+}
+
+func TestPreferredTextProtocolForRequestPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want TextProtocol
+	}{
+		{path: "/v1/chat/completions", want: TextProtocolOpenAI},
+		{path: "/pg/chat/completions", want: TextProtocolOpenAI},
+		{path: "/v1/responses", want: TextProtocolOpenAI},
+		{path: "/v1/responses/compact", want: TextProtocolOpenAI},
+		{path: "/v1/messages", want: TextProtocolClaude},
+		{path: "/v1/images/generations", want: TextProtocolUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			assert.Equal(t, tt.want, PreferredTextProtocolForRequestPath(tt.path))
+		})
+	}
+}
+
+func TestGetRandomSatisfiedChannelFallsBackAcrossTextProtocols(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+
+	priority := int64(100)
+	channel := &Channel{Id: 803, Type: constant.ChannelTypeAnthropic, Priority: &priority}
+	channelSyncLock.Lock()
+	group2model2channels["domestic"] = map[string][]int{"domestic-model": {channel.Id}}
+	channelsIDM[channel.Id] = channel
+	channelSyncLock.Unlock()
+
+	selected, err := GetRandomSatisfiedChannel("domestic", "domestic-model", 0, "/v1/chat/completions")
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, channel.Id, selected.Id)
+}
+
+func TestProtocolPreferenceLeavesUnclassifiedChannelsInCompetition(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+
+	openAIPriority := int64(10)
+	neutralPriority := int64(100)
+	openAIChannel := &Channel{Id: 806, Type: constant.ChannelTypeOpenAI, Priority: &openAIPriority}
+	moonshotChannel := &Channel{Id: 807, Type: constant.ChannelTypeMoonshot, Priority: &neutralPriority}
+	channelSyncLock.Lock()
+	group2model2channels["domestic"] = map[string][]int{"domestic-model": {openAIChannel.Id, moonshotChannel.Id}}
+	channelsIDM[openAIChannel.Id] = openAIChannel
+	channelsIDM[moonshotChannel.Id] = moonshotChannel
+	channelSyncLock.Unlock()
+
+	selected, err := GetRandomSatisfiedChannel("domestic", "domestic-model", 0, "/v1/chat/completions")
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, moonshotChannel.Id, selected.Id)
+	assert.Equal(t, TextProtocolUnknown, ChannelNativeTextProtocol(moonshotChannel))
+}
+
+func TestProtocolPreferenceDoesNotMakeAdvancedCustomPreferred(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+
+	advancedPriority := int64(10)
+	anthropicPriority := int64(100)
+	advancedChannel := &Channel{Id: 808, Type: constant.ChannelTypeAdvancedCustom, Priority: &advancedPriority}
+	anthropicChannel := &Channel{Id: 809, Type: constant.ChannelTypeAnthropic, Priority: &anthropicPriority}
+	channelSyncLock.Lock()
+	group2model2channels["domestic"] = map[string][]int{"domestic-model": {advancedChannel.Id, anthropicChannel.Id}}
+	channelsIDM[advancedChannel.Id] = advancedChannel
+	channelsIDM[anthropicChannel.Id] = anthropicChannel
+	channelSyncLock.Unlock()
+
+	selected, err := GetRandomSatisfiedChannel("domestic", "domestic-model", 0, "/v1/chat/completions")
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, anthropicChannel.Id, selected.Id)
+}
+
+func TestAffinityProtocolAllowedOnlyWhenNoNativeCandidateExists(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+
+	priority := int64(100)
+	openAIChannel := &Channel{Id: 810, Type: constant.ChannelTypeOpenAI, Priority: &priority}
+	anthropicChannel := &Channel{Id: 811, Type: constant.ChannelTypeAnthropic, Priority: &priority}
+	channelSyncLock.Lock()
+	group2model2channels["domestic"] = map[string][]int{"domestic-model": {openAIChannel.Id, anthropicChannel.Id}}
+	channelsIDM[openAIChannel.Id] = openAIChannel
+	channelsIDM[anthropicChannel.Id] = anthropicChannel
+	channelSyncLock.Unlock()
+
+	assert.False(t, ChannelProtocolAffinityAllowed(anthropicChannel, "domestic", "domestic-model", "/v1/chat/completions"))
+
+	channelSyncLock.Lock()
+	group2model2channels["domestic"]["domestic-model"] = []int{anthropicChannel.Id}
+	channelSyncLock.Unlock()
+	assert.True(t, ChannelProtocolAffinityAllowed(anthropicChannel, "domestic", "domestic-model", "/v1/chat/completions"))
+}
+
+func TestGetRandomSatisfiedChannelFallsBackAfterNativeChannelIsSkipped(t *testing.T) {
+	resetChannelPoolRuntimeForTest(t)
+	resetChannelPoolSelectionCacheForTest(t)
+
+	openAIPriority := int64(10)
+	anthropicPriority := int64(100)
+	openAIChannel := &Channel{Id: 804, Type: constant.ChannelTypeOpenAI, Priority: &openAIPriority}
+	anthropicChannel := &Channel{Id: 805, Type: constant.ChannelTypeAnthropic, Priority: &anthropicPriority}
+	channelSyncLock.Lock()
+	group2model2channels["domestic"] = map[string][]int{"domestic-model": {openAIChannel.Id, anthropicChannel.Id}}
+	channelsIDM[openAIChannel.Id] = openAIChannel
+	channelsIDM[anthropicChannel.Id] = anthropicChannel
+	channelSyncLock.Unlock()
+
+	selected, err := GetRandomSatisfiedChannelWithOptions("domestic", "domestic-model", 0, "/v1/chat/completions", ChannelSelectionOptions{
+		SkipChannelIDs: map[int]struct{}{openAIChannel.Id: {}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, anthropicChannel.Id, selected.Id)
+}
+
+func TestGetChannelWithOptionsPrefersNativeTextProtocolWithoutMemoryCache(t *testing.T) {
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = oldMemoryCacheEnabled })
+	require.NoError(t, DB.AutoMigrate(&Channel{}, &Ability{}))
+
+	group := "native-protocol-db-group"
+	modelName := "native-protocol-db-model"
+	openAIPriority := int64(10)
+	anthropicPriority := int64(100)
+	openAIChannel := Channel{
+		Name: "openai-native", Type: constant.ChannelTypeOpenAI, Key: "key", Status: common.ChannelStatusEnabled,
+		Group: group, Models: modelName, Priority: &openAIPriority,
+	}
+	anthropicChannel := Channel{
+		Name: "claude-native", Type: constant.ChannelTypeAnthropic, Key: "key", Status: common.ChannelStatusEnabled,
+		Group: group, Models: modelName, Priority: &anthropicPriority,
+	}
+	require.NoError(t, DB.Create(&openAIChannel).Error)
+	require.NoError(t, DB.Create(&anthropicChannel).Error)
+	require.NoError(t, DB.Create(&Ability{Group: group, Model: modelName, ChannelId: openAIChannel.Id, Enabled: true, Priority: &openAIPriority}).Error)
+	require.NoError(t, DB.Create(&Ability{Group: group, Model: modelName, ChannelId: anthropicChannel.Id, Enabled: true, Priority: &anthropicPriority}).Error)
+	t.Cleanup(func() {
+		_ = DB.Where("channel_id IN ?", []int{openAIChannel.Id, anthropicChannel.Id}).Delete(&Ability{}).Error
+		_ = DB.Delete(&Channel{}, "id IN ?", []int{openAIChannel.Id, anthropicChannel.Id}).Error
+	})
+
+	selected, err := GetChannelWithOptions(group, modelName, 0, "/v1/chat/completions", ChannelSelectionOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, openAIChannel.Id, selected.Id)
 }
 
 func TestGetRandomSatisfiedChannelWithOptionsFindsLegacyImageAliasForCanonicalModel(t *testing.T) {

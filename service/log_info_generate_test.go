@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -100,4 +101,65 @@ func TestGenerateTextOtherInfoIncludesClaudeThinkingConfiguration(t *testing.T) 
 
 	assert.Equal(t, "max", other["reasoning_effort"])
 	assert.Equal(t, "adaptive", other["thinking_type"])
+}
+
+func TestGenerateTextOtherInfoAuditsProtocolFallback(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	now := time.Now()
+	info := &relaycommon.RelayInfo{
+		StartTime:         now,
+		FirstResponseTime: now,
+		RequestURLPath:    "/v1/chat/completions",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeAnthropic,
+		},
+	}
+
+	other := GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
+
+	assert.Equal(t, "openai", other["requested_protocol"])
+	assert.Equal(t, "claude", other["upstream_protocol"])
+	assert.Equal(t, "fallback", other["protocol_route"])
+	assert.NotContains(t, other, "protocol_fallback_reason")
+}
+
+func TestGenerateTextOtherInfoAuditsNativeProtocolRoute(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+	now := time.Now()
+	info := &relaycommon.RelayInfo{
+		StartTime:         now,
+		FirstResponseTime: now,
+		RequestURLPath:    "/v1/messages",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeAnthropic,
+		},
+	}
+
+	other := GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
+
+	assert.Equal(t, "claude", other["requested_protocol"])
+	assert.Equal(t, "claude", other["upstream_protocol"])
+	assert.Equal(t, "native", other["protocol_route"])
+	assert.NotContains(t, other, "protocol_fallback_reason")
+}
+
+func TestGenerateTextOtherInfoSkipsUnclassifiedChannelProtocol(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	now := time.Now()
+	info := &relaycommon.RelayInfo{
+		StartTime:         now,
+		FirstResponseTime: now,
+		RequestURLPath:    "/v1/chat/completions",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeMoonshot,
+		},
+	}
+
+	other := GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
+
+	assert.NotContains(t, other, "upstream_protocol")
+	assert.NotContains(t, other, "protocol_route")
 }

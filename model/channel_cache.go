@@ -133,6 +133,7 @@ func GetRandomSatisfiedChannelWithOptions(group string, model string, retry int,
 			channels = append(channels, channelID)
 		}
 	}
+	channels = filterChannelsByNativeRequestProtocol(channels, requestPath)
 
 	if len(channels) == 0 {
 		return nil, nil

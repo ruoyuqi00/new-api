@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -87,12 +88,34 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
+	appendProtocolRoutingInfo(relayInfo, other)
 	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendImageResolutionBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
 	return other
+}
+
+func appendProtocolRoutingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || relayInfo.ChannelMeta == nil || other == nil {
+		return
+	}
+	requested := model.PreferredTextProtocolForRequestPath(relayInfo.RequestURLPath)
+	if requested == model.TextProtocolUnknown {
+		return
+	}
+	upstream := model.ChannelNativeTextProtocol(&model.Channel{Type: relayInfo.ChannelType})
+	other["requested_protocol"] = string(requested)
+	if upstream == model.TextProtocolUnknown {
+		return
+	}
+	other["upstream_protocol"] = string(upstream)
+	if requested == upstream {
+		other["protocol_route"] = "native"
+		return
+	}
+	other["protocol_route"] = "fallback"
 }
 
 func appendImageResolutionBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
