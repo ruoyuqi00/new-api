@@ -2,8 +2,11 @@ package xai
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -40,13 +43,108 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	aspectRatio, resolution, err := xAIImageParameters(request)
+	if err != nil {
+		return nil, err
+	}
 	xaiRequest := ImageRequest{
 		Model:          request.Model,
 		Prompt:         request.Prompt,
 		N:              int(lo.FromPtrOr(request.N, uint(1))),
+		AspectRatio:    aspectRatio,
+		Resolution:     resolution,
 		ResponseFormat: request.ResponseFormat,
 	}
 	return xaiRequest, nil
+}
+
+func xAIImageParameters(request dto.ImageRequest) (string, string, error) {
+	aspectRatio := strings.TrimSpace(lo.FromPtrOr(request.AspectRatio, ""))
+	if strings.EqualFold(aspectRatio, "auto") {
+		aspectRatio = ""
+	} else if aspectRatio != "" {
+		parts := strings.Split(aspectRatio, ":")
+		if len(parts) != 2 {
+			return "", "", fmt.Errorf("invalid xAI image aspect ratio %q", aspectRatio)
+		}
+		width, widthErr := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		height, heightErr := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+			return "", "", fmt.Errorf("invalid xAI image aspect ratio %q", aspectRatio)
+		}
+		aspectRatio = closestXAIImageAspectRatio(request.Model, width/height)
+	}
+	size := strings.ToLower(strings.TrimSpace(request.Size))
+	switch size {
+	case "", "auto":
+		return aspectRatio, "", nil
+	case "1k", "2k":
+		return aspectRatio, size, nil
+	case "4k":
+		return "", "", errors.New("xAI image generation supports resolutions up to 2k")
+	}
+
+	canonical := strings.NewReplacer("*", "x", "×", "x").Replace(size)
+	parts := strings.Split(canonical, "x")
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid xAI image size %q", request.Size)
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return "", "", fmt.Errorf("invalid xAI image size %q", request.Size)
+	}
+	if width > 2048 || height > 2048 {
+		return "", "", fmt.Errorf("xAI image size %q exceeds the 2048x2048 limit", request.Size)
+	}
+
+	resolution := "1k"
+	if width > 1024 || height > 1024 {
+		resolution = "2k"
+	}
+	if aspectRatio != "" {
+		return aspectRatio, resolution, nil
+	}
+
+	return closestXAIImageAspectRatio(request.Model, float64(width)/float64(height)), resolution, nil
+}
+
+func closestXAIImageAspectRatio(modelName string, requested float64) string {
+	type supportedRatio struct {
+		name  string
+		value float64
+	}
+	supported := []supportedRatio{
+		{name: "1:1", value: 1},
+		{name: "16:9", value: 16.0 / 9.0},
+		{name: "9:16", value: 9.0 / 16.0},
+		{name: "4:3", value: 4.0 / 3.0},
+		{name: "3:4", value: 3.0 / 4.0},
+		{name: "3:2", value: 3.0 / 2.0},
+		{name: "2:3", value: 2.0 / 3.0},
+		{name: "2:1", value: 2},
+		{name: "1:2", value: 0.5},
+		{name: "19.5:9", value: 19.5 / 9.0},
+		{name: "9:19.5", value: 9.0 / 19.5},
+		{name: "20:9", value: 20.0 / 9.0},
+		{name: "9:20", value: 9.0 / 20.0},
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "grok-imagine-image-2") {
+		supported = append(supported,
+			supportedRatio{name: "21:9", value: 21.0 / 9.0},
+			supportedRatio{name: "5:2", value: 2.5},
+		)
+	}
+	closest := supported[0]
+	closestDistance := math.Abs(math.Log(requested / closest.value))
+	for _, candidate := range supported[1:] {
+		distance := math.Abs(math.Log(requested / candidate.value))
+		if distance < closestDistance {
+			closest = candidate
+			closestDistance = distance
+		}
+	}
+	return closest.name
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {

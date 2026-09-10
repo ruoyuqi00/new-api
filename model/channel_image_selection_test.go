@@ -52,8 +52,10 @@ func TestChannelSupportsImageRequestHonorsModelTierAndShape(t *testing.T) {
 	channel := &Channel{Id: 2500, OtherSettings: `{"image_dimension_support":"any","image_model_capabilities":{"gpt-image-2":{"max_tier":"2k","shape":"exact"}}}`}
 	require.True(t, ChannelSupportsImageRequest(channel, "gpt-image-2", ImageSelectionRequirements{Size: "1536x1024", Tier: "2k"}))
 	require.False(t, ChannelSupportsImageRequest(channel, "gpt-image-2", ImageSelectionRequirements{Size: "2048x3072", Tier: "4k"}))
-	ratioOnly := &Channel{Id: 2501, OtherSettings: `{"image_dimension_support":"ratio","image_model_capabilities":{"gpt-image-2":{"max_tier":"2k","shape":"ratio"}}}`}
-	require.False(t, ChannelSupportsImageRequest(ratioOnly, "gpt-image-2", ImageSelectionRequirements{Size: "1536x1024", Tier: "2k"}))
+	ratioOnlyXAI := &Channel{Id: 2501, Type: constant.ChannelTypeXai, OtherSettings: `{"image_dimension_support":"ratio","image_model_capabilities":{"gpt-image-2":{"max_tier":"2k","shape":"ratio"}}}`}
+	require.True(t, ChannelSupportsImageRequest(ratioOnlyXAI, "gpt-image-2", ImageSelectionRequirements{Size: "1536x1024", Tier: "2k"}))
+	ratioOnlyGemini := &Channel{Id: 2502, Type: constant.ChannelTypeGemini, OtherSettings: `{"image_dimension_support":"ratio","image_model_capabilities":{"gpt-image-2":{"max_tier":"2k","shape":"ratio"}}}`}
+	require.False(t, ChannelSupportsImageRequest(ratioOnlyGemini, "gpt-image-2", ImageSelectionRequirements{Size: "1536x1024", Tier: "2k"}))
 }
 
 func TestChannelSupportsImageRequestDerivesTierFromResolutionAliases(t *testing.T) {
@@ -120,6 +122,17 @@ func TestBuildImageSelectionRequirementsRejectsInvalidShape(t *testing.T) {
 	ratio := "wide"
 	_, err := BuildImageSelectionRequirements(&dto.ImageRequest{Model: "gpt-image-2", Size: "1k", AspectRatio: &ratio})
 	require.Error(t, err)
+}
+
+func TestBuildImageSelectionRequirementsAcceptsDecimalAspectRatio(t *testing.T) {
+	ratio := "19.5:9"
+	requirements, err := BuildImageSelectionRequirements(&dto.ImageRequest{Model: "grok-imagine-image", Size: "1k", AspectRatio: &ratio})
+	require.NoError(t, err)
+	assert.Equal(t, ratio, requirements.AspectRatio)
+	assert.True(t, requirements.RequiresNonSquare())
+
+	squareOnly := &Channel{Id: 2503, Type: constant.ChannelTypeOpenAI, OtherSettings: `{"image_dimension_support":"square"}`}
+	assert.False(t, ChannelSupportsImageRequest(squareOnly, "grok-imagine-image", *requirements))
 }
 
 func TestImageModelSelectionNamesIncludeHigherTierAliases(t *testing.T) {

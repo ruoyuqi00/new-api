@@ -3,10 +3,12 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
@@ -108,9 +110,10 @@ func validImageAspectRatio(value string) bool {
 	if len(parts) != 2 {
 		return false
 	}
-	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
-	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
-	return widthErr == nil && heightErr == nil && width > 0 && height > 0
+	width, widthErr := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	height, heightErr := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	return widthErr == nil && heightErr == nil && width > 0 && height > 0 &&
+		!math.IsNaN(width) && !math.IsNaN(height) && !math.IsInf(width, 0) && !math.IsInf(height, 0)
 }
 
 func ValidateImageCapabilitySettings(settings dto.ChannelOtherSettings) error {
@@ -200,9 +203,10 @@ func (requirements ImageSelectionRequirements) RequiresNonSquare() bool {
 	if len(parts) != 2 {
 		return false
 	}
-	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
-	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
-	return widthErr == nil && heightErr == nil && width > 0 && height > 0 && width != height
+	width, widthErr := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	height, heightErr := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	return widthErr == nil && heightErr == nil && width > 0 && height > 0 &&
+		!math.IsNaN(width) && !math.IsNaN(height) && !math.IsInf(width, 0) && !math.IsInf(height, 0) && width != height
 }
 
 func ChannelSupportsImageRequest(channel *Channel, modelName string, requirements ImageSelectionRequirements) bool {
@@ -233,7 +237,7 @@ func ChannelSupportsImageRequest(channel *Channel, modelName string, requirement
 	if _, _, ok := parseImageDimensions(requirements.Size); ok {
 		exactDimensions = true
 	}
-	if exactDimensions && capability.Shape != dto.ImageCapabilityShapeExact {
+	if exactDimensions && capability.Shape != dto.ImageCapabilityShapeExact && channel.Type != constant.ChannelTypeXai {
 		return false
 	}
 	return capability.Shape == dto.ImageCapabilityShapeExact || capability.Shape == dto.ImageCapabilityShapeRatio
