@@ -263,3 +263,92 @@ func TestOaiResponsesToChatStreamRecoversTerminalUsageAfterClientGone(t *testing
 	require.Equal(t, beforeCancel, recorder.Body.String())
 	require.Equal(t, relaycommon.StreamUsageStateExact, info.GetStreamRecoverySnapshot().UsageState)
 }
+
+func TestOaiResponsesStreamRecoversTerminalUsageAfterClientGone(t *testing.T) {
+	oldEnabled := constant.StreamUsageDrainEnabled
+	oldMaxConcurrency := constant.StreamUsageDrainMaxConcurrency
+	oldMaxPerChannel := constant.StreamUsageDrainMaxPerChannel
+	oldTimeout := constant.StreamUsageDrainTimeoutSeconds
+	oldStreamingTimeout := constant.StreamingTimeout
+	t.Cleanup(func() {
+		constant.StreamUsageDrainEnabled = oldEnabled
+		constant.StreamUsageDrainMaxConcurrency = oldMaxConcurrency
+		constant.StreamUsageDrainMaxPerChannel = oldMaxPerChannel
+		constant.StreamUsageDrainTimeoutSeconds = oldTimeout
+		constant.StreamingTimeout = oldStreamingTimeout
+	})
+	constant.StreamUsageDrainEnabled = true
+	constant.StreamUsageDrainMaxConcurrency = 4
+	constant.StreamUsageDrainMaxPerChannel = 4
+	constant.StreamUsageDrainTimeoutSeconds = 30
+	constant.StreamingTimeout = 30
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	requestContext, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestContext)
+	wrote := make(chan struct{})
+	c.Writer = &openAIStreamWriteSignal{ResponseWriter: c.Writer, wrote: wrote}
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		DisablePing: true,
+		RelayFormat: types.RelayFormatOpenAIResponses,
+		RelayMode:   relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 77, UpstreamModelName: "custom-test"},
+	}
+	info.EnableStreamRecovery()
+	info.StartStreamRecoveryAttempt(requestContext)
+	info.MarkStreamAccepted()
+	t.Cleanup(info.FinishStreamRecovery)
+
+	reader, writer := io.Pipe()
+	resp := &http.Response{StatusCode: http.StatusOK, Body: reader}
+	type streamResult struct {
+		usage *dto.Usage
+		err   error
+	}
+	done := make(chan streamResult, 1)
+	go func() {
+		usage, relayErr := OaiResponsesStreamHandler(c, info, resp)
+		if relayErr != nil {
+			done <- streamResult{err: relayErr}
+			return
+		}
+		done <- streamResult{usage: usage}
+	}()
+
+	first := `{"type":"response.output_text.delta","delta":"hello","response":{"id":"resp_1","model":"custom-test"}}`
+	postDetach := `{"type":"response.output_text.delta","delta":" world","response":{"id":"resp_1","model":"custom-test"}}`
+	terminal := `{"type":"response.completed","response":{"id":"resp_1","model":"custom-test","status":"completed","output":[],"usage":{"input_tokens":1200,"output_tokens":25,"total_tokens":1225,"input_tokens_details":{"cached_tokens":1024}}}}`
+	_, err := io.WriteString(writer, "data: "+first+"\n\n")
+	require.NoError(t, err)
+	select {
+	case <-wrote:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first downstream responses write")
+	}
+	beforeCancel := recorder.Body.String()
+	cancel()
+	require.Eventually(t, info.IsStreamDetached, 2*time.Second, time.Millisecond)
+	_, err = io.WriteString(writer, "data: "+postDetach+"\n\ndata: "+terminal+"\n\ndata: [DONE]\n\n")
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	select {
+	case result := <-done:
+		require.NoError(t, result.err)
+		require.NotNil(t, result.usage)
+		require.Equal(t, 1200, result.usage.PromptTokens)
+		require.Equal(t, 25, result.usage.CompletionTokens)
+		require.Equal(t, 1024, result.usage.PromptTokensDetails.CachedTokens)
+		require.Equal(t, "upstream", result.usage.UsageSource)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for direct responses terminal usage recovery")
+	}
+	require.Equal(t, beforeCancel, recorder.Body.String())
+	snapshot := info.GetStreamRecoverySnapshot()
+	require.Equal(t, relaycommon.StreamUsageStateExact, snapshot.UsageState)
+	require.Equal(t, relaycommon.StreamDrainResultCompleted, snapshot.DrainResult)
+}

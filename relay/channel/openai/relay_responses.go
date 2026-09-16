@@ -322,7 +322,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			data = string(sanitized)
 		}
-		if !suppressTerminalEvent {
+		if !suppressTerminalEvent && !info.IsStreamDetached() {
 			if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
 				sr.Stop(err)
 				return

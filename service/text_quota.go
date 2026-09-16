@@ -427,6 +427,25 @@ func shouldRefundUnconfirmedFailedStream(relayInfo *relaycommon.RelayInfo, autho
 	if relayInfo == nil || authoritativeUsage || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
 		return false
 	}
+	if relayInfo.GetStreamRecoverySnapshot().Accepted {
+		return false
+	}
+	switch relayInfo.StreamStatus.EndReason {
+	case relaycommon.StreamEndReasonClientGone,
+		relaycommon.StreamEndReasonHandlerStop:
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldKeepReservationForAcceptedDisconnect(relayInfo *relaycommon.RelayInfo, authoritativeUsage bool) bool {
+	if relayInfo == nil || authoritativeUsage || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
+		return false
+	}
+	if !relayInfo.GetStreamRecoverySnapshot().Accepted {
+		return false
+	}
 	switch relayInfo.StreamStatus.EndReason {
 	case relaycommon.StreamEndReasonClientGone,
 		relaycommon.StreamEndReasonHandlerStop:
@@ -700,6 +719,16 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			summary.Quota = frozenQuota
 			settledFromReservation = true
 			logger.LogWarn(ctx, "unconfirmed GPT text usage exceeded reservation; capping settlement at pre-consumed quota")
+		}
+	}
+	keepReservationForAcceptedDisconnect := !unconfirmedClaudeMessagesUsage &&
+		isFailedTextStreamRefundEligible(ctx, relayInfo) &&
+		shouldKeepReservationForAcceptedDisconnect(relayInfo, authoritativeUsage)
+	if keepReservationForAcceptedDisconnect {
+		if frozenQuota := frozenTextReservationQuota(relayInfo); frozenQuota > 0 {
+			summary.Quota = frozenQuota
+			settledFromReservation = true
+			extraContent = append(extraContent, "accepted stream disconnected without authoritative usage; frozen pre-consumed quota retained")
 		}
 	}
 	if !estimatedGPTTextUsage && !unconfirmedClaudeMessagesUsage && (!authoritativeUsage || !isFailedTextStreamRefundEligible(ctx, relayInfo)) {
