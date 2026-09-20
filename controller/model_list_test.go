@@ -121,6 +121,24 @@ func withTieredBillingConfig(t *testing.T, modes map[string]string, exprs map[st
 	model.InvalidatePricingCache()
 }
 
+func withVideoTierPricingConfig(t *testing.T, models map[string]map[string]operation_setting.VideoTierPricePoint) {
+	t.Helper()
+	videoSetting, ok := config.GlobalConfig.Get("video_pricing_setting").(*operation_setting.VideoTierPriceSetting)
+	require.True(t, ok)
+	original := operation_setting.VideoTierPriceSetting2JSONString()
+	data, err := common.Marshal(models)
+	require.NoError(t, err)
+	require.NoError(t, operation_setting.ValidateVideoTierPriceJSONString(string(data)))
+	require.NoError(t, config.UpdateConfigFromMap(videoSetting, map[string]string{"models": string(data)}))
+	operation_setting.RebuildVideoTierPriceIndex()
+	model.InvalidatePricingCache()
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(videoSetting, map[string]string{"models": original}))
+		operation_setting.RebuildVideoTierPriceIndex()
+		model.InvalidatePricingCache()
+	})
+}
+
 func withSelfUseModeDisabled(t *testing.T) {
 	t.Helper()
 
@@ -363,6 +381,42 @@ func TestPricingCollapsesImageResolutionAliasesIntoCanonicalModel(t *testing.T) 
 	assert.Equal(t, operation_setting.ImageResolutionTier1K, pricing.ImageResolutionPricing.DefaultTier)
 	assert.InDelta(t, 0.01, pricing.ImageResolutionPricing.Prices[operation_setting.ImageResolutionTier1K], 1e-12)
 	assert.InDelta(t, 0.045, pricing.ImageResolutionPricing.Prices[operation_setting.ImageResolutionTier4K], 1e-12)
+}
+
+func TestPricingIncludesEffectiveVideoTierMetadata(t *testing.T) {
+	reference480 := 7.5
+	reference720 := 8.0
+	withVideoTierPricingConfig(t, map[string]map[string]operation_setting.VideoTierPricePoint{
+		"minimax-h3": {
+			"480p": {Standard: 0.11}, "768p": {Standard: 0.17}, "1080p": {Standard: 0.21},
+			"2k": {Standard: 0.31}, "4k": {Standard: 0.47},
+		},
+		"seedance-2-0-mini-official": {
+			"480p": {Standard: 12.5, WithReferenceVideo: &reference480},
+			"720p": {Standard: 13.5, WithReferenceVideo: &reference720},
+		},
+	})
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "minimax-h3", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "seedance-2-0-mini-official", ChannelId: 2, Enabled: true},
+	}).Error)
+	model.InvalidatePricingCache()
+
+	pricingByName := pricingByModelName(model.GetPricing())
+	h3, ok := pricingByName["minimax-h3"]
+	require.True(t, ok)
+	require.NotNil(t, h3.VideoTierPricing)
+	assert.Equal(t, operation_setting.VideoBillingUnitPerSecond, h3.VideoTierPricing.BillingUnit)
+	assert.False(t, h3.VideoTierPricing.Inherited)
+	assert.InDelta(t, 0.21, h3.VideoTierPricing.Prices["1080p"].Standard, 1e-12)
+
+	seedance, ok := pricingByName["seedance-2-0-mini-official"]
+	require.True(t, ok)
+	require.NotNil(t, seedance.VideoTierPricing)
+	assert.Equal(t, operation_setting.VideoBillingUnitPerMillionTokens, seedance.VideoTierPricing.BillingUnit)
+	require.NotNil(t, seedance.VideoTierPricing.Prices["720p"].WithReferenceVideo)
+	assert.InDelta(t, 8.0, *seedance.VideoTierPricing.Prices["720p"].WithReferenceVideo, 1e-12)
 }
 
 func TestListModelsCollapsesImageResolutionAliasesIntoCanonicalModel(t *testing.T) {

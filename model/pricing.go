@@ -38,6 +38,7 @@ type Pricing struct {
 	BillingExpr            string                                            `json:"billing_expr,omitempty"`
 	PricingVersion         string                                            `json:"pricing_version,omitempty"`
 	ImageResolutionPricing *operation_setting.ImageResolutionPricingMetadata `json:"image_resolution_pricing,omitempty"`
+	VideoTierPricing       *operation_setting.VideoTierPricingMetadata       `json:"video_tier_pricing,omitempty"`
 }
 
 type PricingVendor struct {
@@ -353,12 +354,19 @@ func updatePricing() {
 		if metadata, ok := operation_setting.GetImageResolutionPricingMetadata(model); ok {
 			pricing.ImageResolutionPricing = &metadata
 		}
+		videoBasePrice := pricing.ModelPrice
+		if !findPrice {
+			videoBasePrice = pricing.ModelRatio * 2
+		}
+		if metadata, ok := operation_setting.GetVideoTierPricingMetadata(model, videoBasePrice); ok {
+			pricing.VideoTierPricing = &metadata
+		}
 		pricingMap = append(pricingMap, pricing)
 	}
 
 	// 防止大更新后数据不通用
 	if len(pricingMap) > 0 {
-		pricingMap[0].PricingVersion = "5a90f2b86c08bd983a9a2e6d66c255f4eaef9c4bc934386d2b6ae84ef0ff1f1f"
+		pricingMap[0].PricingVersion = "59d93271d6de4fe8b2776a20d10bf73dc09d9be718a850f8771bbca82d13bff6"
 	}
 
 	// 刷新缓存映射，供高并发快速查询
