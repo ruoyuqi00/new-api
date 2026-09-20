@@ -151,6 +151,39 @@ const newKeys = {
     'Set the key name and accessible model groups':
       'Set the key name and accessible model groups',
     'Video generation routes': 'Video generation routes',
+    'Video tier price overrides': 'Video tier price overrides',
+    'JSON map of complete per-model video tier overrides. Use the video tier prices tab for guided editing.':
+      'JSON map of complete per-model video tier overrides. Use the video tier prices tab for guided editing.',
+    'Video tier prices': 'Video tier prices',
+    'Configure exact prices by resolution. Models without an override continue to follow their base price.':
+      'Configure exact prices by resolution. Models without an override continue to follow their base price.',
+    'Search video models': 'Search video models',
+    'No video pricing models found': 'No video pricing models found',
+    'Clear the search or enable a supported video model first.':
+      'Clear the search or enable a supported video model first.',
+    'Billing unit': 'Billing unit',
+    'Price source': 'Price source',
+    'Resolution tiers': 'Resolution tiers',
+    'Per second': 'Per second',
+    'Per successful task': 'Per successful task',
+    'Per 1M video tokens': 'Per 1M video tokens',
+    Explicit: 'Explicit',
+    Inherited: 'Inherited',
+    'Edit video tier prices': 'Edit video tier prices',
+    'Set an independent price for every supported video tier.':
+      'Set an independent price for every supported video tier.',
+    'Explicit tier prices': 'Explicit tier prices',
+    'With reference video': 'With reference video',
+    'per second': 'per second',
+    'per successful task': 'per successful task',
+    'per 1M video tokens': 'per 1M video tokens',
+    'Not applicable': 'Not applicable',
+    'Use inherited prices': 'Use inherited prices',
+    'Save tier prices': 'Save tier prices',
+    'Use inherited video prices?': 'Use inherited video prices?',
+    'This removes the independent tier prices for this model and returns every resolution to base-price scaling.':
+      'This removes the independent tier prices for this model and returns every resolution to base-price scaling.',
+    'Must be greater than zero': 'Must be greater than zero',
   },
   zh: {
     'Thinking Tokens': '思考 Token',
@@ -273,6 +306,39 @@ const newKeys = {
     'Set the key name and accessible model groups':
       '设置密钥名称与可访问的模型分组',
     'Video generation routes': '视频生成路由',
+    'Video tier price overrides': '视频档位价格覆盖',
+    'JSON map of complete per-model video tier overrides. Use the video tier prices tab for guided editing.':
+      '完整的模型视频档位价格 JSON 映射。建议在“视频档位价格”页签中编辑。',
+    'Video tier prices': '视频档位价格',
+    'Configure exact prices by resolution. Models without an override continue to follow their base price.':
+      '按分辨率配置精确价格；未覆盖的模型继续按基础价换算。',
+    'Search video models': '搜索视频模型',
+    'No video pricing models found': '未找到视频计价模型',
+    'Clear the search or enable a supported video model first.':
+      '清除搜索条件，或先启用受支持的视频模型。',
+    'Billing unit': '计费单位',
+    'Price source': '价格来源',
+    'Resolution tiers': '分辨率档位',
+    'Per second': '按秒',
+    'Per successful task': '按成功任务',
+    'Per 1M video tokens': '按百万视频 Token',
+    Explicit: '独立配置',
+    Inherited: '继承基础价',
+    'Edit video tier prices': '编辑视频档位价格',
+    'Set an independent price for every supported video tier.':
+      '为每个支持的视频档位设置独立价格。',
+    'Explicit tier prices': '独立档位价格',
+    'With reference video': '带参考视频',
+    'per second': '每秒',
+    'per successful task': '每个成功任务',
+    'per 1M video tokens': '每百万视频 Token',
+    'Not applicable': '不适用',
+    'Use inherited prices': '使用继承价格',
+    'Save tier prices': '保存档位价格',
+    'Use inherited video prices?': '使用继承的视频价格？',
+    'This removes the independent tier prices for this model and returns every resolution to base-price scaling.':
+      '这会删除该模型的独立档位价格，并让所有分辨率恢复按基础价换算。',
+    'Must be greater than zero': '必须大于 0',
   },
   fr: {
     'Thinking Tokens': 'Jetons de raisonnement',
@@ -399,6 +465,39 @@ const newKeys = {
     'Set the key name and accessible model groups':
       'Définissez le nom de la clé et les groupes de modèles accessibles',
     'Video generation routes': 'Routes de génération vidéo',
+    'Video tier price overrides': 'Remplacements des tarifs vidéo',
+    'JSON map of complete per-model video tier overrides. Use the video tier prices tab for guided editing.':
+      'Carte JSON complète des tarifs vidéo par modèle. Utilisez l’onglet des tarifs vidéo pour une modification guidée.',
+    'Video tier prices': 'Tarifs vidéo par niveau',
+    'Configure exact prices by resolution. Models without an override continue to follow their base price.':
+      'Définissez les tarifs par résolution. Sans remplacement, le tarif de base reste appliqué.',
+    'Search video models': 'Rechercher des modèles vidéo',
+    'No video pricing models found': 'Aucun modèle vidéo tarifé trouvé',
+    'Clear the search or enable a supported video model first.':
+      'Effacez la recherche ou activez d’abord un modèle vidéo compatible.',
+    'Billing unit': 'Unité de facturation',
+    'Price source': 'Source du tarif',
+    'Resolution tiers': 'Niveaux de résolution',
+    'Per second': 'Par seconde',
+    'Per successful task': 'Par tâche réussie',
+    'Per 1M video tokens': 'Par million de jetons vidéo',
+    Explicit: 'Explicite',
+    Inherited: 'Hérité',
+    'Edit video tier prices': 'Modifier les tarifs vidéo',
+    'Set an independent price for every supported video tier.':
+      'Définissez un tarif indépendant pour chaque niveau vidéo pris en charge.',
+    'Explicit tier prices': 'Tarifs explicites',
+    'With reference video': 'Avec vidéo de référence',
+    'per second': 'par seconde',
+    'per successful task': 'par tâche réussie',
+    'per 1M video tokens': 'par million de jetons vidéo',
+    'Not applicable': 'Non applicable',
+    'Use inherited prices': 'Utiliser les tarifs hérités',
+    'Save tier prices': 'Enregistrer les tarifs',
+    'Use inherited video prices?': 'Utiliser les tarifs vidéo hérités ?',
+    'This removes the independent tier prices for this model and returns every resolution to base-price scaling.':
+      'Cela supprime les tarifs indépendants de ce modèle et rétablit le calcul depuis le tarif de base.',
+    'Must be greater than zero': 'Doit être supérieur à zéro',
   },
   ja: {
     'Thinking Tokens': '思考トークン',
@@ -523,6 +622,39 @@ const newKeys = {
     'Set the key name and accessible model groups':
       'キー名とアクセス可能なモデルグループを設定します',
     'Video generation routes': '動画生成ルート',
+    'Video tier price overrides': '動画ティア価格の上書き',
+    'JSON map of complete per-model video tier overrides. Use the video tier prices tab for guided editing.':
+      'モデル別の完全な動画ティア価格 JSON です。動画ティア価格タブで編集してください。',
+    'Video tier prices': '動画ティア価格',
+    'Configure exact prices by resolution. Models without an override continue to follow their base price.':
+      '解像度ごとの価格を設定します。上書きしないモデルは基本価格に従います。',
+    'Search video models': '動画モデルを検索',
+    'No video pricing models found': '動画価格モデルが見つかりません',
+    'Clear the search or enable a supported video model first.':
+      '検索を解除するか、対応する動画モデルを有効にしてください。',
+    'Billing unit': '課金単位',
+    'Price source': '価格の適用元',
+    'Resolution tiers': '解像度ティア',
+    'Per second': '秒単位',
+    'Per successful task': '成功タスク単位',
+    'Per 1M video tokens': '動画100万トークン単位',
+    Explicit: '個別設定',
+    Inherited: '基本価格を継承',
+    'Edit video tier prices': '動画ティア価格を編集',
+    'Set an independent price for every supported video tier.':
+      '対応する動画ティアごとに個別価格を設定します。',
+    'Explicit tier prices': '個別ティア価格',
+    'With reference video': '参照動画あり',
+    'per second': '1秒あたり',
+    'per successful task': '成功タスクあたり',
+    'per 1M video tokens': '動画100万トークンあたり',
+    'Not applicable': '対象外',
+    'Use inherited prices': '継承価格を使用',
+    'Save tier prices': 'ティア価格を保存',
+    'Use inherited video prices?': '継承された動画価格を使用しますか？',
+    'This removes the independent tier prices for this model and returns every resolution to base-price scaling.':
+      'このモデルの個別ティア価格を削除し、すべての解像度を基本価格からの換算に戻します。',
+    'Must be greater than zero': '0 より大きい値が必要です',
   },
   ru: {
     'Thinking Tokens': 'Токены рассуждений',
@@ -648,6 +780,39 @@ const newKeys = {
     'Set the key name and accessible model groups':
       'Задайте имя ключа и доступные группы моделей',
     'Video generation routes': 'Маршруты генерации видео',
+    'Video tier price overrides': 'Переопределения тарифов видео',
+    'JSON map of complete per-model video tier overrides. Use the video tier prices tab for guided editing.':
+      'Полная JSON-карта тарифов видео по моделям. Для настройки используйте вкладку тарифов видео.',
+    'Video tier prices': 'Тарифы видео по уровням',
+    'Configure exact prices by resolution. Models without an override continue to follow their base price.':
+      'Задайте цены по разрешениям. Модели без переопределения используют базовую цену.',
+    'Search video models': 'Поиск видеомоделей',
+    'No video pricing models found': 'Видеомодели с тарифами не найдены',
+    'Clear the search or enable a supported video model first.':
+      'Очистите поиск или сначала включите поддерживаемую видеомодель.',
+    'Billing unit': 'Единица тарификации',
+    'Price source': 'Источник цены',
+    'Resolution tiers': 'Уровни разрешения',
+    'Per second': 'За секунду',
+    'Per successful task': 'За успешную задачу',
+    'Per 1M video tokens': 'За 1 млн видеотокенов',
+    Explicit: 'Задано вручную',
+    Inherited: 'Унаследовано',
+    'Edit video tier prices': 'Изменить тарифы видео',
+    'Set an independent price for every supported video tier.':
+      'Задайте отдельную цену для каждого поддерживаемого уровня видео.',
+    'Explicit tier prices': 'Отдельные цены уровней',
+    'With reference video': 'С референсным видео',
+    'per second': 'за секунду',
+    'per successful task': 'за успешную задачу',
+    'per 1M video tokens': 'за 1 млн видеотокенов',
+    'Not applicable': 'Не применяется',
+    'Use inherited prices': 'Использовать унаследованные цены',
+    'Save tier prices': 'Сохранить цены уровней',
+    'Use inherited video prices?': 'Использовать унаследованные цены видео?',
+    'This removes the independent tier prices for this model and returns every resolution to base-price scaling.':
+      'Отдельные цены этой модели будут удалены, а все разрешения снова будут рассчитываться от базовой цены.',
+    'Must be greater than zero': 'Значение должно быть больше нуля',
   },
   vi: {
     'Thinking Tokens': 'Token suy luận',
@@ -771,6 +936,39 @@ const newKeys = {
     'Set the key name and accessible model groups':
       'Đặt tên khóa và các nhóm mô hình có thể truy cập',
     'Video generation routes': 'Tuyến tạo video',
+    'Video tier price overrides': 'Giá video ghi đè theo mức',
+    'JSON map of complete per-model video tier overrides. Use the video tier prices tab for guided editing.':
+      'Bản đồ JSON đầy đủ của giá video theo từng mô hình. Hãy chỉnh sửa trong thẻ giá video theo mức.',
+    'Video tier prices': 'Giá video theo mức',
+    'Configure exact prices by resolution. Models without an override continue to follow their base price.':
+      'Đặt giá theo độ phân giải. Mô hình không ghi đè tiếp tục dùng giá cơ sở.',
+    'Search video models': 'Tìm mô hình video',
+    'No video pricing models found': 'Không tìm thấy mô hình video có giá',
+    'Clear the search or enable a supported video model first.':
+      'Xóa tìm kiếm hoặc bật một mô hình video được hỗ trợ trước.',
+    'Billing unit': 'Đơn vị tính phí',
+    'Price source': 'Nguồn giá',
+    'Resolution tiers': 'Mức độ phân giải',
+    'Per second': 'Theo giây',
+    'Per successful task': 'Theo tác vụ thành công',
+    'Per 1M video tokens': 'Theo 1 triệu token video',
+    Explicit: 'Thiết lập riêng',
+    Inherited: 'Kế thừa',
+    'Edit video tier prices': 'Sửa giá video theo mức',
+    'Set an independent price for every supported video tier.':
+      'Đặt giá riêng cho từng mức video được hỗ trợ.',
+    'Explicit tier prices': 'Giá riêng theo mức',
+    'With reference video': 'Có video tham chiếu',
+    'per second': 'mỗi giây',
+    'per successful task': 'mỗi tác vụ thành công',
+    'per 1M video tokens': 'mỗi 1 triệu token video',
+    'Not applicable': 'Không áp dụng',
+    'Use inherited prices': 'Dùng giá kế thừa',
+    'Save tier prices': 'Lưu giá theo mức',
+    'Use inherited video prices?': 'Dùng giá video kế thừa?',
+    'This removes the independent tier prices for this model and returns every resolution to base-price scaling.':
+      'Thao tác này xóa giá riêng của mô hình và đưa mọi độ phân giải về cách tính theo giá cơ sở.',
+    'Must be greater than zero': 'Phải lớn hơn 0',
   },
 }
 

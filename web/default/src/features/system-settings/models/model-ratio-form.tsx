@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Code2, Eye, RotateCcw, Save } from 'lucide-react'
 import { memo, useCallback, useRef, useState } from 'react'
-import { type UseFormReturn } from 'react-hook-form'
+import type { UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { JsonCodeEditor } from '@/components/json-code-editor'
@@ -53,6 +53,7 @@ type ModelFormValues = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  VideoTierPrice: string
   ExposeRatioEnabled: boolean
   BillingMode: string
   BillingExpr: string
@@ -76,6 +77,7 @@ type ModelJsonFieldName =
   | 'ImageRatio'
   | 'AudioRatio'
   | 'AudioCompletionRatio'
+  | 'VideoTierPrice'
 
 const modelJsonFields: Array<{
   name: ModelJsonFieldName
@@ -125,6 +127,12 @@ const modelJsonFields: Array<{
     name: 'AudioCompletionRatio',
     labelKey: 'Audio completion ratio',
     descriptionKey: 'Ratio applied to audio completions for streaming models.',
+  },
+  {
+    name: 'VideoTierPrice',
+    labelKey: 'Video tier price overrides',
+    descriptionKey:
+      'JSON map of complete per-model video tier overrides. Use the video tier prices tab for guided editing.',
   },
 ]
 
