@@ -79,6 +79,7 @@ import type {
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
+import { VideoTierPricingBreakdown } from './video-tier-pricing-breakdown'
 
 // ----------------------------------------------------------------------------
 // Local UI helpers
@@ -1259,6 +1260,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
   const showRechargePrice = props.showRechargePrice ?? false
 
   const isDynamic = isDynamicPricingModel(props.model)
+  const videoTierPricing = props.model.video_tier_pricing
+  const videoGroups = videoTierPricing
+    ? getAvailableGroups(props.model, props.usableGroup)
+    : []
 
   return (
     <div className='@container/details space-y-4'>
@@ -1286,26 +1291,41 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
 
           <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
             <SectionTitle>{t('Pricing')}</SectionTitle>
-            <PriceSection
-              model={props.model}
-              priceRate={props.priceRate}
-              usdExchangeRate={props.usdExchangeRate}
-              tokenUnit={props.tokenUnit}
-              showRechargePrice={showRechargePrice}
-            />
-            {isDynamic && props.model.billing_mode === 'tiered_expr' && (
-              <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
+            {videoTierPricing ? (
+              <VideoTierPricingBreakdown
+                metadata={videoTierPricing}
+                groups={videoGroups}
+                groupRatios={props.groupRatio}
+                priceRate={props.priceRate}
+                usdExchangeRate={props.usdExchangeRate}
+                showRechargePrice={showRechargePrice}
+              />
+            ) : (
+              <>
+                <PriceSection
+                  model={props.model}
+                  priceRate={props.priceRate}
+                  usdExchangeRate={props.usdExchangeRate}
+                  tokenUnit={props.tokenUnit}
+                  showRechargePrice={showRechargePrice}
+                />
+                {isDynamic && props.model.billing_mode === 'tiered_expr' && (
+                  <DynamicPricingBreakdown
+                    billingExpr={props.model.billing_expr}
+                  />
+                )}
+                <GroupPricingSection
+                  model={props.model}
+                  groupRatio={props.groupRatio}
+                  usableGroup={props.usableGroup}
+                  autoGroups={props.autoGroups}
+                  priceRate={props.priceRate}
+                  usdExchangeRate={props.usdExchangeRate}
+                  tokenUnit={props.tokenUnit}
+                  showRechargePrice={showRechargePrice}
+                />
+              </>
             )}
-            <GroupPricingSection
-              model={props.model}
-              groupRatio={props.groupRatio}
-              usableGroup={props.usableGroup}
-              autoGroups={props.autoGroups}
-              priceRate={props.priceRate}
-              usdExchangeRate={props.usdExchangeRate}
-              tokenUnit={props.tokenUnit}
-              showRechargePrice={showRechargePrice}
-            />
           </section>
 
           <ModelBackendDetailsSection model={props.model} />

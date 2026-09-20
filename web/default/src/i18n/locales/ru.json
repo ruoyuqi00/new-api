@@ -2135,6 +2135,7 @@
     "Free": "Свободно",
     "Free: {{free}} / Total: {{total}}": "Свободно: {{free}} / Всего: {{total}}",
     "Friendly name to identify this channel": "Дружественное имя для идентификации этого канала",
+    "From": "От",
     "From Address": "Отправитель",
     "From IO.NET deployment": "Из развертывания IO.NET",
     "From model redirect, not yet added to models list": "Из перенаправления модели, еще не добавлено в список моделей",

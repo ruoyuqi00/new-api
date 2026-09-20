@@ -2135,6 +2135,7 @@
     "Free": "Libre",
     "Free: {{free}} / Total: {{total}}": "Disponible : {{free}} / Total : {{total}}",
     "Friendly name to identify this channel": "Nom convivial pour identifier ce canal",
+    "From": "À partir de",
     "From Address": "De l'adresse",
     "From IO.NET deployment": "Depuis le déploiement IO.NET",
     "From model redirect, not yet added to models list": "Depuis la redirection du modèle, pas encore ajouté à la liste des modèles",

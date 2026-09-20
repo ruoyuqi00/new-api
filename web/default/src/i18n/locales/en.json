@@ -2135,6 +2135,7 @@
     "Free": "Free",
     "Free: {{free}} / Total: {{total}}": "Free: {{free}} / Total: {{total}}",
     "Friendly name to identify this channel": "Friendly name to identify this channel",
+    "From": "From",
     "From Address": "From Address",
     "From IO.NET deployment": "From IO.NET deployment",
     "From model redirect, not yet added to models list": "From model redirect, not yet added to models list",

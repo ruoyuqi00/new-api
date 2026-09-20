@@ -34,6 +34,11 @@ import {
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
+import {
+  formatVideoTierPrice,
+  getVideoBillingUnitLabelKey,
+  getVideoTierCardPrice,
+} from '../lib/video-tier-price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
 
@@ -64,6 +69,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 28) : null
   const initial = props.model.model_name?.charAt(0).toUpperCase() || '?'
   const isDynamicPricing = isDynamicPricingModel(props.model)
+  const videoTierPricing = props.model.video_tier_pricing
   const hasCachedPrice = isTokenBased && props.model.cache_ratio != null
   const dynamicSummary = isDynamicPricing
     ? getDynamicPricingSummary(props.model, {
@@ -88,7 +94,24 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   }
 
   let priceSummary: React.ReactNode
-  if (
+  if (videoTierPricing) {
+    priceSummary = (
+      <span className='text-muted-foreground whitespace-nowrap'>
+        {t('From')}{' '}
+        <span className='text-foreground font-mono font-semibold'>
+          {formatVideoTierPrice(
+            getVideoTierCardPrice(
+              videoTierPricing,
+              groups,
+              props.model.group_ratio || {}
+            ),
+            { showRechargePrice, priceRate, usdExchangeRate }
+          )}
+        </span>{' '}
+        / {t(getVideoBillingUnitLabelKey(videoTierPricing.billing_unit))}
+      </span>
+    )
+  } else if (
     dynamicSummary?.isPerCall &&
     dynamicSummary.fixedPriceEntries.length > 0
   ) {
@@ -206,6 +229,18 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     )
   }
 
+  let billingTypeLabel = t('Per Request')
+  let billingUnitLabel = t('request')
+  if (videoTierPricing) {
+    billingTypeLabel = t('Video tier prices')
+    billingUnitLabel = t(
+      getVideoBillingUnitLabelKey(videoTierPricing.billing_unit)
+    )
+  } else if (isTokenBased) {
+    billingTypeLabel = t('Token-based')
+    billingUnitLabel = tokenUnitLabel
+  }
+
   return (
     <div
       className={cn(
@@ -267,7 +302,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </span>
           )}
           <span className='text-muted-foreground text-xs font-medium'>
-            {isTokenBased ? t('Token-based') : t('Per Request')}
+            {billingTypeLabel}
           </span>
           {isDynamicPricing && (
             <StatusBadge
@@ -287,7 +322,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </span>
           ))}
           <span className='text-muted-foreground/50 text-xs'>
-            {isTokenBased ? tokenUnitLabel : t('request')}
+            {billingUnitLabel}
           </span>
           {hiddenCount > 0 && (
             <span className='text-muted-foreground/40 text-xs'>

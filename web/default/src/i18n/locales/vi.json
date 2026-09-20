@@ -2135,6 +2135,7 @@
     "Free": "Trống",
     "Free: {{free}} / Total: {{total}}": "Còn trống: {{free}} / Tổng: {{total}}",
     "Friendly name to identify this channel": "Tên thân thiện để nhận dạng kênh này",
+    "From": "Từ",
     "From Address": "Địa chỉ Người gửi",
     "From IO.NET deployment": "Từ triển khai IO.NET",
     "From model redirect, not yet added to models list": "Từ chuyển hướng mô hình, chưa được thêm vào danh sách mô hình",

@@ -2135,6 +2135,7 @@
     "Free": "可用",
     "Free: {{free}} / Total: {{total}}": "可用空间: {{free}} / 总空间: {{total}}",
     "Friendly name to identify this channel": "用于识别此渠道的友好名称",
+    "From": "起价",
     "From Address": "发件地址",
     "From IO.NET deployment": "来自 IO.NET 部署",
     "From model redirect, not yet added to models list": "来自模型重定向，尚未加入模型列表",

@@ -173,6 +173,7 @@ const newKeys = {
     'Set an independent price for every supported video tier.':
       'Set an independent price for every supported video tier.',
     'Explicit tier prices': 'Explicit tier prices',
+    From: 'From',
     'With reference video': 'With reference video',
     'per second': 'per second',
     'per successful task': 'per successful task',
@@ -328,6 +329,7 @@ const newKeys = {
     'Set an independent price for every supported video tier.':
       '为每个支持的视频档位设置独立价格。',
     'Explicit tier prices': '独立档位价格',
+    From: '起价',
     'With reference video': '带参考视频',
     'per second': '每秒',
     'per successful task': '每个成功任务',
@@ -487,6 +489,7 @@ const newKeys = {
     'Set an independent price for every supported video tier.':
       'Définissez un tarif indépendant pour chaque niveau vidéo pris en charge.',
     'Explicit tier prices': 'Tarifs explicites',
+    From: 'À partir de',
     'With reference video': 'Avec vidéo de référence',
     'per second': 'par seconde',
     'per successful task': 'par tâche réussie',
@@ -644,6 +647,7 @@ const newKeys = {
     'Set an independent price for every supported video tier.':
       '対応する動画ティアごとに個別価格を設定します。',
     'Explicit tier prices': '個別ティア価格',
+    From: '最低',
     'With reference video': '参照動画あり',
     'per second': '1秒あたり',
     'per successful task': '成功タスクあたり',
@@ -802,6 +806,7 @@ const newKeys = {
     'Set an independent price for every supported video tier.':
       'Задайте отдельную цену для каждого поддерживаемого уровня видео.',
     'Explicit tier prices': 'Отдельные цены уровней',
+    From: 'От',
     'With reference video': 'С референсным видео',
     'per second': 'за секунду',
     'per successful task': 'за успешную задачу',
@@ -958,6 +963,7 @@ const newKeys = {
     'Set an independent price for every supported video tier.':
       'Đặt giá riêng cho từng mức video được hỗ trợ.',
     'Explicit tier prices': 'Giá riêng theo mức',
+    From: 'Từ',
     'With reference video': 'Có video tham chiếu',
     'per second': 'mỗi giây',
     'per successful task': 'mỗi tác vụ thành công',
