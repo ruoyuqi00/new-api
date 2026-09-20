@@ -156,7 +156,7 @@ export function VideoTierPricingDrawer(props: VideoTierPricingDrawerProps) {
         side='right'
         className={sideDrawerContentClassName('sm:max-w-2xl')}
       >
-        <SheetHeader className={sideDrawerHeaderClassName()}>
+        <SheetHeader className={sideDrawerHeaderClassName('pr-14 sm:pr-14')}>
           <div className='flex min-w-0 items-start justify-between gap-3'>
             <div className='min-w-0'>
               <SheetTitle className='truncate font-mono text-base'>
