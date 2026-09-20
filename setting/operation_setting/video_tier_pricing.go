@@ -335,6 +335,10 @@ func effectiveVideoTierPrices(modelName string, definition videoTierPriceDefinit
 	}
 	prices := make(map[string]VideoTierPricePoint, len(definition.LegacyPrices))
 	for tier, legacy := range definition.LegacyPrices {
+		if inheritedBasePrice == basePoint.Standard {
+			prices[tier] = copyVideoTierPricePoint(legacy)
+			continue
+		}
 		point := VideoTierPricePoint{Standard: inheritedBasePrice * legacy.Standard / basePoint.Standard}
 		if definition.RequiresReferenceVideoPricing && legacy.WithReferenceVideo != nil {
 			value := inheritedBasePrice * *legacy.WithReferenceVideo / basePoint.Standard

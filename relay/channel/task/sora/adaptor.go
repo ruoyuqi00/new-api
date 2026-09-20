@@ -19,6 +19,8 @@ import (
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -471,7 +473,7 @@ func validateMoonVideoRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.
 		if duration < 4 || duration > 15 {
 			return service.TaskErrorWrapperLocal(fmt.Errorf("H3 duration must be between 4 and 15 seconds"), "invalid_seconds", http.StatusBadRequest)
 		}
-		if !moonH3TierSupported(request.Size, request.Resolution) {
+		if _, configured, priceErr := operation_setting.ResolveVideoTierPrice(request.Model, moonRequestResolution(request), false, 1); !configured || priceErr != nil {
 			return service.TaskErrorWrapperLocal(fmt.Errorf("unsupported H3 pricing tier"), "unsupported_pricing_tier", http.StatusBadRequest)
 		}
 	} else if isMoonSeedanceTokenModel(request.Model) {
@@ -482,11 +484,7 @@ func validateMoonVideoRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.
 		if (request.Duration != nil || request.Seconds != nil) && duration != -1 && (duration < 4 || duration > maxDuration) {
 			return service.TaskErrorWrapperLocal(fmt.Errorf("Seedance duration must be -1 or between 4 and %d seconds", maxDuration), "invalid_seconds", http.StatusBadRequest)
 		}
-		resolution := strings.ToLower(strings.TrimSpace(request.Resolution))
-		if resolution == "" {
-			resolution = strings.ToLower(strings.TrimSpace(request.Size))
-		}
-		if _, _, ok := moonSeedanceTokenRate(request.Model, resolution, moonRequestHasVideo(request)); !ok {
+		if _, configured, priceErr := operation_setting.ResolveVideoTierPrice(request.Model, moonRequestResolution(request), moonRequestHasVideo(request), 1); !configured || priceErr != nil {
 			return service.TaskErrorWrapperLocal(fmt.Errorf("unsupported Seedance pricing tier"), "unsupported_pricing_tier", http.StatusBadRequest)
 		}
 	} else {
@@ -496,12 +494,8 @@ func validateMoonVideoRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.
 		if !moonDurationSupported(request.Model, duration) {
 			return service.TaskErrorWrapperLocal(fmt.Errorf("unsupported %s duration", request.Model), "invalid_seconds", http.StatusBadRequest)
 		}
-		if request.Model != "grok-v1.5-video" {
-			if _, _, ok := moonPerSecondRate(request.Model, request.Size, request.Resolution); !ok {
-				return service.TaskErrorWrapperLocal(fmt.Errorf("unsupported %s pricing tier", request.Model), "unsupported_pricing_tier", http.StatusBadRequest)
-			}
-		} else if !moonGrokResolutionSupported(request.Size, request.Resolution) {
-			return service.TaskErrorWrapperLocal(fmt.Errorf("unsupported Grok pricing tier"), "unsupported_pricing_tier", http.StatusBadRequest)
+		if _, configured, priceErr := operation_setting.ResolveVideoTierPrice(request.Model, moonRequestResolution(request), moonRequestHasVideo(request), 1); !configured || priceErr != nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("unsupported %s pricing tier", request.Model), "unsupported_pricing_tier", http.StatusBadRequest)
 		}
 	}
 	action := constant.TaskActionTextGenerate
@@ -542,6 +536,37 @@ func moonRequestHasReference(request moonVideoRequest) bool {
 	return false
 }
 
+func moonRequestResolution(request moonVideoRequest) string {
+	if request.Model == "minimax-h3" && strings.TrimSpace(request.Size) != "" {
+		return request.Size
+	}
+	if strings.TrimSpace(request.Resolution) != "" {
+		return request.Resolution
+	}
+	return request.Size
+}
+
+func moonInheritedVideoBasePrice(info *relaycommon.RelayInfo, modelName string) (float64, bool) {
+	if isMoonSeedanceTokenModel(modelName) {
+		if info != nil && info.PriceData.ModelRatio > 0 {
+			return info.PriceData.ModelRatio * 2, true
+		}
+		modelRatio, ok, _ := ratio_setting.GetModelRatio(modelName)
+		if !ok {
+			modelRatio, ok = ratio_setting.GetDefaultModelRatioMap()[modelName]
+		}
+		return modelRatio * 2, ok && modelRatio > 0
+	}
+	if info != nil && info.PriceData.ModelPrice > 0 {
+		return info.PriceData.ModelPrice, true
+	}
+	modelPrice, ok := ratio_setting.GetModelPrice(modelName, false)
+	if !ok {
+		modelPrice, ok = ratio_setting.GetDefaultModelPriceMap()[modelName]
+	}
+	return modelPrice, ok && modelPrice > 0
+}
+
 func estimateMoonVideoBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	value, ok := c.Get(moonRequestContextKey)
 	if !ok {
@@ -555,27 +580,31 @@ func estimateMoonVideoBilling(c *gin.Context, info *relaycommon.RelayInfo) map[s
 	if modelName == "" {
 		modelName = request.Model
 	}
-	duration, _ := moonDuration(request)
-	if modelName == "minimax-h3" {
-		if duration <= 0 {
-			duration = 4
-		}
-		resolutionRatio := moonH3ResolutionRate(request.Size, request.Resolution) / 0.10
-		return map[string]float64{
-			"seconds":              float64(duration),
-			moonResolutionRatioKey: resolutionRatio,
-		}
-	}
-	if modelName == "grok-v1.5-video" {
+	basePrice, ok := moonInheritedVideoBasePrice(info, modelName)
+	if !ok {
 		return nil
 	}
-	if isMoonPerSecondModel(modelName) {
+	quote, configured, err := operation_setting.ResolveVideoTierPrice(
+		modelName,
+		moonRequestResolution(request),
+		moonRequestHasVideo(request),
+		basePrice,
+	)
+	if err != nil || !configured {
+		return nil
+	}
+	priceRatio := quote.UnitPrice / basePrice
+	if quote.BillingUnit == operation_setting.VideoBillingUnitPerSuccessfulTask {
+		if priceRatio == 1 {
+			return nil
+		}
+		return map[string]float64{relaycommon.TaskPriceTierRatioKey: priceRatio}
+	}
+
+	duration, _ := moonDuration(request)
+	if quote.BillingUnit == operation_setting.VideoBillingUnitPerSecond {
 		if duration <= 0 {
 			duration = moonDefaultDuration(modelName)
-		}
-		rate, baseRate, ok := moonPerSecondRate(modelName, request.Size, request.Resolution)
-		if !ok {
-			return nil
 		}
 		billableSeconds := float64(duration)
 		if isMoonWanModel(modelName) {
@@ -583,19 +612,10 @@ func estimateMoonVideoBilling(c *gin.Context, info *relaycommon.RelayInfo) map[s
 		}
 		return map[string]float64{
 			"seconds":              billableSeconds,
-			moonResolutionRatioKey: rate / baseRate,
+			moonResolutionRatioKey: priceRatio,
 		}
 	}
-	if !isMoonSeedanceTokenModel(modelName) {
-		return nil
-	}
-	resolution := strings.ToLower(strings.TrimSpace(request.Resolution))
-	if resolution == "" {
-		resolution = strings.ToLower(strings.TrimSpace(request.Size))
-	}
-	hasVideo := moonRequestHasVideo(request)
-	rate, baseRate, ok := moonSeedanceTokenRate(modelName, resolution, hasVideo)
-	if !ok {
+	if quote.BillingUnit != operation_setting.VideoBillingUnitPerMillionTokens {
 		return nil
 	}
 	if duration == -1 {
@@ -608,13 +628,13 @@ func estimateMoonVideoBilling(c *gin.Context, info *relaycommon.RelayInfo) map[s
 		duration = 5
 	}
 	totalSeconds := float64(duration) + moonReferenceVideoSeconds(request)
-	estimatedTokens := totalSeconds * moonResolutionPixels(resolution) * 24 / 1024
+	estimatedTokens := totalSeconds * moonResolutionPixels(quote.Tier) * 24 / 1024
 	reservationRatio := estimatedTokens * 2 / common.QuotaPerUnit
 	if reservationRatio <= 0 {
 		reservationRatio = 1
 	}
 	return map[string]float64{
-		moonRateRatioKey:             rate / baseRate,
+		moonRateRatioKey:             priceRatio,
 		moonTokenReservationRatioKey: reservationRatio,
 	}
 }
@@ -676,81 +696,16 @@ func moonDurationSupported(modelName string, duration int) bool {
 	}
 }
 
-func moonPerSecondRate(modelName, size, resolution string) (float64, float64, bool) {
-	tier := moonPerSecondResolutionTier(size, resolution)
-	prices := map[string]map[string]float64{
-		"wan3.0-video":            {"480p": 0.27, "720p": 0.36, "1080p": 0.72},
-		"wan3.0-video-prime":      {"480p": 0.40, "720p": 0.54, "1080p": 1.08},
-		"seedance2.0-9-3-3-PT":    {"480p": 0.34, "720p": 0.42},
-		"seedance2.5-30-10-10-PT": {"480p": 0.45, "720p": 0.67},
-		"seedance2.0-fast-PT":     {"480p": 0.30, "720p": 0.36},
-	}
-	modelPrices, ok := prices[modelName]
-	if !ok {
-		return 0, 0, false
-	}
-	rate, ok := modelPrices[tier]
-	if !ok {
-		return 0, 0, false
-	}
-	return rate, modelPrices["480p"], true
-}
-
-func moonPerSecondResolutionTier(size, resolution string) string {
-	tier := strings.ToLower(strings.TrimSpace(resolution))
-	if tier == "" {
-		tier = strings.ToLower(strings.TrimSpace(size))
-	}
-	if tier == "" {
-		return "720p"
-	}
-	switch tier {
-	case "854x480", "832x480", "864x480", "480x854":
-		return "480p"
-	case "1280x720", "720x1280":
-		return "720p"
-	case "1920x1080", "1080x1920":
-		return "1080p"
-	default:
-		return tier
-	}
-}
-
-func moonGrokResolutionSupported(size, resolution string) bool {
-	switch moonPerSecondResolutionTier(size, resolution) {
-	case "720p", "1080p":
-		return true
-	default:
-		return false
-	}
-}
-
 func moonSeedanceTokenRate(modelName, resolution string, hasVideo bool) (float64, float64, bool) {
-	type ratePair struct{ withoutVideo, withVideo float64 }
-	prices := map[string]map[string]ratePair{
-		"seedance-2-0-mini-official": {"480p": {11.5, 7}, "720p": {11.5, 7}},
-		"seedance-2-0-fast-official": {"480p": {24.05, 14.3}, "720p": {24.05, 14.3}},
-		"seedance-2-0-official": {
-			"480p": {36.8, 22.4}, "720p": {36.8, 22.4}, "1080p": {40.8, 24.8}, "4k": {20.8, 12.8},
-		},
-		"seedance-2-5-official": {"720p": {59.5, 35.7}, "1080p": {65.45, 39.1}},
-	}
-	modelPrices, ok := prices[modelName]
+	basePrice, ok := moonInheritedVideoBasePrice(nil, modelName)
 	if !ok {
 		return 0, 0, false
 	}
-	if resolution == "" {
-		resolution = "720p"
-	}
-	pair, ok := modelPrices[resolution]
-	if !ok {
+	quote, configured, err := operation_setting.ResolveVideoTierPrice(modelName, resolution, hasVideo, basePrice)
+	if err != nil || !configured {
 		return 0, 0, false
 	}
-	base := modelPrices["720p"].withoutVideo
-	if hasVideo {
-		return pair.withVideo, base, true
-	}
-	return pair.withoutVideo, base, true
+	return quote.UnitPrice, basePrice, true
 }
 
 func moonDuration(request moonVideoRequest) (int, error) {
@@ -861,38 +816,19 @@ func moonResolutionPixels(resolution string) float64 {
 }
 
 func moonH3ResolutionRate(size, resolution string) float64 {
-	tier := strings.ToLower(strings.TrimSpace(size))
-	if tier == "" {
-		tier = strings.ToLower(strings.TrimSpace(resolution))
+	basePrice, ok := moonInheritedVideoBasePrice(nil, "minimax-h3")
+	if !ok {
+		return 0
 	}
-	switch tier {
-	case "4k":
-		return 0.36
-	case "2k":
-		return 0.26
-	case "1080p", "1920x1088", "1088x1920", "1440x1440", "1184x1760", "1760x1184", "1248x1664", "1664x1248", "2208x960":
-		return 0.18
-	case "768p", "1376x768", "768x1376", "1024x1024", "832x1248", "1248x832", "896x1184", "1184x896", "1568x672":
-		return 0.16
-	default:
-		return 0.10
+	requested := size
+	if strings.TrimSpace(requested) == "" {
+		requested = resolution
 	}
-}
-
-func moonH3TierSupported(size, resolution string) bool {
-	tier := strings.ToLower(strings.TrimSpace(size))
-	if tier == "" {
-		tier = strings.ToLower(strings.TrimSpace(resolution))
+	quote, configured, err := operation_setting.ResolveVideoTierPrice("minimax-h3", requested, false, basePrice)
+	if err != nil || !configured {
+		return 0
 	}
-	switch tier {
-	case "480p", "864x480", "480x864", "640x640", "544x800", "800x544", "576x736", "736x576", "992x416",
-		"768p", "1376x768", "768x1376", "1024x1024", "832x1248", "1248x832", "896x1184", "1184x896", "1568x672",
-		"1080p", "1920x1088", "1088x1920", "1440x1440", "1184x1760", "1760x1184", "1248x1664", "1664x1248", "2208x960",
-		"2k", "4k":
-		return true
-	default:
-		return false
-	}
+	return quote.UnitPrice
 }
 
 func parseMoonTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {

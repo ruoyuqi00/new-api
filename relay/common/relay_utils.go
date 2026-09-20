@@ -83,6 +83,10 @@ func validatePrompt(prompt string) *dto.TaskError {
 // used as a billing multiplier through task OtherRatios.
 const MaxTaskDurationSeconds = 3600
 
+// TaskPriceTierRatioKey is the only task ratio that may refine a model whose
+// billing unit is otherwise fixed per successful task.
+const TaskPriceTierRatioKey = "price_tier"
+
 func validateTaskDurationBounds(req TaskSubmitReq) *dto.TaskError {
 	if taskErr := validateTaskDurationValue("duration", req.Duration, false); taskErr != nil {
 		return taskErr

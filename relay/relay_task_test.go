@@ -150,6 +150,23 @@ func TestTaskCatalogPricingProducesExactFrozenQuota(t *testing.T) {
 	assert.GreaterOrEqual(t, perSecond, int(0.35*5*common.QuotaPerUnit))
 }
 
+func TestPerCallTaskAppliesOnlyExplicitPriceTierRatio(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		TaskPerCallBilling: true,
+		PriceData: types.PriceData{
+			Quota: 300_000,
+			OtherRatios: map[string]float64{
+				relaycommon.TaskPriceTierRatioKey: 1.25,
+				"seconds":                         99,
+			},
+		},
+	}
+
+	quota, clamp := applyEstimatedTaskRatiosQuota(info)
+	assert.Equal(t, 375_000, quota)
+	assert.Nil(t, clamp)
+}
+
 func TestApplyTaskOtherRatiosQuota(t *testing.T) {
 	require.Equal(t, 2000, applyTaskOtherRatiosQuota(1000, map[string]float64{
 		"seconds": 2,

@@ -215,11 +215,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 
 		// 6. 将 OtherRatios 应用到基础额度
-		if !info.TaskPerCallBilling {
-			quota, clamp := applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, info.PriceData.OtherRatios)
-			noteTaskQuotaClamp(info, clamp, "task_submit_other_ratios")
-			info.PriceData.Quota = quota
-		}
+		quota, clamp := applyEstimatedTaskRatiosQuota(info)
+		noteTaskQuotaClamp(info, clamp, "task_submit_other_ratios")
+		info.PriceData.Quota = quota
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
@@ -431,6 +429,22 @@ func recalcQuotaFromRatiosChecked(info *relaycommon.RelayInfo, ratios map[string
 func applyTaskOtherRatiosQuota(baseQuota int, ratios map[string]float64) int {
 	quota, _ := applyTaskOtherRatiosQuotaChecked(baseQuota, ratios)
 	return quota
+}
+
+func applyEstimatedTaskRatiosQuota(info *relaycommon.RelayInfo) (int, *common.QuotaClamp) {
+	if info == nil {
+		return 0, nil
+	}
+	if !info.TaskPerCallBilling {
+		return applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, info.PriceData.OtherRatios)
+	}
+	tierRatio, ok := info.PriceData.OtherRatios[relaycommon.TaskPriceTierRatioKey]
+	if !ok {
+		return info.PriceData.Quota, nil
+	}
+	return applyTaskOtherRatiosQuotaChecked(info.PriceData.Quota, map[string]float64{
+		relaycommon.TaskPriceTierRatioKey: tierRatio,
+	})
 }
 
 func applyTaskOtherRatiosQuotaChecked(baseQuota int, ratios map[string]float64) (int, *common.QuotaClamp) {

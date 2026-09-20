@@ -8,8 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,6 +26,26 @@ func newMoonTestContext(t *testing.T, body string) *gin.Context {
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	return ctx
+}
+
+func replaceMoonVideoTierPrices(t *testing.T, models map[string]map[string]operation_setting.VideoTierPricePoint) {
+	t.Helper()
+	setting, ok := config.GlobalConfig.Get("video_pricing_setting").(*operation_setting.VideoTierPriceSetting)
+	require.True(t, ok)
+	original := operation_setting.VideoTierPriceSetting2JSONString()
+	data, err := common.Marshal(models)
+	require.NoError(t, err)
+	require.NoError(t, operation_setting.ValidateVideoTierPriceJSONString(string(data)))
+	require.NoError(t, config.UpdateConfigFromMap(setting, map[string]string{"models": string(data)}))
+	operation_setting.RebuildVideoTierPriceIndex()
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(setting, map[string]string{"models": original}))
+		operation_setting.RebuildVideoTierPriceIndex()
+	})
+}
+
+func videoTierPoint(standard float64) operation_setting.VideoTierPricePoint {
+	return operation_setting.VideoTierPricePoint{Standard: standard}
 }
 
 func TestMoonRequestPreservesContentAndAcceptsNumericSeconds(t *testing.T) {
@@ -452,4 +476,132 @@ func TestMoonRejectsUnsupportedPricedResolution(t *testing.T) {
 		require.NotNil(t, taskErr)
 		assert.Equal(t, "unsupported_pricing_tier", taskErr.Code)
 	}
+}
+
+func TestMoonH3UsesConfiguredResolutionPrice(t *testing.T) {
+	replaceMoonVideoTierPrices(t, map[string]map[string]operation_setting.VideoTierPricePoint{
+		"minimax-h3": {
+			"480p": videoTierPoint(0.11), "768p": videoTierPoint(0.17), "1080p": videoTierPoint(0.21),
+			"2k": videoTierPoint(0.31), "4k": videoTierPoint(0.47),
+		},
+	})
+	ctx := newMoonTestContext(t, `{
+		"model":"minimax-h3",
+		"prompt":"camera pushes forward",
+		"workflow_id":"text-to-video",
+		"seconds":5,
+		"size":"4K"
+	}`)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "minimax-h3",
+		PriceData:       types.PriceData{ModelPrice: 0.10},
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelBaseUrl: "https://moon.sixai.cc"},
+	}
+	adaptor := &TaskAdaptor{}
+	adaptor.Init(info)
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(ctx, info))
+	ratios := adaptor.EstimateBilling(ctx, info)
+	assert.Equal(t, 5.0, ratios["seconds"])
+	assert.InDelta(t, 4.7, ratios[moonResolutionRatioKey], 1e-12)
+}
+
+func TestMoonConfiguredPerSecondPricesPreserveDurationRules(t *testing.T) {
+	replaceMoonVideoTierPrices(t, map[string]map[string]operation_setting.VideoTierPricePoint{
+		"wan3.0-video": {
+			"480p": videoTierPoint(0.28), "720p": videoTierPoint(0.50), "1080p": videoTierPoint(0.90),
+		},
+		"seedance2.0-fast-PT": {
+			"480p": videoTierPoint(0.31), "720p": videoTierPoint(0.45),
+		},
+	})
+	tests := []struct {
+		name          string
+		body          string
+		model         string
+		basePrice     float64
+		wantSeconds   float64
+		wantPriceRate float64
+	}{
+		{
+			name: "Wan includes reference duration",
+			body: `{"model":"wan3.0-video","prompt":"x","duration":5,"resolution":"1080p",` +
+				`"reference_videos":[{"url":"https://example.com/ref.mp4","durationSeconds":3}]}`,
+			model: "wan3.0-video", basePrice: 0.27, wantSeconds: 8, wantPriceRate: 0.90 / 0.27,
+		},
+		{
+			name: "PT charges output duration only",
+			body: `{"model":"seedance2.0-fast-PT","prompt":"x","duration":9,"resolution":"720p",` +
+				`"reference_videos":[{"url":"https://example.com/ref.mp4","durationSeconds":3}]}`,
+			model: "seedance2.0-fast-PT", basePrice: 0.30, wantSeconds: 9, wantPriceRate: 1.5,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := newMoonTestContext(t, test.body)
+			info := &relaycommon.RelayInfo{
+				OriginModelName: test.model, PriceData: types.PriceData{ModelPrice: test.basePrice},
+				TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://moon.sixai.cc"},
+			}
+			adaptor := &TaskAdaptor{}
+			adaptor.Init(info)
+			require.Nil(t, adaptor.ValidateRequestAndSetAction(ctx, info))
+			ratios := adaptor.EstimateBilling(ctx, info)
+			assert.Equal(t, test.wantSeconds, ratios["seconds"])
+			assert.InDelta(t, test.wantPriceRate, ratios[moonResolutionRatioKey], 1e-12)
+		})
+	}
+}
+
+func TestMoonGrokUsesConfiguredTaskTierWithoutDurationMultiplier(t *testing.T) {
+	replaceMoonVideoTierPrices(t, map[string]map[string]operation_setting.VideoTierPricePoint{
+		"grok-v1.5-video": {"720p": videoTierPoint(0.61), "1080p": videoTierPoint(0.75)},
+	})
+	ctx := newMoonTestContext(t, `{"model":"grok-v1.5-video","prompt":"x","seconds":6,"size":"1080p"}`)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "grok-v1.5-video", PriceData: types.PriceData{ModelPrice: 0.60},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://moon.sixai.cc"},
+	}
+	adaptor := &TaskAdaptor{}
+	adaptor.Init(info)
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(ctx, info))
+	ratios := adaptor.EstimateBilling(ctx, info)
+	assert.NotContains(t, ratios, "seconds")
+	assert.InDelta(t, 1.25, ratios[relaycommon.TaskPriceTierRatioKey], 1e-12)
+}
+
+func TestMoonSeedanceSettlementUsesConfiguredReferenceTokenRate(t *testing.T) {
+	reference480 := 7.5
+	reference720 := 8.0
+	replaceMoonVideoTierPrices(t, map[string]map[string]operation_setting.VideoTierPricePoint{
+		"seedance-2-0-mini-official": {
+			"480p": {Standard: 12.5, WithReferenceVideo: &reference480},
+			"720p": {Standard: 13.5, WithReferenceVideo: &reference720},
+		},
+	})
+	ctx := newMoonTestContext(t, `{
+		"model":"seedance-2-0-mini-official","prompt":"x","duration":5,"resolution":"720p",
+		"reference_videos":[{"url":"https://example.com/ref.mp4","durationSeconds":3}]
+	}`)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "seedance-2-0-mini-official", PriceData: types.PriceData{ModelRatio: 5.75},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://moon.sixai.cc"},
+	}
+	adaptor := &TaskAdaptor{}
+	adaptor.Init(info)
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(ctx, info))
+	ratios := adaptor.EstimateBilling(ctx, info)
+	assert.InDelta(t, 8.0/11.5, ratios[moonRateRatioKey], 1e-12)
+
+	task := &model.Task{
+		Properties: model.Properties{OriginModelName: "seedance-2-0-mini-official"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			OriginModelName: "seedance-2-0-mini-official", ModelRatio: 5.75, GroupRatio: 0.3,
+			OtherRatios: map[string]float64{moonRateRatioKey: ratios[moonRateRatioKey]},
+		}},
+	}
+	assert.Equal(t, 120000, adaptor.AdjustBillingOnComplete(task, &relaycommon.TaskInfo{TotalTokens: 100000}))
 }
