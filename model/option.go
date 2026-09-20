@@ -637,6 +637,8 @@ func validateOptionValue(key, value string) error {
 		return err
 	case "image_resolution_price_setting.models":
 		return operation_setting.ValidateImageResolutionPriceJSONString(value)
+	case "video_pricing_setting.models":
+		return operation_setting.ValidateVideoTierPriceJSONString(value)
 	default:
 		return nil
 	}
@@ -671,6 +673,9 @@ func handleConfigUpdate(key, value string) bool {
 		operation_setting.RebuildToolPriceIndex()
 	} else if configName == "image_resolution_price_setting" {
 		operation_setting.RebuildImageResolutionPriceIndex()
+		InvalidatePricingCache()
+	} else if configName == "video_pricing_setting" {
+		operation_setting.RebuildVideoTierPriceIndex()
 		InvalidatePricingCache()
 	} else if configName == "billing_setting" {
 		InvalidatePricingCache()
