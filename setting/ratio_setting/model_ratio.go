@@ -24,6 +24,11 @@ const (
 // 1 === ￥0.014 / 1k tokens
 
 var defaultModelRatio = map[string]float64{
+	// Moon Seedance Official uses authoritative video-token billing.
+	"seedance-2-0-mini-official": 5.75,
+	"seedance-2-0-fast-official": 12.025,
+	"seedance-2-0-official":      18.4,
+	"seedance-2-5-official":      29.75,
 	//"midjourney":                50,
 	"gpt-4-gizmo-*":                             15,
 	"gpt-4o-gizmo-*":                            2.5,
@@ -266,6 +271,16 @@ var defaultModelRatio = map[string]float64{
 }
 
 var defaultModelPrice = map[string]float64{
+	// Moon per-second models use their 480p price as the base. The adaptor
+	// applies requested seconds and the selected resolution multiplier.
+	"minimax-h3":              0.10,
+	"wan3.0-video":            0.27,
+	"wan3.0-video-prime":      0.40,
+	"seedance2.0-9-3-3-PT":    0.34,
+	"seedance2.5-30-10-10-PT": 0.45,
+	"seedance2.0-fast-PT":     0.30,
+	// Moon Grok 1.5 is billed once per successful task.
+	"grok-v1.5-video":                0.60,
 	"suno_music":                     0.1,
 	"suno_lyrics":                    0.01,
 	"dall-e-3":                       0.04,

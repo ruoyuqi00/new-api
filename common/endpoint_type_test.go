@@ -91,3 +91,24 @@ func TestOpenAIChannelSoraModelsUseVideoEndpoint(t *testing.T) {
 		GetEndpointTypesByChannelType(constant.ChannelTypeOpenAI, "gpt-5.6"),
 	)
 }
+
+func TestOpenAIChannelMoonModelsUseVideoEndpoint(t *testing.T) {
+	for _, modelName := range []string{
+		"seedance-2-0-mini-official",
+		"seedance-2-0-fast-official",
+		"seedance-2-0-official",
+		"seedance-2-5-official",
+		"minimax-h3",
+		"wan3.0-video",
+		"wan3.0-video-prime",
+		"grok-v1.5-video",
+		"seedance2.0-9-3-3-PT",
+		"seedance2.5-30-10-10-PT",
+		"seedance2.0-fast-PT",
+	} {
+		require.Equal(t,
+			[]constant.EndpointType{constant.EndpointTypeOpenAIVideo},
+			GetEndpointTypesByChannelType(constant.ChannelTypeOpenAI, modelName),
+		)
+	}
+}

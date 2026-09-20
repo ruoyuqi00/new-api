@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, KeyRound, Settings2, WalletCards } from 'lucide-react'
+import {
+  ChevronDown,
+  CircleDot,
+  KeyRound,
+  Settings2,
+  WalletCards,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm, type SubmitErrorHandler } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -76,7 +82,8 @@ import {
   transformFormDataToPayload,
   transformApiKeyToFormDefaults,
 } from '../lib'
-import { type ApiKey } from '../types'
+import type { ApiKeyGroupProtocol } from '../lib/api-key-group-protocols'
+import type { ApiKey } from '../types'
 import {
   ApiKeyGroupCombobox,
   type ApiKeyGroupOption,
@@ -126,6 +133,8 @@ export function ApiKeysMutateDrawer({
       label: key,
       desc: info.desc || key,
       ratio: info.ratio,
+      protocols: (info.protocols ?? []) as ApiKeyGroupProtocol[],
+      endpointPaths: info.endpoint_paths ?? [],
     })
   )
   const backendHasAuto = groups.some((g) => g.value === 'auto')
@@ -139,17 +148,19 @@ export function ApiKeysMutateDrawer({
   // Load existing data when updating
   useEffect(() => {
     if (open && isUpdate && currentRow) {
-      getApiKey(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformApiKeyToFormDefaults(result.data))
-        }
-      })
+      void getApiKey(currentRow.id)
+        .then((result) => {
+          if (result.success && result.data) {
+            form.reset(transformApiKeyToFormDefaults(result.data))
+          }
+        })
+        .catch(() => toast.error(t(ERROR_MESSAGES.UNEXPECTED)))
     } else if (open && !isUpdate) {
       form.reset(
         getApiKeyFormDefaultValues(defaultUseAutoGroup && backendHasAuto)
       )
     }
-  }, [open, isUpdate, currentRow, form, defaultUseAutoGroup, backendHasAuto])
+  }, [open, isUpdate, currentRow, form, defaultUseAutoGroup, backendHasAuto, t])
 
   // Correct group after groups load: if the form value is not in available groups, fall back
   useEffect(() => {
@@ -215,7 +226,7 @@ export function ApiKeysMutateDrawer({
           triggerRefresh()
         }
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setIsSubmitting(false)
@@ -247,6 +258,12 @@ export function ApiKeysMutateDrawer({
   const quotaPlaceholder = tokensOnly
     ? t('Enter quota in tokens')
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
+  let submitLabel = t('Create API Key')
+  if (isSubmitting) {
+    submitLabel = t('Saving...')
+  } else if (isUpdate) {
+    submitLabel = t('Save changes')
+  }
   const selectedGroup = form.watch('group')
   const unlimitedQuota = form.watch('unlimited_quota')
 
@@ -261,17 +278,44 @@ export function ApiKeysMutateDrawer({
       }}
     >
       <SheetContent
-        className={sideDrawerContentClassName('max-w-none sm:!max-w-[620px]')}
+        data-api-key-route-drawer
+        className={sideDrawerContentClassName(
+          'bg-background/98 max-w-none sm:!inset-auto sm:!top-1/2 sm:!left-1/2 sm:!h-[min(876px,calc(100dvh-2rem))] sm:!w-[620px] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:rounded-lg sm:border sm:shadow-2xl'
+        )}
       >
-        <SheetHeader className={sideDrawerHeaderClassName()}>
-          <SheetTitle>
-            {isUpdate ? t('Update API Key') : t('Create API Key')}
-          </SheetTitle>
-          <SheetDescription>
-            {isUpdate
-              ? t('Update the API key by providing necessary info.')
-              : t('Add a new API key by providing necessary info.')}
-          </SheetDescription>
+        <div
+          className='bg-background grid h-0.5 shrink-0 grid-cols-[2.3fr_0.65fr_0.16fr_0.8fr] gap-1'
+          aria-hidden='true'
+        >
+          <span className='bg-cyan-300' />
+          <span className='bg-amber-400/80' />
+          <span className='bg-violet-400/80' />
+          <span className='bg-emerald-400/60' />
+        </div>
+        <SheetHeader
+          className={sideDrawerHeaderClassName('flex-row items-center gap-3')}
+        >
+          <span className='relative grid size-9 shrink-0 place-items-center rounded-full border border-cyan-300/35 bg-cyan-400/5 shadow-[0_0_24px_rgb(34_211_238_/_12%)]'>
+            <span className='grid size-5 place-items-center rounded-full border border-amber-400/50'>
+              <CircleDot className='size-3 text-cyan-300' aria-hidden='true' />
+            </span>
+          </span>
+          <span className='min-w-0 flex-1'>
+            <SheetTitle className='flex flex-wrap items-center gap-2'>
+              {isUpdate ? t('Update API Key') : t('Create API Key')}
+              <span className='border-primary/20 text-primary/70 inline-flex h-5 items-center gap-1.5 rounded-sm border px-1.5 font-mono text-[9px] font-bold'>
+                <span className='size-1 rounded-full bg-emerald-400' />
+                ROUTE CORE
+              </span>
+            </SheetTitle>
+            <SheetDescription>
+              {isUpdate
+                ? t('Update the API key by providing necessary info.')
+                : t(
+                    'Configure API key access groups and routing capabilities.'
+                  )}
+            </SheetDescription>
+          </span>
         </SheetHeader>
         <Form {...form}>
           <form
@@ -282,7 +326,7 @@ export function ApiKeysMutateDrawer({
             <SideDrawerSection>
               <SideDrawerSectionHeader
                 title={t('Basic Information')}
-                description={t('Set API key basic information')}
+                description={t('Set the key name and accessible model groups')}
                 icon={<KeyRound className='size-4' />}
               />
               <FormField
@@ -418,7 +462,9 @@ export function ApiKeysMutateDrawer({
                           min='1'
                           placeholder={t('Number of keys to create')}
                           onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 1)
+                            field.onChange(
+                              Number.parseInt(e.target.value, 10) || 1
+                            )
                           }
                         />
                       </FormControl>
@@ -454,7 +500,9 @@ export function ApiKeysMutateDrawer({
                           step={tokensOnly ? 1 : 0.01}
                           placeholder={quotaPlaceholder}
                           onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value) || 0)
+                            field.onChange(
+                              Number.parseFloat(e.target.value) || 0
+                            )
                           }
                         />
                       </FormControl>
@@ -580,20 +628,31 @@ export function ApiKeysMutateDrawer({
             </Collapsible>
           </form>
         </Form>
-        <SheetFooter className={sideDrawerFooterClassName()}>
-          <SheetClose
-            render={<Button variant='outline' className='w-full sm:w-auto' />}
-          >
-            {t('Close')}
-          </SheetClose>
-          <Button
-            type='button'
-            onClick={form.handleSubmit(onSubmit, onInvalid)}
-            disabled={isSubmitting}
-            className='w-full sm:w-auto'
-          >
-            {isSubmitting ? t('Saving...') : t('Save changes')}
-          </Button>
+        <SheetFooter
+          data-route-picker-footer
+          className={sideDrawerFooterClassName(
+            'sm:items-center sm:justify-between'
+          )}
+        >
+          <span className='text-muted-foreground col-span-2 hidden min-w-0 items-center gap-2 text-[10px] sm:flex'>
+            <span className='size-1.5 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_7px_currentColor]' />
+            {t('Group capabilities are derived from active channels')}
+          </span>
+          <span className='contents sm:flex sm:gap-2'>
+            <SheetClose
+              render={<Button variant='outline' className='w-full sm:w-auto' />}
+            >
+              {t('Cancel')}
+            </SheetClose>
+            <Button
+              type='button'
+              onClick={form.handleSubmit(onSubmit, onInvalid)}
+              disabled={isSubmitting}
+              className='w-full sm:w-auto'
+            >
+              {submitLabel}
+            </Button>
+          </span>
         </SheetFooter>
       </SheetContent>
     </Sheet>

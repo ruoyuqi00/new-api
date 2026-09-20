@@ -24,6 +24,12 @@ type groupCatalogItem struct {
 	ActiveModels       []string `json:"active_models"`
 }
 
+type UserGroupInfo struct {
+	Ratio any    `json:"ratio"`
+	Desc  string `json:"desc"`
+	service.GroupProtocolMetadata
+}
+
 func GetGroups(c *gin.Context) {
 	groupNames := make([]string, 0)
 	for groupName := range ratio_setting.GetGroupRatioCopy() {
@@ -81,24 +87,50 @@ func GetGroupCatalog(c *gin.Context) {
 }
 
 func GetUserGroups(c *gin.Context) {
-	usableGroups := make(map[string]map[string]interface{})
+	usableGroups := make(map[string]UserGroupInfo)
 	userGroup := ""
 	userId := c.GetInt("id")
 	userGroup, _ = model.GetUserGroup(userId, false)
 	userUsableGroups := service.GetUserUsableGroups(userGroup)
-	for groupName, _ := range ratio_setting.GetGroupRatioCopy() {
+	visibleGroups := make([]string, 0, len(userUsableGroups))
+	for groupName := range userUsableGroups {
+		if groupName != "auto" {
+			visibleGroups = append(visibleGroups, groupName)
+		}
+	}
+	sort.Strings(visibleGroups)
+	groupProtocolMetadata := make(map[string]service.GroupProtocolMetadata)
+	if abilities, err := model.GetActiveAbilitiesForGroups(visibleGroups); err != nil {
+		common.SysLog("failed to load group protocol metadata: " + err.Error())
+	} else {
+		groupProtocolMetadata = service.BuildGroupProtocolMetadata(abilities)
+	}
+	for groupName := range ratio_setting.GetGroupRatioCopy() {
 		// UserUsableGroups contains the groups that the user can use
 		if desc, ok := userUsableGroups[groupName]; ok {
-			usableGroups[groupName] = map[string]interface{}{
-				"ratio": service.GetUserGroupRatioForUser(userId, userGroup, groupName),
-				"desc":  desc,
+			metadata := groupProtocolMetadata[groupName]
+			if metadata.Protocols == nil {
+				metadata.Protocols = []string{}
+			}
+			if metadata.EndpointPaths == nil {
+				metadata.EndpointPaths = []string{}
+			}
+			usableGroups[groupName] = UserGroupInfo{
+				Ratio:                 service.GetUserGroupRatioForUser(userId, userGroup, groupName),
+				Desc:                  desc,
+				GroupProtocolMetadata: metadata,
 			}
 		}
 	}
 	if _, ok := userUsableGroups["auto"]; ok {
-		usableGroups["auto"] = map[string]interface{}{
-			"ratio": "自动",
-			"desc":  setting.GetUsableGroupDescription("auto"),
+		metadata := service.MergeGroupProtocolMetadata(
+			service.GetUserAutoGroup(userGroup),
+			groupProtocolMetadata,
+		)
+		usableGroups["auto"] = UserGroupInfo{
+			Ratio:                 "自动",
+			Desc:                  setting.GetUsableGroupDescription("auto"),
+			GroupProtocolMetadata: metadata,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{

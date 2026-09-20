@@ -305,6 +305,10 @@ func TestYucoreMediaModelPricingUnitPrefersConfiguredCapability(t *testing.T) {
 	assert.False(t, YucoreMediaModelUsesPerCallPricing("unconfigured-video"))
 }
 
+func TestMoonGrokVideoUsesPerCallPricing(t *testing.T) {
+	assert.True(t, YucoreMediaModelUsesPerCallPricing("grok-v1.5-video"))
+}
+
 func TestCangyuanMediaCatalogReturnsIndependentCopies(t *testing.T) {
 	first, err := loadCangyuanMediaCatalog()
 	require.NoError(t, err)

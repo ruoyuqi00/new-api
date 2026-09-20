@@ -797,6 +797,9 @@ func YucoreMediaModelPricingUnit(modelID string) (string, bool) {
 
 // YucoreMediaModelUsesPerCallPricing reports whether task duration must not multiply the configured model price.
 func YucoreMediaModelUsesPerCallPricing(modelID string) bool {
+	if strings.EqualFold(strings.TrimSpace(modelID), "grok-v1.5-video") {
+		return true
+	}
 	if unit, explicit := YucoreMediaModelPricingUnit(modelID); explicit {
 		return unit == YucoreMediaPricingPerCall
 	}

@@ -301,3 +301,14 @@ func TestTaskModel2UserDtoHidesMappedModelDetails(t *testing.T) {
 	assert.JSONEq(t, `"internal-upstream-model"`, string(adminPayload.Properties["upstream_model_name"]))
 	assert.JSONEq(t, string(originalData), string(adminPayload.Data))
 }
+
+func TestTaskModel2DtoSanitizesStoredVideoData(t *testing.T) {
+	task := &model.Task{
+		TaskID: "task_public_123",
+		Data:   []byte(`{"id":"upstream_secret","task_id":"upstream_secret","billing":{"charged_amount":9.9},"status":"completed"}`),
+	}
+
+	result := TaskModel2Dto(task)
+
+	assert.JSONEq(t, `{"id":"task_public_123","task_id":"task_public_123","status":"completed"}`, string(result.Data))
+}

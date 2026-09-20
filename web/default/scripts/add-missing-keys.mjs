@@ -133,6 +133,24 @@ const newKeys = {
     'Waiting for User': 'Waiting for User',
     'Write a reply': 'Write a reply',
     '{{count}} files selected': '{{count}} files selected',
+    '{{count}} available groups': '{{count}} available groups',
+    'All protocol routes': 'All protocol routes',
+    'Claude messages routes': 'Claude messages routes',
+    'Configure API key access groups and routing capabilities.':
+      'Configure API key access groups and routing capabilities.',
+    'Filter available routes by protocol':
+      'Filter available routes by protocol',
+    'Gemini native routes': 'Gemini native routes',
+    'Group capabilities are derived from active channels':
+      'Group capabilities are derived from active channels',
+    'Image generation routes': 'Image generation routes',
+    'OpenAI compatible routes': 'OpenAI compatible routes',
+    'Protocol routing': 'Protocol routing',
+    'Search groups, descriptions, or API endpoints':
+      'Search groups, descriptions, or API endpoints',
+    'Set the key name and accessible model groups':
+      'Set the key name and accessible model groups',
+    'Video generation routes': 'Video generation routes',
   },
   zh: {
     'Thinking Tokens': '思考 Token',
@@ -238,6 +256,23 @@ const newKeys = {
     'Waiting for User': '等待用户回复',
     'Write a reply': '输入回复内容',
     '{{count}} files selected': '已选择 {{count}} 个文件',
+    '{{count}} available groups': '{{count}} 个可用分组',
+    'All protocol routes': '全部协议路由',
+    'Claude messages routes': 'Claude 消息路由',
+    'Configure API key access groups and routing capabilities.':
+      '配置密钥的访问分组与路由能力。',
+    'Filter available routes by protocol': '按请求协议筛选可用路由',
+    'Gemini native routes': 'Gemini 原生路由',
+    'Group capabilities are derived from active channels':
+      '分组能力来自启用中的渠道',
+    'Image generation routes': '图片生成路由',
+    'OpenAI compatible routes': 'OpenAI 兼容路由',
+    'Protocol routing': '协议路由',
+    'Search groups, descriptions, or API endpoints':
+      '搜索分组、说明或 API 端点',
+    'Set the key name and accessible model groups':
+      '设置密钥名称与可访问的模型分组',
+    'Video generation routes': '视频生成路由',
   },
   fr: {
     'Thinking Tokens': 'Jetons de raisonnement',
@@ -346,6 +381,24 @@ const newKeys = {
     'Waiting for User': "En attente de l'utilisateur",
     'Write a reply': 'Écrire une réponse',
     '{{count}} files selected': '{{count}} fichiers sélectionnés',
+    '{{count}} available groups': '{{count}} groupes disponibles',
+    'All protocol routes': 'Toutes les routes de protocole',
+    'Claude messages routes': 'Routes de messages Claude',
+    'Configure API key access groups and routing capabilities.':
+      "Configurez les groupes d'accès et les capacités de routage de la clé API.",
+    'Filter available routes by protocol':
+      'Filtrer les routes disponibles par protocole',
+    'Gemini native routes': 'Routes natives Gemini',
+    'Group capabilities are derived from active channels':
+      'Les capacités du groupe proviennent des canaux actifs',
+    'Image generation routes': "Routes de génération d'images",
+    'OpenAI compatible routes': 'Routes compatibles OpenAI',
+    'Protocol routing': 'Routage par protocole',
+    'Search groups, descriptions, or API endpoints':
+      'Rechercher des groupes, descriptions ou points API',
+    'Set the key name and accessible model groups':
+      'Définissez le nom de la clé et les groupes de modèles accessibles',
+    'Video generation routes': 'Routes de génération vidéo',
   },
   ja: {
     'Thinking Tokens': '思考トークン',
@@ -452,6 +505,24 @@ const newKeys = {
     'Waiting for User': 'ユーザー待ち',
     'Write a reply': '返信を入力',
     '{{count}} files selected': '{{count}}件のファイルを選択',
+    '{{count}} available groups': '利用可能なグループ: {{count}}',
+    'All protocol routes': 'すべてのプロトコルルート',
+    'Claude messages routes': 'Claude メッセージルート',
+    'Configure API key access groups and routing capabilities.':
+      'API キーのアクセスグループとルーティング機能を設定します。',
+    'Filter available routes by protocol':
+      'プロトコルで利用可能なルートを絞り込む',
+    'Gemini native routes': 'Gemini ネイティブルート',
+    'Group capabilities are derived from active channels':
+      'グループ機能は有効なチャネルから取得されます',
+    'Image generation routes': '画像生成ルート',
+    'OpenAI compatible routes': 'OpenAI 互換ルート',
+    'Protocol routing': 'プロトコルルーティング',
+    'Search groups, descriptions, or API endpoints':
+      'グループ、説明、API エンドポイントを検索',
+    'Set the key name and accessible model groups':
+      'キー名とアクセス可能なモデルグループを設定します',
+    'Video generation routes': '動画生成ルート',
   },
   ru: {
     'Thinking Tokens': 'Токены рассуждений',
@@ -559,6 +630,24 @@ const newKeys = {
     'Waiting for User': 'Ожидает пользователя',
     'Write a reply': 'Напишите ответ',
     '{{count}} files selected': 'Выбрано файлов: {{count}}',
+    '{{count}} available groups': 'Доступно групп: {{count}}',
+    'All protocol routes': 'Все маршруты протоколов',
+    'Claude messages routes': 'Маршруты сообщений Claude',
+    'Configure API key access groups and routing capabilities.':
+      'Настройте группы доступа и возможности маршрутизации API-ключа.',
+    'Filter available routes by protocol':
+      'Фильтровать доступные маршруты по протоколу',
+    'Gemini native routes': 'Нативные маршруты Gemini',
+    'Group capabilities are derived from active channels':
+      'Возможности группы определяются активными каналами',
+    'Image generation routes': 'Маршруты генерации изображений',
+    'OpenAI compatible routes': 'Маршруты, совместимые с OpenAI',
+    'Protocol routing': 'Маршрутизация протоколов',
+    'Search groups, descriptions, or API endpoints':
+      'Поиск групп, описаний или конечных точек API',
+    'Set the key name and accessible model groups':
+      'Задайте имя ключа и доступные группы моделей',
+    'Video generation routes': 'Маршруты генерации видео',
   },
   vi: {
     'Thinking Tokens': 'Token suy luận',
@@ -665,6 +754,23 @@ const newKeys = {
     'Waiting for User': 'Đang chờ người dùng',
     'Write a reply': 'Viết phản hồi',
     '{{count}} files selected': 'Đã chọn {{count}} tệp',
+    '{{count}} available groups': '{{count}} nhóm khả dụng',
+    'All protocol routes': 'Tất cả tuyến giao thức',
+    'Claude messages routes': 'Tuyến tin nhắn Claude',
+    'Configure API key access groups and routing capabilities.':
+      'Cấu hình nhóm truy cập và khả năng định tuyến của khóa API.',
+    'Filter available routes by protocol': 'Lọc tuyến khả dụng theo giao thức',
+    'Gemini native routes': 'Tuyến gốc Gemini',
+    'Group capabilities are derived from active channels':
+      'Khả năng nhóm được lấy từ các kênh đang hoạt động',
+    'Image generation routes': 'Tuyến tạo ảnh',
+    'OpenAI compatible routes': 'Tuyến tương thích OpenAI',
+    'Protocol routing': 'Định tuyến giao thức',
+    'Search groups, descriptions, or API endpoints':
+      'Tìm nhóm, mô tả hoặc điểm cuối API',
+    'Set the key name and accessible model groups':
+      'Đặt tên khóa và các nhóm mô hình có thể truy cập',
+    'Video generation routes': 'Tuyến tạo video',
   },
 }
 
