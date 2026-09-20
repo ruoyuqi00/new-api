@@ -19,23 +19,37 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, test } from 'bun:test'
 
 import {
-  EXPECTED_VIDEO_PRICES,
+  EXPECTED_EXPANDED_VIDEO_CAPABILITIES,
+  EXPECTED_VIDEO_CAPABILITIES,
   checkDocument,
   checkParity,
 } from './check-video-api-docs.mjs'
 
-function buildDocument() {
-  const rows = [...EXPECTED_VIDEO_PRICES]
-    .map(([model, price]) => `| \`${model}\` | ${price} |`)
+function renderRows(rows) {
+  return rows
+    .map(
+      ([model, billing, resolution]) =>
+        `| \`${model}\` | \`${billing}\` | \`${resolution}\` |`
+    )
     .join('\n')
+}
 
+function buildDocument() {
   return `# Test
 
 <!-- video-model-catalog:start -->
-| Model | Price |
-| --- | ---: |
-${rows}
+| Model | Billing | Resolution |
+| --- | --- | --- |
+${renderRows(EXPECTED_VIDEO_CAPABILITIES)}
 <!-- video-model-catalog:end -->
+
+<!-- expanded-video-model-catalog:start -->
+| Model | Billing | Resolution |
+| --- | --- | --- |
+${renderRows(EXPECTED_EXPANDED_VIDEO_CAPABILITIES)}
+<!-- expanded-video-model-catalog:end -->
+
+Current prices: [/pricing](/pricing)
 
 GET /v1/models
 POST /v1/videos
@@ -47,7 +61,6 @@ POST /v1/images/edits
 queued processing completed succeeded success failed canceled cancelled
 
 \`grok-imagine-image\` \`grok-imagine-image-quality\` \`grok-imagine-video\` \`grok-imagine-video-1.5\` \`grok-imagine-video-1.5-preview\`
-0.02619 0.0414 0.0594 0.0774
 
 \`\`\`json
 {"model":"seedance-2.0","duration":4,"generate_audio":false}
@@ -56,25 +69,52 @@ queued processing completed succeeded success failed canceled cancelled
 }
 
 describe('video API documentation checker', () => {
-  test('accepts a complete public contract', () => {
-    expect(checkDocument('valid.md', buildDocument()).modelPrices).toEqual([
-      ...EXPECTED_VIDEO_PRICES,
-    ])
-  })
-
-  test('rejects a missing model', () => {
-    const changed = buildDocument().replace('| `seedance-2.0` | 5.616 |\n', '')
-    expect(() => checkDocument('missing.md', changed)).toThrow(
-      'MODEL_SET_MISMATCH'
+  test('accepts a complete price-free public contract', () => {
+    const contract = checkDocument('valid.md', buildDocument())
+    expect(contract.videoCapabilities).toEqual(EXPECTED_VIDEO_CAPABILITIES)
+    expect(contract.expandedVideoCapabilities).toEqual(
+      EXPECTED_EXPANDED_VIDEO_CAPABILITIES
     )
   })
 
-  test('rejects a changed public price', () => {
+  test('rejects a missing expanded video capability row', () => {
     const changed = buildDocument().replace(
-      '| `seedance-2.0` | 5.616 |',
-      '| `seedance-2.0` | 5.5 |'
+      '| `minimax-h3` | `per_second` | `480p/768p/1080p/2K/4K` |\n',
+      ''
     )
-    expect(() => checkDocument('changed.md', changed)).toThrow('PRICE_MISMATCH')
+    expect(() => checkDocument('missing-expanded.md', changed)).toThrow(
+      'EXPANDED_VIDEO_MODEL_SET_MISMATCH'
+    )
+  })
+
+  test('rejects a changed video capability', () => {
+    const changed = buildDocument().replace(
+      '| `grok-v1.5-video` | `per_successful_task` | `720p/1080p` |',
+      '| `grok-v1.5-video` | `per_second` | `720p/1080p` |'
+    )
+    expect(() => checkDocument('changed-expanded.md', changed)).toThrow(
+      'EXPANDED_VIDEO_CAPABILITY_MISMATCH'
+    )
+  })
+
+  test('rejects a price column in a public model catalog', () => {
+    const changed = buildDocument().replace(
+      '| Model | Billing | Resolution |',
+      '| Model | Billing | Resolution | Price |'
+    )
+    expect(() => checkDocument('priced.md', changed)).toThrow(
+      'PUBLIC_PRICE_COLUMN'
+    )
+  })
+
+  test('requires the live pricing page link', () => {
+    const changed = buildDocument().replace(
+      'Current prices: [/pricing](/pricing)',
+      'Current prices are available elsewhere.'
+    )
+    expect(() => checkDocument('no-pricing-link.md', changed)).toThrow(
+      'PRICING_LINK_MISMATCH'
+    )
   })
 
   test('rejects invalid JSON examples', () => {

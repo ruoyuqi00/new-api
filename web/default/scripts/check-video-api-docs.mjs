@@ -20,21 +20,35 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const EXPECTED_VIDEO_PRICES = new Map([
-  ['grok-video', '0.9936'],
-  ['grok-video-1.5', '2.0016'],
-  ['happyhouse-1.0', '6.48'],
-  ['happyhouse-1.1', '4.176'],
-  ['minimax-h3-2k', '5.04'],
-  ['omni-fast', '0.95388'],
-  ['omni-fast-no-water', '1.1664'],
-  ['omni-v2v', '1.27536'],
-  ['omni-v2v-no-water', '1.4904'],
-  ['sd7-seedance-2.0-1080p', '7.056'],
-  ['sd7-seedance-2.0-720p', '5.616'],
-  ['sd8-seedance-2.0', '4.176'],
-  ['seedance-2.0', '5.616'],
-])
+export const EXPECTED_VIDEO_CAPABILITIES = [
+  ['grok-video', 'per_successful_task', 'model_default'],
+  ['grok-video-1.5', 'per_successful_task', 'model_default'],
+  ['happyhouse-1.0', 'per_successful_task', 'model_default'],
+  ['happyhouse-1.1', 'per_successful_task', 'model_default'],
+  ['minimax-h3-2k', 'per_successful_task', '2K'],
+  ['omni-fast', 'per_successful_task', 'model_default'],
+  ['omni-fast-no-water', 'per_successful_task', 'model_default'],
+  ['omni-v2v', 'per_successful_task', 'model_default'],
+  ['omni-v2v-no-water', 'per_successful_task', 'model_default'],
+  ['sd7-seedance-2.0-1080p', 'per_successful_task', '1080p'],
+  ['sd7-seedance-2.0-720p', 'per_successful_task', '720p'],
+  ['sd8-seedance-2.0', 'per_successful_task', 'model_default'],
+  ['seedance-2.0', 'per_successful_task', 'model_default'],
+]
+
+export const EXPECTED_EXPANDED_VIDEO_CAPABILITIES = [
+  ['seedance-2-0-mini-official', 'per_1m_video_tokens', '480p/720p'],
+  ['seedance-2-0-fast-official', 'per_1m_video_tokens', '480p/720p'],
+  ['seedance-2-0-official', 'per_1m_video_tokens', '480p/720p/1080p/4K'],
+  ['seedance-2-5-official', 'per_1m_video_tokens', '720p/1080p'],
+  ['minimax-h3', 'per_second', '480p/768p/1080p/2K/4K'],
+  ['wan3.0-video', 'per_second', '480p/720p/1080p'],
+  ['wan3.0-video-prime', 'per_second', '480p/720p/1080p'],
+  ['seedance2.0-9-3-3-PT', 'per_second', '480p/720p'],
+  ['seedance2.5-30-10-10-PT', 'per_second', '480p/720p'],
+  ['seedance2.0-fast-PT', 'per_second', '480p/720p'],
+  ['grok-v1.5-video', 'per_successful_task', '720p/1080p'],
+]
 
 const DOC_PATHS = [
   'public/developer-docs/yucore-api.md',
@@ -64,6 +78,8 @@ const REQUIRED_STATUSES = [
 
 const CATALOG_START = '<!-- video-model-catalog:start -->'
 const CATALOG_END = '<!-- video-model-catalog:end -->'
+const EXPANDED_CATALOG_START = '<!-- expanded-video-model-catalog:start -->'
+const EXPANDED_CATALOG_END = '<!-- expanded-video-model-catalog:end -->'
 
 const GENERIC_PRIVATE_PATTERNS = [
   /上游/iu,
@@ -87,39 +103,77 @@ function fail(code, fileName, detail) {
   throw new Error(`${code}: ${fileName}${detail ? ` (${detail})` : ''}`)
 }
 
-function parseCatalog(fileName, content) {
-  const start = content.indexOf(CATALOG_START)
-  const end = content.indexOf(CATALOG_END)
+function parseCapabilityCatalog(
+  fileName,
+  content,
+  startMarker,
+  endMarker,
+  expectedRows,
+  modelSetMismatchCode,
+  capabilityMismatchCode
+) {
+  const start = content.indexOf(startMarker)
+  const end = content.indexOf(endMarker)
   if (
     start < 0 ||
     end <= start ||
-    content.includes(CATALOG_START, start + CATALOG_START.length) ||
-    content.includes(CATALOG_END, end + CATALOG_END.length)
+    content.includes(startMarker, start + startMarker.length) ||
+    content.includes(endMarker, end + endMarker.length)
   ) {
-    fail('MODEL_SET_MISMATCH', fileName, 'catalog markers')
+    fail(modelSetMismatchCode, fileName, 'catalog markers')
   }
 
-  const section = content.slice(start + CATALOG_START.length, end)
+  const section = content.slice(start + startMarker.length, end)
+  if (/^\|[^\n]*(?:\bprices?\b|价格|價格)[^\n]*\|$/imu.test(section)) {
+    fail('PUBLIC_PRICE_COLUMN', fileName)
+  }
+
   const rows = new Map()
-  const rowPattern = /^\|\s*`([^`]+)`\s*\|\s*([0-9]+(?:\.[0-9]+)?)\s*\|$/gm
+  const rowPattern = /^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|$/gm
   for (const match of section.matchAll(rowPattern)) {
     if (rows.has(match[1])) {
-      fail('MODEL_SET_MISMATCH', fileName, 'duplicate model')
+      fail(modelSetMismatchCode, fileName, 'duplicate model')
     }
-    rows.set(match[1], match[2])
+    rows.set(match[1], [match[1], match[2], match[3]])
   }
 
   const actualModels = [...rows.keys()].sort()
-  const expectedModels = [...EXPECTED_VIDEO_PRICES.keys()].sort()
+  const expectedModels = expectedRows.map(([model]) => model).sort()
   if (JSON.stringify(actualModels) !== JSON.stringify(expectedModels)) {
-    fail('MODEL_SET_MISMATCH', fileName)
+    fail(modelSetMismatchCode, fileName)
   }
-  for (const [model, expectedPrice] of EXPECTED_VIDEO_PRICES) {
-    if (rows.get(model) !== expectedPrice) {
-      fail('PRICE_MISMATCH', fileName, model)
+  for (const expectedRow of expectedRows) {
+    if (
+      JSON.stringify(rows.get(expectedRow[0])) !== JSON.stringify(expectedRow)
+    ) {
+      fail(capabilityMismatchCode, fileName, expectedRow[0])
     }
   }
-  return [...EXPECTED_VIDEO_PRICES]
+  return expectedRows.map((row) => [...row])
+}
+
+function parseCatalog(fileName, content) {
+  return parseCapabilityCatalog(
+    fileName,
+    content,
+    CATALOG_START,
+    CATALOG_END,
+    EXPECTED_VIDEO_CAPABILITIES,
+    'MODEL_SET_MISMATCH',
+    'VIDEO_CAPABILITY_MISMATCH'
+  )
+}
+
+function parseExpandedCatalog(fileName, content) {
+  return parseCapabilityCatalog(
+    fileName,
+    content,
+    EXPANDED_CATALOG_START,
+    EXPANDED_CATALOG_END,
+    EXPECTED_EXPANDED_VIDEO_CAPABILITIES,
+    'EXPANDED_VIDEO_MODEL_SET_MISMATCH',
+    'EXPANDED_VIDEO_CAPABILITY_MISMATCH'
+  )
 }
 
 function checkJsonExamples(fileName, content) {
@@ -149,11 +203,6 @@ function checkGrokImagineContract(fileName, content) {
       fail('GROK_IMAGINE_CONTRACT_MISMATCH', fileName, model)
     }
   }
-  for (const price of ['0.02619', '0.0414', '0.0594', '0.0774']) {
-    if (!content.includes(price)) {
-      fail('GROK_IMAGINE_CONTRACT_MISMATCH', fileName, price)
-    }
-  }
   if (content.includes('grok-imagine-edit')) {
     fail('GROK_IMAGINE_CONTRACT_MISMATCH', fileName, 'unsupported edit model')
   }
@@ -171,9 +220,14 @@ function checkPrivateContent(fileName, content, privatePatterns) {
 
 export function checkDocument(fileName, content, privatePatterns = []) {
   checkPrivateContent(fileName, content, privatePatterns)
-  const modelPrices = parseCatalog(fileName, content)
+  const videoCapabilities = parseCatalog(fileName, content)
+  const expandedVideoCapabilities = parseExpandedCatalog(fileName, content)
   checkJsonExamples(fileName, content)
   checkGrokImagineContract(fileName, content)
+
+  if (!content.includes('](/pricing)')) {
+    fail('PRICING_LINK_MISMATCH', fileName)
+  }
 
   const paths = REQUIRED_PATHS.filter((requiredPath) =>
     content.includes(requiredPath)
@@ -189,7 +243,7 @@ export function checkDocument(fileName, content, privatePatterns = []) {
     fail('STATUS_MISMATCH', fileName)
   }
 
-  return { modelPrices, paths, statuses }
+  return { videoCapabilities, expandedVideoCapabilities, paths, statuses }
 }
 
 export function checkParity(contracts) {

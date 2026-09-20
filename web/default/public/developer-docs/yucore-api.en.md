@@ -42,6 +42,8 @@ Both addresses use the same API Keys, model list, account balance, and prices. Y
 
 Do not include a complete Key in a chat, support ticket, or screenshot. Every example below reads `YUAPI_API_KEY` from the environment instead of embedding it in source code.
 
+To call the additional video models listed later on this page, select each complete model ID in the same model restriction, such as `minimax-h3` or `seedance2.0-fast-PT`. Model IDs include significant punctuation and version numbers; do not replace them with display names.
+
 > Advanced note: some accounts may also show a group named `下游多模态`. It is another selectable group name and does not change the request paths or task protocol in this guide. First-time users should select `多模态创作`.
 
 ## 3. Verify the API Key
@@ -139,39 +141,158 @@ Create a new production Key after testing instead of keeping the test Key indefi
 - Never place it in browser JavaScript, a mobile package, a public repository, or client logs.
 - If a Key leaks, delete it, issue a replacement, and review usage records.
 
-## 7. Video Models and Public Prices
+## 7. Video Models and Billing
 
-These are the per-generation prices for the `多模态创作` group. Polling, reading status, and downloading the same task do not charge again. The model marketplace and your account interface remain the final source for current availability and amounts.
+The following table lists video models, billing units, and resolution capabilities for the `多模态创作` group. Polling, reading status, and downloading the same task do not charge again. Amounts may change with configuration; use the [model marketplace](/pricing) as the live source.
 
 <!-- video-model-catalog:start -->
-| Model | `多模态创作` price per generation |
-| --- | ---: |
-| `grok-video` | 0.9936 |
-| `grok-video-1.5` | 2.0016 |
-| `happyhouse-1.0` | 6.48 |
-| `happyhouse-1.1` | 4.176 |
-| `minimax-h3-2k` | 5.04 |
-| `omni-fast` | 0.95388 |
-| `omni-fast-no-water` | 1.1664 |
-| `omni-v2v` | 1.27536 |
-| `omni-v2v-no-water` | 1.4904 |
-| `sd7-seedance-2.0-1080p` | 7.056 |
-| `sd7-seedance-2.0-720p` | 5.616 |
-| `sd8-seedance-2.0` | 4.176 |
-| `seedance-2.0` | 5.616 |
+| Model | Billing | Resolution |
+| --- | --- | --- |
+| `grok-video` | `per_successful_task` | `model_default` |
+| `grok-video-1.5` | `per_successful_task` | `model_default` |
+| `happyhouse-1.0` | `per_successful_task` | `model_default` |
+| `happyhouse-1.1` | `per_successful_task` | `model_default` |
+| `minimax-h3-2k` | `per_successful_task` | `2K` |
+| `omni-fast` | `per_successful_task` | `model_default` |
+| `omni-fast-no-water` | `per_successful_task` | `model_default` |
+| `omni-v2v` | `per_successful_task` | `model_default` |
+| `omni-v2v-no-water` | `per_successful_task` | `model_default` |
+| `sd7-seedance-2.0-1080p` | `per_successful_task` | `1080p` |
+| `sd7-seedance-2.0-720p` | `per_successful_task` | `720p` |
+| `sd8-seedance-2.0` | `per_successful_task` | `model_default` |
+| `seedance-2.0` | `per_successful_task` | `model_default` |
 <!-- video-model-catalog:end -->
 
 Per-video billing is separate from text Token billing and per-image billing. Do not apply text `usage`, cache-hit, or stream-interruption rules to video tasks.
 
+### Additional Video Models
+
+The following 11 models use the same `POST /v1/videos`, task polling, and content download endpoints. `per_1m_video_tokens` means per one million video Tokens, `per_second` means per second, and `per_successful_task` means per successful task.
+
+<!-- expanded-video-model-catalog:start -->
+| Model ID | Billing unit | Resolution tier |
+| --- | --- | --- |
+| `seedance-2-0-mini-official` | `per_1m_video_tokens` | `480p/720p` |
+| `seedance-2-0-fast-official` | `per_1m_video_tokens` | `480p/720p` |
+| `seedance-2-0-official` | `per_1m_video_tokens` | `480p/720p/1080p/4K` |
+| `seedance-2-5-official` | `per_1m_video_tokens` | `720p/1080p` |
+| `minimax-h3` | `per_second` | `480p/768p/1080p/2K/4K` |
+| `wan3.0-video` | `per_second` | `480p/720p/1080p` |
+| `wan3.0-video-prime` | `per_second` | `480p/720p/1080p` |
+| `seedance2.0-9-3-3-PT` | `per_second` | `480p/720p` |
+| `seedance2.5-30-10-10-PT` | `per_second` | `480p/720p` |
+| `seedance2.0-fast-PT` | `per_second` | `480p/720p` |
+| `grok-v1.5-video` | `per_successful_task` | `720p/1080p` |
+<!-- expanded-video-model-catalog:end -->
+
+Billing and parameter rules:
+
+- Official Seedance Token models are billed from final video Tokens. Requests with a reference video use the separate reference-video tier.
+- `seedance-2-0-mini-official`, `seedance-2-0-fast-official`, and `seedance-2-0-official` support 4-15 seconds. `seedance-2-5-official` supports 4-30 seconds. These models also accept `-1` to let the service choose the duration automatically.
+- `minimax-h3` is billed by output seconds and resolution, with no time-of-day discount.
+- Wan 3.0 bills output duration plus reference-video duration. The three PT models bill output duration only.
+- `grok-v1.5-video` is billed per successful task; duration does not multiply the billed quantity.
+- Wan 3.0 supports 2-30 seconds. `seedance2.0-9-3-3-PT` and `seedance2.0-fast-PT` support 5-15 seconds. `seedance2.5-30-10-10-PT` supports 5-30 seconds. `grok-v1.5-video` supports 4-15 seconds.
+
+Every create request should send a stable, unique `Idempotency-Key`. Reuse the same value when retrying the same business request, and use a new value for a new video task. After a successful submission, store the task ID and poll only that task instead of creating duplicates while it is still running.
+
+#### Official Seedance Token Model
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-001" \
+  -d '{
+    "model": "seedance-2-0-mini-official",
+    "prompt": "A seaside boardwalk at sunrise, slow forward camera movement",
+    "duration": 5,
+    "resolution": "720p",
+    "ratio": "16:9"
+  }'
+```
+
+#### Wan 3.0
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-002" \
+  -d '{
+    "model": "wan3.0-video",
+    "prompt": "A rain-soaked city street, slow cinematic lateral movement",
+    "duration": 5,
+    "resolution": "720p",
+    "aspect_ratio": "16:9"
+  }'
+```
+
+#### MiniMax H3
+
+H3 requires `workflow_id`, `seconds`, and an exact `size`. For example, use `1920x1088` for landscape 1080p instead of supplying only an aspect ratio. Durations from 4-15 seconds are supported. Common exact sizes are:
+
+- 480p: `864x480`, `480x864`, `640x640`, `544x800`, `800x544`, `576x736`, `736x576`, `992x416`
+- 768p: `1376x768`, `768x1376`, `1024x1024`, `832x1248`, `1248x832`, `896x1184`, `1184x896`, `1568x672`
+- 1080p: `1920x1088`, `1088x1920`, `1440x1440`, `1184x1760`, `1760x1184`, `1248x1664`, `1664x1248`, `2208x960`
+- Higher tiers: `2K`, `4K`
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-003" \
+  -d '{
+    "model": "minimax-h3",
+    "prompt": "A sailboat crossing a golden sea, stable aerial camera",
+    "workflow_id": "text-to-video",
+    "seconds": 5,
+    "size": "1920x1088"
+  }'
+```
+
+#### Grok Video 1.5
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-004" \
+  -d '{
+    "model": "grok-v1.5-video",
+    "prompt": "A futuristic city under neon lights, forward-moving camera",
+    "seconds": 6,
+    "size": "1080p",
+    "aspect_ratio": "16:9"
+  }'
+```
+
+#### Seedance PT
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-005" \
+  -d '{
+    "model": "seedance2.0-fast-PT",
+    "prompt": "A forest path with sunlight through the leaves, steady forward camera",
+    "duration": 9,
+    "resolution": "720p",
+    "ratio": "16:9",
+    "generate_audio": true
+  }'
+```
+
 ### Grok Imagine asynchronous video
 
-The following three models are independent asynchronous video models billed by generated second. The table lists base prices in USD. Your configured group multiplier is applied once after this base price. The default duration is 5 seconds when omitted, and integer durations from 1 through 15 seconds are supported. `size` may be `480p`, `720p`, or `1080p`, or dimensions containing the corresponding height, such as `1280x720`.
+The following three models are independent asynchronous video models billed by generated second with your group multiplier applied. The default duration is 5 seconds when omitted, and integer durations from 1 through 15 seconds are supported. `size` may be `480p`, `720p`, or `1080p`, or dimensions containing the corresponding height, such as `1280x720`. See the [model marketplace](/pricing) for live amounts.
 
-| Model | 480p per second | 720p per second | 1080p per second |
-| --- | ---: | ---: | ---: |
-| `grok-imagine-video` | 0.0414 | 0.0594 | 0.0774 |
-| `grok-imagine-video-1.5` | 0.0414 | 0.0594 | 0.0774 |
-| `grok-imagine-video-1.5-preview` | 0.0414 | 0.0594 | 0.0774 |
+| Model | Billing unit | Supported resolutions |
+| --- | --- | --- |
+| `grok-imagine-video` | `per_second` | `480p/720p/1080p` |
+| `grok-imagine-video-1.5` | `per_second` | `480p/720p/1080p` |
+| `grok-imagine-video-1.5-preview` | `per_second` | `480p/720p/1080p` |
 
 Save the task ID returned by creation and use the status endpoint to poll it. During `queued` or `processing`, poll the original task instead of creating another one. A duration or resolution outside the supported range returns `400` before a task is submitted.
 
@@ -459,21 +580,21 @@ Image generation is synchronous and does not use the video polling workflow:
 - Request only `n=1`
 - Read `data[0].url` or `data[0].b64_json` from a successful response
 
-| Model | Fixed tier | Price per image |
-| --- | ---: | ---: |
-| `gpt-image-2-1k` | 1K | 0.0325 |
-| `gpt-image-2-2k` | 2K | 0.0650 |
-| `gpt-image-2-4k` | 4K | 0.1040 |
-| `nano-banana-pro-1k` | 1K | 0.1040 |
-| `nano-banana-pro-2k` | 2K | 0.1300 |
-| `nano-banana-pro-4k` | 4K | 0.1937 |
-| `nano-banana2-1k` | 1K | 0.0767 |
-| `nano-banana2-2k` | 2K | 0.1040 |
-| `nano-banana2-4k` | 4K | 0.1560 |
-| `grok-imagine-image` | Standard | 0.02619 |
-| `grok-imagine-image-quality` | High quality | 0.02619 |
+| Model | Fixed tier |
+| --- | --- |
+| `gpt-image-2-1k` | `1K` |
+| `gpt-image-2-2k` | `2K` |
+| `gpt-image-2-4k` | `4K` |
+| `nano-banana-pro-1k` | `1K` |
+| `nano-banana-pro-2k` | `2K` |
+| `nano-banana-pro-4k` | `4K` |
+| `nano-banana2-1k` | `1K` |
+| `nano-banana2-2k` | `2K` |
+| `nano-banana2-4k` | `4K` |
+| `grok-imagine-image` | `standard` |
+| `grok-imagine-image-quality` | `high_quality` |
 
-The listed Grok Imagine image amount is a base USD price per image. Your configured group multiplier is applied once after this base price. A request producing multiple images is billed by the actual image count.
+Images are billed by the actual successful image count with your group multiplier applied. See the [model marketplace](/pricing) for live amounts.
 
 `grok-4.5` is a text model. `grok-imagine-image` and `grok-imagine-image-quality` are image models. `grok-video` and `grok-video-1.5` are asynchronous video models. Always use the exact model ID and its corresponding endpoint.
 

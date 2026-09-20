@@ -42,6 +42,8 @@ YuAPI 提供两个 Base URL：
 
 不要把完整 Key 发到聊天、工单或截图中。本文统一使用环境变量 `YUAPI_API_KEY`，不会在示例里硬编码 Key。
 
+如果要调用本页后半部分列出的新视频模型，请在同一个“模型限制”中勾选对应的完整模型 ID，例如 `minimax-h3` 或 `seedance2.0-fast-PT`。模型 ID 区分符号和版本号，不要用展示名称代替。
+
 > 高级说明：部分账户可能还会看到 `下游多模态` 分组。它只是另一个可选分组名称，不改变本文的请求路径和任务协议；新手请使用 `多模态创作`。
 
 ## 3. 验证 API Key
@@ -139,39 +141,158 @@ curl -L "$YUAPI_MEDIA_BASE_URL/videos/$TASK_ID/content" \
 - 不要在浏览器 JavaScript、移动应用包、公开仓库或客户端日志里保存 Key。
 - Key 泄露后立即删除旧 Key、创建新 Key，并检查使用记录。
 
-## 7. 视频模型与公开价格
+## 7. 视频模型与计费
 
-下面是 `多模态创作` 分组的单次视频生成价格。查询任务、读取状态和下载同一任务不会再次扣费。最终可用模型和金额仍以模型广场及账户界面为准。
+下面列出 `多模态创作` 分组的视频模型、计费单位和分辨率能力。查询任务、读取状态和下载同一任务不会再次扣费。实时金额可能随配置调整，请以[模型广场](/pricing)为准。
 
 <!-- video-model-catalog:start -->
-| 模型 | `多模态创作` 单次价格 |
-| --- | ---: |
-| `grok-video` | 0.9936 |
-| `grok-video-1.5` | 2.0016 |
-| `happyhouse-1.0` | 6.48 |
-| `happyhouse-1.1` | 4.176 |
-| `minimax-h3-2k` | 5.04 |
-| `omni-fast` | 0.95388 |
-| `omni-fast-no-water` | 1.1664 |
-| `omni-v2v` | 1.27536 |
-| `omni-v2v-no-water` | 1.4904 |
-| `sd7-seedance-2.0-1080p` | 7.056 |
-| `sd7-seedance-2.0-720p` | 5.616 |
-| `sd8-seedance-2.0` | 4.176 |
-| `seedance-2.0` | 5.616 |
+| 模型 | 计费单位 | 分辨率档位 |
+| --- | --- | --- |
+| `grok-video` | `per_successful_task` | `model_default` |
+| `grok-video-1.5` | `per_successful_task` | `model_default` |
+| `happyhouse-1.0` | `per_successful_task` | `model_default` |
+| `happyhouse-1.1` | `per_successful_task` | `model_default` |
+| `minimax-h3-2k` | `per_successful_task` | `2K` |
+| `omni-fast` | `per_successful_task` | `model_default` |
+| `omni-fast-no-water` | `per_successful_task` | `model_default` |
+| `omni-v2v` | `per_successful_task` | `model_default` |
+| `omni-v2v-no-water` | `per_successful_task` | `model_default` |
+| `sd7-seedance-2.0-1080p` | `per_successful_task` | `1080p` |
+| `sd7-seedance-2.0-720p` | `per_successful_task` | `720p` |
+| `sd8-seedance-2.0` | `per_successful_task` | `model_default` |
+| `seedance-2.0` | `per_successful_task` | `model_default` |
 <!-- video-model-catalog:end -->
 
 视频按次计费与文本 Token 计费、图片按张计费彼此独立。不要把文本接口的 `usage` 字段、缓存命中规则或流式中断规则套用到视频任务。
 
+### 更多视频模型
+
+下面 11 个模型使用同一套 `POST /v1/videos`、任务查询和内容下载接口。`per_1m_video_tokens` 表示每 100 万视频 Token，`per_second` 表示每秒，`per_successful_task` 表示每个成功任务。
+
+<!-- expanded-video-model-catalog:start -->
+| 模型 ID | 计费单位 | 分辨率档位 |
+| --- | --- | --- |
+| `seedance-2-0-mini-official` | `per_1m_video_tokens` | `480p/720p` |
+| `seedance-2-0-fast-official` | `per_1m_video_tokens` | `480p/720p` |
+| `seedance-2-0-official` | `per_1m_video_tokens` | `480p/720p/1080p/4K` |
+| `seedance-2-5-official` | `per_1m_video_tokens` | `720p/1080p` |
+| `minimax-h3` | `per_second` | `480p/768p/1080p/2K/4K` |
+| `wan3.0-video` | `per_second` | `480p/720p/1080p` |
+| `wan3.0-video-prime` | `per_second` | `480p/720p/1080p` |
+| `seedance2.0-9-3-3-PT` | `per_second` | `480p/720p` |
+| `seedance2.5-30-10-10-PT` | `per_second` | `480p/720p` |
+| `seedance2.0-fast-PT` | `per_second` | `480p/720p` |
+| `grok-v1.5-video` | `per_successful_task` | `720p/1080p` |
+<!-- expanded-video-model-catalog:end -->
+
+计费和参数规则：
+
+- Seedance 官方 Token 模型按最终视频 Token 计费；带参考视频时使用独立的参考视频档位。
+- `seedance-2-0-mini-official`、`seedance-2-0-fast-official` 和 `seedance-2-0-official` 支持 4-15 秒；`seedance-2-5-official` 支持 4-30 秒；这些模型也可用 `-1` 让服务自动选择时长。
+- `minimax-h3` 按输出秒数和分辨率计费，不应用分时折扣。
+- Wan 3.0 按“输出时长 + 参考视频时长”计费；三个 PT 模型只按输出时长计费。
+- `grok-v1.5-video` 按成功任务计费，时长不会再次乘入计费量。
+- Wan 3.0 支持 2-30 秒；`seedance2.0-9-3-3-PT` 和 `seedance2.0-fast-PT` 支持 5-15 秒；`seedance2.5-30-10-10-PT` 支持 5-30 秒；`grok-v1.5-video` 支持 4-15 秒。
+
+所有创建请求都应发送稳定且唯一的 `Idempotency-Key`。同一业务请求重试时复用原值；新的视频任务使用新值。成功提交后保存任务 ID，只轮询原任务，不要因为等待时间较长而重复创建。
+
+#### Seedance 官方 Token 模型
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-001" \
+  -d '{
+    "model": "seedance-2-0-mini-official",
+    "prompt": "清晨的海边木栈道，镜头缓慢向前推进",
+    "duration": 5,
+    "resolution": "720p",
+    "ratio": "16:9"
+  }'
+```
+
+#### Wan 3.0
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-002" \
+  -d '{
+    "model": "wan3.0-video",
+    "prompt": "雨后的城市街道，电影镜头缓慢横移",
+    "duration": 5,
+    "resolution": "720p",
+    "aspect_ratio": "16:9"
+  }'
+```
+
+#### MiniMax H3
+
+H3 必须同时提供 `workflow_id`、`seconds` 和精确的 `size`。例如 1080p 横屏使用 `1920x1088`，不能只写宽高比。支持 4-15 秒；常用精确尺寸如下：
+
+- 480p：`864x480`、`480x864`、`640x640`、`544x800`、`800x544`、`576x736`、`736x576`、`992x416`
+- 768p：`1376x768`、`768x1376`、`1024x1024`、`832x1248`、`1248x832`、`896x1184`、`1184x896`、`1568x672`
+- 1080p：`1920x1088`、`1088x1920`、`1440x1440`、`1184x1760`、`1760x1184`、`1248x1664`、`1664x1248`、`2208x960`
+- 更高档位：`2K`、`4K`
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-003" \
+  -d '{
+    "model": "minimax-h3",
+    "prompt": "一艘帆船穿过金色海面，稳定航拍镜头",
+    "workflow_id": "text-to-video",
+    "seconds": 5,
+    "size": "1920x1088"
+  }'
+```
+
+#### Grok Video 1.5
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-004" \
+  -d '{
+    "model": "grok-v1.5-video",
+    "prompt": "霓虹灯下的未来城市，镜头向前穿行",
+    "seconds": 6,
+    "size": "1080p",
+    "aspect_ratio": "16:9"
+  }'
+```
+
+#### Seedance PT
+
+```bash
+curl --fail-with-body -X POST "$YUAPI_MEDIA_BASE_URL/videos" \
+  -H "Authorization: Bearer $YUAPI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-order-20260920-005" \
+  -d '{
+    "model": "seedance2.0-fast-PT",
+    "prompt": "森林中的小路，阳光穿过树叶，镜头平稳前进",
+    "duration": 9,
+    "resolution": "720p",
+    "ratio": "16:9",
+    "generate_audio": true
+  }'
+```
+
 ### Grok Imagine 异步视频
 
-以下三个模型是独立的异步视频模型，按生成秒数计费。表中价格为 USD 基础单价；系统会在此基础上只应用一次你所属分组的倍率。未提供时长时默认为 5 秒，支持整数 1-15 秒。`size` 可以使用 `480p`、`720p`、`1080p`，也可以使用包含对应高度的尺寸，例如 `1280x720`。
+以下三个模型是独立的异步视频模型，按生成秒数计费，并应用你所属分组的倍率。未提供时长时默认为 5 秒，支持整数 1-15 秒。`size` 可以使用 `480p`、`720p`、`1080p`，也可以使用包含对应高度的尺寸，例如 `1280x720`。实时金额请查看[模型广场](/pricing)。
 
-| 模型 | 480p（每秒） | 720p（每秒） | 1080p（每秒） |
-| --- | ---: | ---: | ---: |
-| `grok-imagine-video` | 0.0414 | 0.0594 | 0.0774 |
-| `grok-imagine-video-1.5` | 0.0414 | 0.0594 | 0.0774 |
-| `grok-imagine-video-1.5-preview` | 0.0414 | 0.0594 | 0.0774 |
+| 模型 | 计费单位 | 支持的分辨率 |
+| --- | --- | --- |
+| `grok-imagine-video` | `per_second` | `480p/720p/1080p` |
+| `grok-imagine-video-1.5` | `per_second` | `480p/720p/1080p` |
+| `grok-imagine-video-1.5-preview` | `per_second` | `480p/720p/1080p` |
 
 创建任务后，请保存响应中的任务 ID，并使用查询接口获取状态；`queued` 或 `processing` 时只查询原任务，不要重复创建。时长或分辨率不在上述范围内时，系统会在提交前返回 `400`，不会送出任务。
 
@@ -513,23 +634,23 @@ await writeFile('result.mp4', Buffer.from(await content.arrayBuffer()))
 - 每次只请求 `n=1`
 - 成功结果读取 `data[0].url` 或 `data[0].b64_json`
 
-### 图片模型与公开价格
+### 图片模型与固定档位
 
-| 模型 | 固定档位 | 单张价格 |
-| --- | ---: | ---: |
-| `gpt-image-2-1k` | 1K | 0.0325 |
-| `gpt-image-2-2k` | 2K | 0.0650 |
-| `gpt-image-2-4k` | 4K | 0.1040 |
-| `nano-banana-pro-1k` | 1K | 0.1040 |
-| `nano-banana-pro-2k` | 2K | 0.1300 |
-| `nano-banana-pro-4k` | 4K | 0.1937 |
-| `nano-banana2-1k` | 1K | 0.0767 |
-| `nano-banana2-2k` | 2K | 0.1040 |
-| `nano-banana2-4k` | 4K | 0.1560 |
-| `grok-imagine-image` | 标准 | 0.02619 |
-| `grok-imagine-image-quality` | 高质量 | 0.02619 |
+| 模型 | 固定档位 |
+| --- | --- |
+| `gpt-image-2-1k` | `1K` |
+| `gpt-image-2-2k` | `2K` |
+| `gpt-image-2-4k` | `4K` |
+| `nano-banana-pro-1k` | `1K` |
+| `nano-banana-pro-2k` | `2K` |
+| `nano-banana-pro-4k` | `4K` |
+| `nano-banana2-1k` | `1K` |
+| `nano-banana2-2k` | `2K` |
+| `nano-banana2-4k` | `4K` |
+| `grok-imagine-image` | `standard` |
+| `grok-imagine-image-quality` | `high_quality` |
 
-表中的 Grok Imagine 图片价格是每张 USD 基础价格，系统会在此基础上只应用一次你所属分组的倍率。一次请求生成多张图片时，按实际张数计费。
+图片按实际成功生成的张数计费，并应用你所属分组的倍率。实时金额请查看[模型广场](/pricing)。
 
 `grok-4.5` 是文本模型；`grok-imagine-image` 和 `grok-imagine-image-quality` 是图片模型；`grok-video` 和 `grok-video-1.5` 是异步视频模型。它们不能通过更换提示词互相转换，请始终使用准确模型 ID 和对应接口。
 
