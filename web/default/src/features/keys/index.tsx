@@ -44,7 +44,7 @@ export function ApiKeys() {
           <ApiKeysPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
-          <div className='flex h-full min-h-0 flex-col gap-3'>
+          <div className='flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain sm:overflow-hidden'>
             <GroupAvailabilityMonitor
               items={availabilityQuery.data?.data ?? []}
               isLoading={availabilityQuery.isLoading}
@@ -52,7 +52,7 @@ export function ApiKeys() {
               onRefresh={() => void availabilityQuery.refetch()}
             />
             <ApiEndpointNotice />
-            <div className='min-h-0 flex-1'>
+            <div className='min-h-0 shrink-0 sm:flex-1'>
               <ApiKeysTable />
             </div>
           </div>
