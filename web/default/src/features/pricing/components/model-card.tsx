@@ -32,6 +32,10 @@ import {
   isDynamicPricingModel,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
+import {
+  formatImageResolutionPrice,
+  getImageResolutionCardPrice,
+} from '../lib/image-resolution-price'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
 import {
@@ -69,6 +73,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 28) : null
   const initial = props.model.model_name?.charAt(0).toUpperCase() || '?'
   const isDynamicPricing = isDynamicPricingModel(props.model)
+  const imageResolutionPricing = props.model.image_resolution_pricing
   const videoTierPricing = props.model.video_tier_pricing
   const hasCachedPrice = isTokenBased && props.model.cache_ratio != null
   const dynamicSummary = isDynamicPricing
@@ -94,7 +99,24 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   }
 
   let priceSummary: React.ReactNode
-  if (videoTierPricing) {
+  if (imageResolutionPricing) {
+    priceSummary = (
+      <span className='text-muted-foreground whitespace-nowrap'>
+        {t('From')}{' '}
+        <span className='text-foreground font-mono font-semibold'>
+          {formatImageResolutionPrice(
+            getImageResolutionCardPrice(
+              imageResolutionPricing,
+              groups,
+              props.model.group_ratio || {}
+            ),
+            { showRechargePrice, priceRate, usdExchangeRate }
+          )}
+        </span>{' '}
+        / {t('per image')}
+      </span>
+    )
+  } else if (videoTierPricing) {
     priceSummary = (
       <span className='text-muted-foreground whitespace-nowrap'>
         {t('From')}{' '}

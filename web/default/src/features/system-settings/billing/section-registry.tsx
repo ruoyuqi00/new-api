@@ -37,6 +37,7 @@ const getModelDefaults = (settings: BillingSettings) => ({
   ImageRatio: settings.ImageRatio,
   AudioRatio: settings.AudioRatio,
   AudioCompletionRatio: settings.AudioCompletionRatio,
+  ImageResolutionPrice: settings['image_resolution_price_setting.models'],
   VideoTierPrice: settings['video_pricing_setting.models'],
   ExposeRatioEnabled: settings.ExposeRatioEnabled,
   BillingMode: settings['billing_setting.billing_mode'],
@@ -106,7 +107,13 @@ const BILLING_SECTIONS = [
         modelDefaults={getModelDefaults(settings)}
         groupDefaults={getGroupDefaults(settings)}
         toolPricesDefault={settings['tool_price_setting.prices']}
-        visibleTabs={['models', 'video-prices', 'tool-prices', 'upstream-sync']}
+        visibleTabs={[
+          'models',
+          'image-prices',
+          'video-prices',
+          'tool-prices',
+          'upstream-sync',
+        ]}
       />
     ),
   },

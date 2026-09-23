@@ -44,6 +44,15 @@ export type VideoTierPricingMetadata = {
   prices: Record<string, VideoTierPricePoint>
 }
 
+export type ImageResolutionTier = '1k' | '2k' | '4k'
+
+export type ImageResolutionPricingMetadata = {
+  pricing_model: string
+  default_tier: ImageResolutionTier
+  prices: Record<ImageResolutionTier, number>
+  alias_minimum_tier?: ImageResolutionTier
+}
+
 export type PricingModel = {
   id: number
   model_name: string
@@ -73,6 +82,7 @@ export type PricingModel = {
   billing_expr?: string
   /** Pricing version returned by backend, useful for cache busting */
   pricing_version?: string
+  image_resolution_pricing?: ImageResolutionPricingMetadata
   video_tier_pricing?: VideoTierPricingMetadata
   /**
    * Optional model metadata fields reserved for backend-provided catalog data.

@@ -27,6 +27,32 @@ function stableStringify(obj) {
 
 const newKeys = {
   en: {
+    '1K price': '1K price',
+    '2K price': '2K price',
+    '4K price': '4K price',
+    'Automatic resolution billing': 'Automatic resolution billing',
+    'Base price': 'Base price',
+    'Clear the search or enable a supported image model first.':
+      'Clear the search or enable a supported image model first.',
+    'Configure 1K, 2K, and 4K prices under one official image model. The requested size selects the billing tier automatically.':
+      'Configure 1K, 2K, and 4K prices under one official image model. The requested size selects the billing tier automatically.',
+    'Default tier': 'Default tier',
+    'Edit image resolution prices': 'Edit image resolution prices',
+    'Higher tiers cannot cost less than lower tiers':
+      'Higher tiers cannot cost less than lower tiers',
+    'Image resolution price policies': 'Image resolution price policies',
+    'Image resolution prices': 'Image resolution prices',
+    'JSON map of complete per-model 1K, 2K, and 4K price policies. Use the image resolution prices tab for guided editing.':
+      'JSON map of complete per-model 1K, 2K, and 4K price policies. Use the image resolution prices tab for guided editing.',
+    'No image pricing models found': 'No image pricing models found',
+    'Per image': 'Per image',
+    'Price per image': 'Price per image',
+    Resolution: 'Resolution',
+    'Save resolution prices': 'Save resolution prices',
+    'Search image models': 'Search image models',
+    'Set the base per-image price for each resolution tier.':
+      'Set the base per-image price for each resolution tier.',
+    'per image': 'per image',
     'Thinking Tokens': 'Thinking Tokens',
     'Text Output Tokens': 'Text Output Tokens',
     'Thinking Billing': 'Thinking Billing',
@@ -187,6 +213,32 @@ const newKeys = {
     'Must be greater than zero': 'Must be greater than zero',
   },
   zh: {
+    '1K price': '1K 价格',
+    '2K price': '2K 价格',
+    '4K price': '4K 价格',
+    'Automatic resolution billing': '按分辨率自动计费',
+    'Base price': '基础价格',
+    'Clear the search or enable a supported image model first.':
+      '清除搜索条件，或先启用支持的图片模型。',
+    'Configure 1K, 2K, and 4K prices under one official image model. The requested size selects the billing tier automatically.':
+      '在一个官方图片模型下配置 1K、2K 和 4K 价格。系统会根据请求尺寸自动选择计费档位。',
+    'Default tier': '默认档位',
+    'Edit image resolution prices': '编辑图片分辨率价格',
+    'Higher tiers cannot cost less than lower tiers':
+      '高分辨率档价格不能低于低分辨率档',
+    'Image resolution price policies': '图片分辨率价格策略',
+    'Image resolution prices': '图片分辨率价格',
+    'JSON map of complete per-model 1K, 2K, and 4K price policies. Use the image resolution prices tab for guided editing.':
+      '按模型配置完整 1K、2K 和 4K 价格策略的 JSON 映射。请使用图片分辨率价格标签页进行可视化编辑。',
+    'No image pricing models found': '未找到图片计价模型',
+    'Per image': '按张',
+    'Price per image': '每张价格',
+    Resolution: '分辨率',
+    'Save resolution prices': '保存分辨率价格',
+    'Search image models': '搜索图片模型',
+    'Set the base per-image price for each resolution tier.':
+      '为每个分辨率档设置每张图片的基础价格。',
+    'per image': '每张',
     'Thinking Tokens': '思考 Token',
     'Text Output Tokens': '正文输出 Token',
     'Thinking Billing': '思考计费',
@@ -343,6 +395,32 @@ const newKeys = {
     'Must be greater than zero': '必须大于 0',
   },
   fr: {
+    '1K price': 'Prix 1K',
+    '2K price': 'Prix 2K',
+    '4K price': 'Prix 4K',
+    'Automatic resolution billing': 'Facturation automatique par résolution',
+    'Base price': 'Prix de base',
+    'Clear the search or enable a supported image model first.':
+      "Effacez la recherche ou activez d'abord un modèle d'image pris en charge.",
+    'Configure 1K, 2K, and 4K prices under one official image model. The requested size selects the billing tier automatically.':
+      "Configurez les prix 1K, 2K et 4K sous un modèle d'image officiel. La taille demandée sélectionne automatiquement le palier.",
+    'Default tier': 'Palier par défaut',
+    'Edit image resolution prices': "Modifier les prix de résolution d'image",
+    'Higher tiers cannot cost less than lower tiers':
+      'Un palier supérieur ne peut pas coûter moins cher',
+    'Image resolution price policies': "Tarifs par résolution d'image",
+    'Image resolution prices': "Prix par résolution d'image",
+    'JSON map of complete per-model 1K, 2K, and 4K price policies. Use the image resolution prices tab for guided editing.':
+      "Objet JSON des tarifs 1K, 2K et 4K complets par modèle. Utilisez l'onglet des prix par résolution pour l'édition guidée.",
+    'No image pricing models found': "Aucun modèle d'image tarifé trouvé",
+    'Per image': 'Par image',
+    'Price per image': 'Prix par image',
+    Resolution: 'Résolution',
+    'Save resolution prices': 'Enregistrer les prix',
+    'Search image models': "Rechercher des modèles d'image",
+    'Set the base per-image price for each resolution tier.':
+      'Définissez le prix de base par image pour chaque résolution.',
+    'per image': 'par image',
     'Thinking Tokens': 'Jetons de raisonnement',
     'Text Output Tokens': 'Jetons de sortie texte',
     'Thinking Billing': 'Facturation du raisonnement',
@@ -503,6 +581,32 @@ const newKeys = {
     'Must be greater than zero': 'Doit être supérieur à zéro',
   },
   ja: {
+    '1K price': '1K 価格',
+    '2K price': '2K 価格',
+    '4K price': '4K 価格',
+    'Automatic resolution billing': '解像度別の自動課金',
+    'Base price': '基本価格',
+    'Clear the search or enable a supported image model first.':
+      '検索をクリアするか、対応する画像モデルを有効にしてください。',
+    'Configure 1K, 2K, and 4K prices under one official image model. The requested size selects the billing tier automatically.':
+      '1つの公式画像モデルに 1K、2K、4K の価格を設定します。要求サイズに応じて課金区分が自動選択されます。',
+    'Default tier': 'デフォルト区分',
+    'Edit image resolution prices': '画像解像度価格を編集',
+    'Higher tiers cannot cost less than lower tiers':
+      '上位区分の価格を下位区分より低くできません',
+    'Image resolution price policies': '画像解像度価格ポリシー',
+    'Image resolution prices': '画像解像度価格',
+    'JSON map of complete per-model 1K, 2K, and 4K price policies. Use the image resolution prices tab for guided editing.':
+      'モデルごとの完全な 1K、2K、4K 価格ポリシーの JSON マップです。画像解像度価格タブで編集してください。',
+    'No image pricing models found': '画像価格モデルが見つかりません',
+    'Per image': '画像ごと',
+    'Price per image': '画像単価',
+    Resolution: '解像度',
+    'Save resolution prices': '解像度価格を保存',
+    'Search image models': '画像モデルを検索',
+    'Set the base per-image price for each resolution tier.':
+      '各解像度区分の画像単価を設定します。',
+    'per image': '画像ごと',
     'Thinking Tokens': '思考トークン',
     'Text Output Tokens': 'テキスト出力トークン',
     'Thinking Billing': '思考の課金',
@@ -661,6 +765,32 @@ const newKeys = {
     'Must be greater than zero': '0 より大きい値が必要です',
   },
   ru: {
+    '1K price': 'Цена 1K',
+    '2K price': 'Цена 2K',
+    '4K price': 'Цена 4K',
+    'Automatic resolution billing': 'Автоматическая тарификация по разрешению',
+    'Base price': 'Базовая цена',
+    'Clear the search or enable a supported image model first.':
+      'Очистите поиск или сначала включите поддерживаемую модель изображений.',
+    'Configure 1K, 2K, and 4K prices under one official image model. The requested size selects the billing tier automatically.':
+      'Настройте цены 1K, 2K и 4K для одной официальной модели изображений. Тариф выбирается автоматически по размеру.',
+    'Default tier': 'Уровень по умолчанию',
+    'Edit image resolution prices': 'Изменить цены по разрешению',
+    'Higher tiers cannot cost less than lower tiers':
+      'Более высокий уровень не может стоить дешевле',
+    'Image resolution price policies': 'Тарифы по разрешению изображений',
+    'Image resolution prices': 'Цены по разрешению изображений',
+    'JSON map of complete per-model 1K, 2K, and 4K price policies. Use the image resolution prices tab for guided editing.':
+      'JSON-карта полных тарифов 1K, 2K и 4K для каждой модели. Используйте вкладку цен по разрешению.',
+    'No image pricing models found': 'Модели с тарифами изображений не найдены',
+    'Per image': 'За изображение',
+    'Price per image': 'Цена за изображение',
+    Resolution: 'Разрешение',
+    'Save resolution prices': 'Сохранить цены',
+    'Search image models': 'Поиск моделей изображений',
+    'Set the base per-image price for each resolution tier.':
+      'Задайте базовую цену за изображение для каждого разрешения.',
+    'per image': 'за изображение',
     'Thinking Tokens': 'Токены рассуждений',
     'Text Output Tokens': 'Токены текстового вывода',
     'Thinking Billing': 'Тарификация рассуждений',
@@ -820,6 +950,32 @@ const newKeys = {
     'Must be greater than zero': 'Значение должно быть больше нуля',
   },
   vi: {
+    '1K price': 'Giá 1K',
+    '2K price': 'Giá 2K',
+    '4K price': 'Giá 4K',
+    'Automatic resolution billing': 'Tự động tính phí theo độ phân giải',
+    'Base price': 'Giá cơ sở',
+    'Clear the search or enable a supported image model first.':
+      'Xóa tìm kiếm hoặc bật một mô hình hình ảnh được hỗ trợ trước.',
+    'Configure 1K, 2K, and 4K prices under one official image model. The requested size selects the billing tier automatically.':
+      'Cấu hình giá 1K, 2K và 4K trong một mô hình hình ảnh chính thức. Kích thước yêu cầu tự động chọn bậc tính phí.',
+    'Default tier': 'Bậc mặc định',
+    'Edit image resolution prices': 'Sửa giá độ phân giải hình ảnh',
+    'Higher tiers cannot cost less than lower tiers':
+      'Bậc cao hơn không được có giá thấp hơn bậc thấp',
+    'Image resolution price policies': 'Chính sách giá độ phân giải hình ảnh',
+    'Image resolution prices': 'Giá theo độ phân giải hình ảnh',
+    'JSON map of complete per-model 1K, 2K, and 4K price policies. Use the image resolution prices tab for guided editing.':
+      'Ánh xạ JSON của chính sách giá 1K, 2K và 4K đầy đủ theo mô hình. Dùng thẻ giá độ phân giải để chỉnh sửa trực quan.',
+    'No image pricing models found': 'Không tìm thấy mô hình định giá hình ảnh',
+    'Per image': 'Theo hình ảnh',
+    'Price per image': 'Giá mỗi hình ảnh',
+    Resolution: 'Độ phân giải',
+    'Save resolution prices': 'Lưu giá độ phân giải',
+    'Search image models': 'Tìm mô hình hình ảnh',
+    'Set the base per-image price for each resolution tier.':
+      'Đặt giá cơ sở mỗi hình ảnh cho từng bậc độ phân giải.',
+    'per image': 'mỗi hình ảnh',
     'Thinking Tokens': 'Token suy luận',
     'Text Output Tokens': 'Token đầu ra văn bản',
     'Thinking Billing': 'Tính phí suy luận',

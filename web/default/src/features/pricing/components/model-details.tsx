@@ -77,6 +77,7 @@ import type {
   TokenUnit,
 } from '../types'
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
+import { ImageResolutionPricingBreakdown } from './image-resolution-pricing-breakdown'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
 import { VideoTierPricingBreakdown } from './video-tier-pricing-breakdown'
@@ -1260,10 +1261,61 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
   const showRechargePrice = props.showRechargePrice ?? false
 
   const isDynamic = isDynamicPricingModel(props.model)
+  const imageResolutionPricing = props.model.image_resolution_pricing
   const videoTierPricing = props.model.video_tier_pricing
-  const videoGroups = videoTierPricing
-    ? getAvailableGroups(props.model, props.usableGroup)
-    : []
+  const tierPriceGroups =
+    imageResolutionPricing || videoTierPricing
+      ? getAvailableGroups(props.model, props.usableGroup)
+      : []
+  let pricingContent: React.ReactNode
+  if (imageResolutionPricing) {
+    pricingContent = (
+      <ImageResolutionPricingBreakdown
+        metadata={imageResolutionPricing}
+        groups={tierPriceGroups}
+        groupRatios={props.groupRatio}
+        priceRate={props.priceRate}
+        usdExchangeRate={props.usdExchangeRate}
+        showRechargePrice={showRechargePrice}
+      />
+    )
+  } else if (videoTierPricing) {
+    pricingContent = (
+      <VideoTierPricingBreakdown
+        metadata={videoTierPricing}
+        groups={tierPriceGroups}
+        groupRatios={props.groupRatio}
+        priceRate={props.priceRate}
+        usdExchangeRate={props.usdExchangeRate}
+        showRechargePrice={showRechargePrice}
+      />
+    )
+  } else {
+    pricingContent = (
+      <>
+        <PriceSection
+          model={props.model}
+          priceRate={props.priceRate}
+          usdExchangeRate={props.usdExchangeRate}
+          tokenUnit={props.tokenUnit}
+          showRechargePrice={showRechargePrice}
+        />
+        {isDynamic && props.model.billing_mode === 'tiered_expr' && (
+          <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
+        )}
+        <GroupPricingSection
+          model={props.model}
+          groupRatio={props.groupRatio}
+          usableGroup={props.usableGroup}
+          autoGroups={props.autoGroups}
+          priceRate={props.priceRate}
+          usdExchangeRate={props.usdExchangeRate}
+          tokenUnit={props.tokenUnit}
+          showRechargePrice={showRechargePrice}
+        />
+      </>
+    )
+  }
 
   return (
     <div className='@container/details space-y-4'>
@@ -1291,41 +1343,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
 
           <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
             <SectionTitle>{t('Pricing')}</SectionTitle>
-            {videoTierPricing ? (
-              <VideoTierPricingBreakdown
-                metadata={videoTierPricing}
-                groups={videoGroups}
-                groupRatios={props.groupRatio}
-                priceRate={props.priceRate}
-                usdExchangeRate={props.usdExchangeRate}
-                showRechargePrice={showRechargePrice}
-              />
-            ) : (
-              <>
-                <PriceSection
-                  model={props.model}
-                  priceRate={props.priceRate}
-                  usdExchangeRate={props.usdExchangeRate}
-                  tokenUnit={props.tokenUnit}
-                  showRechargePrice={showRechargePrice}
-                />
-                {isDynamic && props.model.billing_mode === 'tiered_expr' && (
-                  <DynamicPricingBreakdown
-                    billingExpr={props.model.billing_expr}
-                  />
-                )}
-                <GroupPricingSection
-                  model={props.model}
-                  groupRatio={props.groupRatio}
-                  usableGroup={props.usableGroup}
-                  autoGroups={props.autoGroups}
-                  priceRate={props.priceRate}
-                  usdExchangeRate={props.usdExchangeRate}
-                  tokenUnit={props.tokenUnit}
-                  showRechargePrice={showRechargePrice}
-                />
-              </>
-            )}
+            {pricingContent}
           </section>
 
           <ModelBackendDetailsSection model={props.model} />

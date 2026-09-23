@@ -264,6 +264,7 @@ export type ModelSettings = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  'image_resolution_price_setting.models': string
   'video_pricing_setting.models': string
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
@@ -334,6 +335,7 @@ export type BillingSettings = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  'image_resolution_price_setting.models': string
   'video_pricing_setting.models': string
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string

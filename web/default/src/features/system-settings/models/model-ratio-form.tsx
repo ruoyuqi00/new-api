@@ -53,6 +53,7 @@ type ModelFormValues = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  ImageResolutionPrice: string
   VideoTierPrice: string
   ExposeRatioEnabled: boolean
   BillingMode: string
@@ -77,6 +78,7 @@ type ModelJsonFieldName =
   | 'ImageRatio'
   | 'AudioRatio'
   | 'AudioCompletionRatio'
+  | 'ImageResolutionPrice'
   | 'VideoTierPrice'
 
 const modelJsonFields: Array<{
@@ -127,6 +129,12 @@ const modelJsonFields: Array<{
     name: 'AudioCompletionRatio',
     labelKey: 'Audio completion ratio',
     descriptionKey: 'Ratio applied to audio completions for streaming models.',
+  },
+  {
+    name: 'ImageResolutionPrice',
+    labelKey: 'Image resolution price policies',
+    descriptionKey:
+      'JSON map of complete per-model 1K, 2K, and 4K price policies. Use the image resolution prices tab for guided editing.',
   },
   {
     name: 'VideoTierPrice',

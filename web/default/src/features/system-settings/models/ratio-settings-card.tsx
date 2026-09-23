@@ -32,6 +32,7 @@ import { SettingsPageTitleStatusPortal } from '../components/settings-page-conte
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { GroupRatioForm } from './group-ratio-form'
+import { ImageResolutionPricingSettings } from './image-resolution-pricing-settings'
 import { ModelRatioForm } from './model-ratio-form'
 import { ToolPriceSettings } from './tool-price-settings'
 import { UpstreamRatioSync } from './upstream-ratio-sync'
@@ -109,6 +110,7 @@ const createModelSchema = (t: Translate) =>
     ImageRatio: createJsonStringField(t),
     AudioRatio: createJsonStringField(t),
     AudioCompletionRatio: createJsonStringField(t),
+    ImageResolutionPrice: createJsonStringField(t),
     VideoTierPrice: createJsonStringField(t),
     ExposeRatioEnabled: z.boolean(),
     BillingMode: createJsonStringField(t),
@@ -139,6 +141,7 @@ type GroupFormValues = z.infer<ReturnType<typeof createGroupSchema>>
 type RatioTabId =
   | 'models'
   | 'groups'
+  | 'image-prices'
   | 'video-prices'
   | 'tool-prices'
   | 'upstream-sync'
@@ -190,6 +193,9 @@ export function RatioSettingsCard({
     AudioCompletionRatio: normalizeJsonString(
       modelDefaults.AudioCompletionRatio
     ),
+    ImageResolutionPrice: normalizeJsonString(
+      modelDefaults.ImageResolutionPrice
+    ),
     VideoTierPrice: normalizeJsonString(modelDefaults.VideoTierPrice),
     ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
     BillingMode: normalizeJsonString(modelDefaults.BillingMode),
@@ -235,6 +241,9 @@ export function RatioSettingsCard({
       AudioCompletionRatio: formatJsonForTextarea(
         modelDefaults.AudioCompletionRatio
       ),
+      ImageResolutionPrice: formatJsonForTextarea(
+        modelDefaults.ImageResolutionPrice
+      ),
       VideoTierPrice: formatJsonForTextarea(modelDefaults.VideoTierPrice),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
@@ -276,6 +285,9 @@ export function RatioSettingsCard({
       AudioCompletionRatio: normalizeJsonString(
         modelDefaults.AudioCompletionRatio
       ),
+      ImageResolutionPrice: normalizeJsonString(
+        modelDefaults.ImageResolutionPrice
+      ),
       VideoTierPrice: normalizeJsonString(modelDefaults.VideoTierPrice),
       ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
       BillingMode: normalizeJsonString(modelDefaults.BillingMode),
@@ -294,6 +306,9 @@ export function RatioSettingsCard({
       AudioRatio: formatJsonForTextarea(modelDefaults.AudioRatio),
       AudioCompletionRatio: formatJsonForTextarea(
         modelDefaults.AudioCompletionRatio
+      ),
+      ImageResolutionPrice: formatJsonForTextarea(
+        modelDefaults.ImageResolutionPrice
       ),
       VideoTierPrice: formatJsonForTextarea(modelDefaults.VideoTierPrice),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
@@ -352,6 +367,7 @@ export function RatioSettingsCard({
         ImageRatio: normalizeJsonString(values.ImageRatio),
         AudioRatio: normalizeJsonString(values.AudioRatio),
         AudioCompletionRatio: normalizeJsonString(values.AudioCompletionRatio),
+        ImageResolutionPrice: normalizeJsonString(values.ImageResolutionPrice),
         VideoTierPrice: normalizeJsonString(values.VideoTierPrice),
         ExposeRatioEnabled: values.ExposeRatioEnabled,
         BillingMode: normalizeJsonString(values.BillingMode),
@@ -361,6 +377,7 @@ export function RatioSettingsCard({
       const apiKeyMap: Record<string, string> = {
         BillingMode: 'billing_setting.billing_mode',
         BillingExpr: 'billing_setting.billing_expr',
+        ImageResolutionPrice: 'image_resolution_price_setting.models',
         VideoTierPrice: 'video_pricing_setting.models',
       }
 
@@ -454,6 +471,28 @@ export function RatioSettingsCard({
     [modelForm, queryClient, updateOption]
   )
 
+  const saveImageResolutionPrices = useCallback(
+    async (value: string) => {
+      const normalized = normalizeJsonString(value)
+      await updateOption.mutateAsync({
+        key: 'image_resolution_price_setting.models',
+        value: normalized,
+      })
+      modelNormalizedDefaults.current = {
+        ...modelNormalizedDefaults.current,
+        ImageResolutionPrice: normalized,
+      }
+      setSavedModelValues(modelNormalizedDefaults.current)
+      modelForm.setValue(
+        'ImageResolutionPrice',
+        formatJsonForTextarea(normalized),
+        { shouldDirty: false, shouldValidate: true }
+      )
+      await queryClient.invalidateQueries({ queryKey: ['pricing'] })
+    },
+    [modelForm, queryClient, updateOption]
+  )
+
   const { mutate: resetMutate } = resetMutation
   const handleConfirmReset = useCallback(() => {
     resetMutate()
@@ -462,6 +501,7 @@ export function RatioSettingsCard({
   const tabLabels: Record<RatioTabId, string> = {
     models: 'Model prices',
     groups: 'Group ratios',
+    'image-prices': 'Image resolution prices',
     'video-prices': 'Video tier prices',
     'tool-prices': 'Tool prices',
     'upstream-sync': 'Upstream price sync',
@@ -472,7 +512,8 @@ export function RatioSettingsCard({
       2: 'grid-cols-2',
       3: 'grid-cols-3',
       4: 'grid-cols-4',
-    }[visibleTabs.length] ?? 'grid-cols-4'
+      5: 'grid-cols-2 sm:grid-cols-5',
+    }[visibleTabs.length] ?? 'grid-cols-2 sm:grid-cols-5'
   const defaultTab = visibleTabs[0] ?? 'models'
 
   const renderTabContent = (tab: RatioTabId) => {
@@ -502,6 +543,15 @@ export function RatioSettingsCard({
         <VideoTierPricingSettings
           value={modelForm.watch('VideoTierPrice')}
           onChange={saveVideoTierPrices}
+          isSaving={updateOption.isPending}
+        />
+      )
+    }
+    if (tab === 'image-prices') {
+      return (
+        <ImageResolutionPricingSettings
+          value={modelForm.watch('ImageResolutionPrice')}
+          onChange={saveImageResolutionPrices}
           isSaving={updateOption.isPending}
         />
       )
