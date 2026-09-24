@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type ThinkingContentInfo struct {
@@ -1126,6 +1127,19 @@ func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.Channel
 		(channelOtherSettings.DisableStore && values[3].Exists()) ||
 		(!channelOtherSettings.AllowSafetyIdentifier && values[4].Exists()) ||
 		(!channelOtherSettings.AllowIncludeObfuscation && values[5].Exists())
+}
+
+func (info *RelayInfo) ShouldIgnoreClientMaxOutputTokens() bool {
+	return info != nil && info.ChannelMeta != nil &&
+		info.ChannelType == constant.ChannelTypeOpenAI &&
+		info.ChannelOtherSettings.IgnoreClientMaxOutputTokens
+}
+
+func RemoveClientMaxOutputTokens(jsonData []byte, info *RelayInfo) ([]byte, error) {
+	if !info.ShouldIgnoreClientMaxOutputTokens() || !gjson.GetBytes(jsonData, "max_output_tokens").Exists() {
+		return jsonData, nil
+	}
+	return sjson.DeleteBytes(jsonData, "max_output_tokens")
 }
 
 // RemoveGeminiDisabledFields removes disabled fields from Gemini request JSON data

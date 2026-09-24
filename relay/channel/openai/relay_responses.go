@@ -273,6 +273,39 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			terminalReceived = true
 			info.StreamTerminalSuccess = false
 			terminalFailure = true
+			var publicIncompleteDetails *dto.IncompleteDetails
+			type publicInputTokenDetails struct {
+				CachedTokens int `json:"cached_tokens"`
+			}
+			type publicResponsesUsage struct {
+				InputTokens        int                      `json:"input_tokens"`
+				OutputTokens       int                      `json:"output_tokens"`
+				TotalTokens        int                      `json:"total_tokens"`
+				InputTokensDetails *publicInputTokenDetails `json:"input_tokens_details,omitempty"`
+			}
+			var publicUsage *publicResponsesUsage
+			publicMaxOutputTokens := 0
+			if streamResponse.Response != nil {
+				publicMaxOutputTokens = streamResponse.Response.MaxOutputTokens
+				if streamResponse.Response.Usage != nil {
+					publicUsage = &publicResponsesUsage{
+						InputTokens:  streamResponse.Response.Usage.InputTokens,
+						OutputTokens: streamResponse.Response.Usage.OutputTokens,
+						TotalTokens:  streamResponse.Response.Usage.TotalTokens,
+					}
+					if streamResponse.Response.Usage.InputTokensDetails != nil {
+						publicUsage.InputTokensDetails = &publicInputTokenDetails{
+							CachedTokens: streamResponse.Response.Usage.InputTokensDetails.CachedTokens,
+						}
+					}
+				}
+				if streamResponse.Response.IncompleteDetails != nil {
+					reason := strings.TrimSpace(streamResponse.Response.IncompleteDetails.Reason)
+					if reason == "max_output_tokens" || reason == "content_filter" {
+						publicIncompleteDetails = &dto.IncompleteDetails{Reason: reason}
+					}
+				}
+			}
 			publicResponseID := publishedResponseID
 			if publicResponseID == "" {
 				publicResponseID = "resp_" + c.GetString(common.RequestIdKey)
@@ -298,29 +331,60 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				streamResponse.Param = []byte(`null`)
 				streamResponse.Response = nil
 			} else {
-				publicStatus := []byte(`"failed"`)
+				publicStatus := "failed"
 				if originalEventType == "response.incomplete" {
-					publicStatus = []byte(`"incomplete"`)
+					publicStatus = "incomplete"
 				}
-				streamResponse.Response = &dto.OpenAIResponsesResponse{
-					ID:     publicResponseID,
-					Object: "response",
-					Model:  publicResponseModel,
-					Status: publicStatus,
-					Error:  publicError,
-					Output: []dto.ResponsesOutput{},
+				type publicResponsesTerminal struct {
+					ID                string                 `json:"id"`
+					Object            string                 `json:"object"`
+					Status            string                 `json:"status"`
+					Error             map[string]any         `json:"error"`
+					IncompleteDetails *dto.IncompleteDetails `json:"incomplete_details,omitempty"`
+					MaxOutputTokens   int                    `json:"max_output_tokens,omitempty"`
+					Model             string                 `json:"model"`
+					Output            []dto.ResponsesOutput  `json:"output"`
+					Usage             *publicResponsesUsage  `json:"usage,omitempty"`
 				}
+				type publicResponsesTerminalEvent struct {
+					Type           string                  `json:"type"`
+					SequenceNumber *int64                  `json:"sequence_number,omitempty"`
+					Response       publicResponsesTerminal `json:"response"`
+				}
+				publicEvent := publicResponsesTerminalEvent{
+					Type:           originalEventType,
+					SequenceNumber: streamResponse.SequenceNumber,
+					Response: publicResponsesTerminal{
+						ID:                publicResponseID,
+						Object:            "response",
+						Status:            publicStatus,
+						Error:             publicError,
+						IncompleteDetails: publicIncompleteDetails,
+						MaxOutputTokens:   publicMaxOutputTokens,
+						Model:             publicResponseModel,
+						Output:            []dto.ResponsesOutput{},
+						Usage:             publicUsage,
+					},
+				}
+				sanitized, err := common.Marshal(&publicEvent)
+				if err != nil {
+					sr.Error(err)
+					return
+				}
+				data = string(sanitized)
 			}
 			if !info.StreamTerminalUsageSeen && !imageGenerationSeen {
 				pendingEstimatedTerminal = true
 				suppressTerminalEvent = true
 			}
-			sanitized, err := common.Marshal(&streamResponse)
-			if err != nil {
-				sr.Error(err)
-				return
+			if originalEventType == "error" {
+				sanitized, err := common.Marshal(&streamResponse)
+				if err != nil {
+					sr.Error(err)
+					return
+				}
+				data = string(sanitized)
 			}
-			data = string(sanitized)
 		}
 		if !suppressTerminalEvent && !info.IsStreamDetached() {
 			if err := sendResponsesStreamData(c, streamResponse, data); err != nil {

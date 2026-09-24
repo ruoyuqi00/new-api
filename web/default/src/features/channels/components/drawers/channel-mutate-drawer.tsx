@@ -284,6 +284,7 @@ const SENSITIVE_FORM_FIELDS = [
   'disable_store',
   'allow_safety_identifier',
   'allow_include_obfuscation',
+  'ignore_client_max_output_tokens',
   'allow_inference_geo',
   'allow_speed',
   'claude_beta_query',
@@ -335,6 +336,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
+    values.ignore_client_max_output_tokens ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -739,6 +741,9 @@ export function ChannelMutateDrawer({
   const currentDisableStore = form.watch('disable_store')
   const currentAllowSafetyIdentifier = form.watch('allow_safety_identifier')
   const currentAllowIncludeObfuscation = form.watch('allow_include_obfuscation')
+  const currentIgnoreClientMaxOutputTokens = form.watch(
+    'ignore_client_max_output_tokens'
+  )
   const currentAllowInferenceGeo = form.watch('allow_inference_geo')
   const currentAllowSpeed = form.watch('allow_speed')
   const currentClaudeBetaQuery = form.watch('claude_beta_query')
@@ -949,6 +954,7 @@ export function ChannelMutateDrawer({
       currentDisableStore ||
       currentAllowSafetyIdentifier ||
       currentAllowIncludeObfuscation ||
+      currentIgnoreClientMaxOutputTokens ||
       currentAllowInferenceGeo
     )
   } else if (currentType === 14) {
@@ -4266,6 +4272,33 @@ export function ChannelMutateDrawer({
 
                                 {currentType === 1 && (
                                   <>
+                                    <FormField
+                                      control={form.control}
+                                      name='ignore_client_max_output_tokens'
+                                      render={({ field }) => (
+                                        <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                          <div className='space-y-0.5'>
+                                            <FormLabel className='text-sm'>
+                                              {t(
+                                                'Ignore client max_output_tokens'
+                                              )}
+                                            </FormLabel>
+                                            <FormDescription>
+                                              {t(
+                                                'Remove max_output_tokens from Responses requests before forwarding them upstream'
+                                              )}
+                                            </FormDescription>
+                                          </div>
+                                          <FormControl>
+                                            <Switch
+                                              checked={field.value}
+                                              onCheckedChange={field.onChange}
+                                            />
+                                          </FormControl>
+                                        </FormItem>
+                                      )}
+                                    />
+
                                     <FormField
                                       control={form.control}
                                       name='disable_store'

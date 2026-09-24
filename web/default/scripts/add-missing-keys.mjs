@@ -27,6 +27,9 @@ function stableStringify(obj) {
 
 const newKeys = {
   en: {
+    'Ignore client max_output_tokens': 'Ignore client max_output_tokens',
+    'Remove max_output_tokens from Responses requests before forwarding them upstream':
+      'Remove max_output_tokens from Responses requests before forwarding them upstream',
     '1K price': '1K price',
     '2K price': '2K price',
     '4K price': '4K price',
@@ -213,6 +216,9 @@ const newKeys = {
     'Must be greater than zero': 'Must be greater than zero',
   },
   zh: {
+    'Ignore client max_output_tokens': '忽略客户端 max_output_tokens',
+    'Remove max_output_tokens from Responses requests before forwarding them upstream':
+      '转发 Responses 请求到上游前移除 max_output_tokens',
     '1K price': '1K 价格',
     '2K price': '2K 价格',
     '4K price': '4K 价格',
@@ -395,6 +401,9 @@ const newKeys = {
     'Must be greater than zero': '必须大于 0',
   },
   fr: {
+    'Ignore client max_output_tokens': 'Ignorer max_output_tokens du client',
+    'Remove max_output_tokens from Responses requests before forwarding them upstream':
+      'Supprimer max_output_tokens des requêtes Responses avant leur transfert en amont',
     '1K price': 'Prix 1K',
     '2K price': 'Prix 2K',
     '4K price': 'Prix 4K',
@@ -581,6 +590,10 @@ const newKeys = {
     'Must be greater than zero': 'Doit être supérieur à zéro',
   },
   ja: {
+    'Ignore client max_output_tokens':
+      'クライアントの max_output_tokens を無視',
+    'Remove max_output_tokens from Responses requests before forwarding them upstream':
+      'Responses リクエストをアップストリームへ転送する前に max_output_tokens を削除します',
     '1K price': '1K 価格',
     '2K price': '2K 価格',
     '4K price': '4K 価格',
@@ -765,6 +778,9 @@ const newKeys = {
     'Must be greater than zero': '0 より大きい値が必要です',
   },
   ru: {
+    'Ignore client max_output_tokens': 'Игнорировать max_output_tokens клиента',
+    'Remove max_output_tokens from Responses requests before forwarding them upstream':
+      'Удалять max_output_tokens из запросов Responses перед отправкой провайдеру',
     '1K price': 'Цена 1K',
     '2K price': 'Цена 2K',
     '4K price': 'Цена 4K',
@@ -950,6 +966,9 @@ const newKeys = {
     'Must be greater than zero': 'Значение должно быть больше нуля',
   },
   vi: {
+    'Ignore client max_output_tokens': 'Bỏ qua max_output_tokens của máy khách',
+    'Remove max_output_tokens from Responses requests before forwarding them upstream':
+      'Xóa max_output_tokens khỏi yêu cầu Responses trước khi chuyển tiếp lên nhà cung cấp',
     '1K price': 'Giá 1K',
     '2K price': 'Giá 2K',
     '4K price': 'Giá 4K',

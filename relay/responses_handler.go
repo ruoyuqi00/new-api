@@ -85,16 +85,23 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
-		if !injectPromptCacheKeyEnabled {
+		rewritePassthroughBody := injectPromptCacheKeyEnabled || info.ShouldIgnoreClientMaxOutputTokens()
+		if !rewritePassthroughBody {
 			requestBody = common.NewReplayableBodyReader(storage)
 		} else {
 			jsonData, err := storage.Bytes()
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 			}
-			jsonData, err = injectPromptCacheKey(jsonData, promptCacheKey)
+			jsonData, err = relaycommon.RemoveClientMaxOutputTokens(jsonData, info)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if injectPromptCacheKeyEnabled {
+				jsonData, err = injectPromptCacheKey(jsonData, promptCacheKey)
+				if err != nil {
+					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+				}
 			}
 			body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 			if err != nil {

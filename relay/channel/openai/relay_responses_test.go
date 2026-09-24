@@ -70,6 +70,40 @@ func TestOaiResponsesStreamHandlerParsesResponseDoneUsage(t *testing.T) {
 	require.True(t, info.StreamTerminalUsageSeen)
 }
 
+func TestOaiResponsesStreamHandlerPreservesPublicIncompleteUsageAndReason(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	ctx, recorder := clientResponseTestContext()
+	ctx.Request.URL.Path = "/v1/responses"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"model\":\"upstream-model\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":1200,\"output_tokens\":25,\"total_tokens\":1225,\"input_tokens_details\":{\"cached_tokens\":1024},\"cost\":{\"private\":\"usage-secret-marker\"},\"usage_source\":\"private-source\"}}}\n\n",
+		)),
+	}
+
+	info := mappedResponsesClientResponseInfo()
+	info.RelayMode = relayconstant.RelayModeResponses
+	usage, relayErr := OaiResponsesStreamHandler(ctx, info, resp)
+
+	require.Nil(t, relayErr)
+	require.Equal(t, 1200, usage.PromptTokens)
+	require.Equal(t, 25, usage.CompletionTokens)
+	require.True(t, info.StreamTerminalUsageSeen)
+	require.Contains(t, recorder.Body.String(), `"incomplete_details":{"reason":"max_output_tokens"}`)
+	require.Contains(t, recorder.Body.String(), `"input_tokens":1200`)
+	require.NotContains(t, recorder.Body.String(), "usage-secret-marker")
+	require.NotContains(t, recorder.Body.String(), "private-source")
+	require.NotContains(t, recorder.Body.String(), `"prompt_tokens"`)
+	lines := strings.Split(recorder.Body.String(), "\n")
+	require.GreaterOrEqual(t, len(lines), 2)
+	eventData := strings.TrimPrefix(lines[1], "data: ")
+	require.Len(t, gjson.Get(eventData, "response.usage").Map(), 4)
+	require.Len(t, gjson.Get(eventData, "response.usage.input_tokens_details").Map(), 1)
+}
+
 func TestOaiResponsesStreamHandlerRejectsAmplifiedTerminalUsage(t *testing.T) {
 	oldStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30

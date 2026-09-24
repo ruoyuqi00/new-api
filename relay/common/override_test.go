@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -2012,6 +2013,53 @@ func TestRemoveDisabledFieldsSkipWhenChannelPassThroughEnabled(t *testing.T) {
 		t.Fatalf("RemoveDisabledFields returned error: %v", err)
 	}
 	assertJSONEqual(t, input, string(out))
+}
+
+func TestRemoveClientMaxOutputTokensIgnoresOutputLimit(t *testing.T) {
+	input := `{
+		"model":"gpt-5.1",
+		"max_output_tokens":4096,
+		"service_tier":"flex",
+		"store":true
+	}`
+	info := &RelayInfo{ChannelMeta: &ChannelMeta{
+		ChannelType: constant.ChannelTypeOpenAI,
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			IgnoreClientMaxOutputTokens: true,
+		},
+	}}
+
+	out, err := RemoveClientMaxOutputTokens([]byte(input), info)
+	require.NoError(t, err)
+	assertJSONEqual(t, `{"model":"gpt-5.1","service_tier":"flex","store":true}`, string(out))
+}
+
+func TestRemoveClientMaxOutputTokensPreservesLargeIntegers(t *testing.T) {
+	input := `{"model":"gpt-5.1","max_output_tokens":4096,"vendor_integer":9007199254740993}`
+	info := &RelayInfo{ChannelMeta: &ChannelMeta{
+		ChannelType: constant.ChannelTypeOpenAI,
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			IgnoreClientMaxOutputTokens: true,
+		},
+	}}
+
+	out, err := RemoveClientMaxOutputTokens([]byte(input), info)
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"vendor_integer":9007199254740993`)
+}
+
+func TestRemoveClientMaxOutputTokensPreservesLimitForNonOpenAIChannel(t *testing.T) {
+	input := `{"model":"grok-4","max_output_tokens":4096}`
+	info := &RelayInfo{ChannelMeta: &ChannelMeta{
+		ChannelType: constant.ChannelTypeXai,
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			IgnoreClientMaxOutputTokens: true,
+		},
+	}}
+
+	out, err := RemoveClientMaxOutputTokens([]byte(input), info)
+	require.NoError(t, err)
+	require.Equal(t, input, string(out))
 }
 
 func TestRemoveDisabledFieldsSkipWhenGlobalPassThroughEnabled(t *testing.T) {

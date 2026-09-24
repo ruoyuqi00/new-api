@@ -72,3 +72,53 @@ describe('channel image dimension support', () => {
     )
   })
 })
+
+describe('channel client output limit control', () => {
+  test('persists and restores the OpenAI output-limit override', () => {
+    const formData = {
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      name: 'openai channel',
+      type: 1,
+      key: 'test-key',
+      models: 'gpt-5.1',
+      ignore_client_max_output_tokens: true,
+    }
+
+    const payload = transformFormDataToCreatePayload(formData)
+    const settings = JSON.parse(String(payload.channel.settings)) as Record<
+      string,
+      unknown
+    >
+    assert.equal(settings.ignore_client_max_output_tokens, true)
+
+    const channel = {
+      ...payload.channel,
+      id: 44,
+      status: 1,
+      settings: payload.channel.settings,
+      channel_info: { multi_key_mode: 'random' },
+    } as unknown as Channel
+    assert.equal(
+      transformChannelToFormDefaults(channel).ignore_client_max_output_tokens,
+      true
+    )
+  })
+
+  test('does not persist the OpenAI-only option for other channel types', () => {
+    const formData = {
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      name: 'anthropic channel',
+      type: 14,
+      key: 'test-key',
+      models: 'claude-sonnet-4-5',
+      ignore_client_max_output_tokens: true,
+    }
+
+    const payload = transformFormDataToCreatePayload(formData)
+    const settings = JSON.parse(String(payload.channel.settings)) as Record<
+      string,
+      unknown
+    >
+    assert.equal('ignore_client_max_output_tokens' in settings, false)
+  })
+})

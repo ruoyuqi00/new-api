@@ -65,14 +65,17 @@ func TestResponsesHelperInjectsScopedPromptCacheKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
-		name             string
-		body             string
-		sessionID        string
-		passThrough      bool
-		injectionEnabled bool
-		wantInjected     bool
-		wantExplicit     string
-		wantUnknown      bool
+		name              string
+		body              string
+		sessionID         string
+		passThrough       bool
+		injectionEnabled  bool
+		wantInjected      bool
+		wantExplicit      string
+		wantUnknown       bool
+		ignoreOutputLimit bool
+		wantOutputLimit   bool
+		channelType       int
 	}{
 		{
 			name:             "converted request",
@@ -83,12 +86,32 @@ func TestResponsesHelperInjectsScopedPromptCacheKey(t *testing.T) {
 		},
 		{
 			name:             "raw passthrough preserves unknown fields",
-			body:             `{"model":"gpt-test","input":"hello","unknown_passthrough_field":"kept"}`,
+			body:             `{"model":"gpt-test","input":"hello","max_output_tokens":4096,"unknown_passthrough_field":"kept"}`,
 			sessionID:        "stable-session-passthrough",
 			passThrough:      true,
 			injectionEnabled: true,
 			wantInjected:     true,
 			wantUnknown:      true,
+			wantOutputLimit:  true,
+		},
+		{
+			name:              "raw passthrough removes explicitly ignored output limit",
+			body:              `{"model":"gpt-test","input":"hello","max_output_tokens":4096,"unknown_passthrough_field":"kept"}`,
+			sessionID:         "stable-session-output-limit",
+			passThrough:       true,
+			injectionEnabled:  false,
+			wantUnknown:       true,
+			ignoreOutputLimit: true,
+		},
+		{
+			name:              "raw passthrough keeps output limit for non OpenAI channel",
+			body:              `{"model":"grok-test","input":"hello","max_output_tokens":4096}`,
+			sessionID:         "stable-session-non-openai",
+			passThrough:       true,
+			injectionEnabled:  false,
+			ignoreOutputLimit: true,
+			wantOutputLimit:   true,
+			channelType:       constant.ChannelTypeXai,
 		},
 		{
 			name:             "explicit client key wins",
@@ -148,10 +171,17 @@ func TestResponsesHelperInjectsScopedPromptCacheKey(t *testing.T) {
 			common.SetContextKey(c, constant.ContextKeyTokenId, 8501)
 			common.SetContextKey(c, constant.ContextKeyUsingGroup, "gptpro")
 			common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-test")
-			common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+			channelType := tt.channelType
+			if channelType == 0 {
+				channelType = constant.ChannelTypeOpenAI
+			}
+			common.SetContextKey(c, constant.ContextKeyChannelType, channelType)
 			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
 			common.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
 			common.SetContextKey(c, constant.ContextKeyChannelSetting, dto.ChannelSettings{PassThroughBodyEnabled: tt.passThrough})
+			common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+				IgnoreClientMaxOutputTokens: tt.ignoreOutputLimit,
+			})
 
 			var request dto.OpenAIResponsesRequest
 			require.NoError(t, common.Unmarshal([]byte(tt.body), &request))
@@ -180,6 +210,8 @@ func TestResponsesHelperInjectsScopedPromptCacheKey(t *testing.T) {
 			if tt.wantUnknown {
 				assert.Equal(t, "kept", body["unknown_passthrough_field"])
 			}
+			_, hasOutputLimit := body["max_output_tokens"]
+			assert.Equal(t, tt.wantOutputLimit, hasOutputLimit)
 		})
 	}
 }
