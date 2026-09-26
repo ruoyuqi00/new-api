@@ -40,7 +40,8 @@ import type {
 export async function getSHKeeperSettings(signal?: AbortSignal) {
   const res = await api.get<SHKeeperSettingsResponse>(
     '/api/option/shkeeper/status',
-    { signal }
+    // Query cancellation must not leave retries sharing the aborted request.
+    { signal, disableDuplicate: true }
   )
   return res.data
 }

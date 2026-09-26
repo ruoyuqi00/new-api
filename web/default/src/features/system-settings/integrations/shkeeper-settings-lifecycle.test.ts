@@ -128,4 +128,41 @@ describe('SHKeeper settings request lifecycle', () => {
 
     assert.deepEqual(events, ['cancel status', 'write settings'])
   })
+
+  for (const failureStage of ['cancellation', 'writer'] as const) {
+    test(`allows another save after ${failureStage} rejects`, async () => {
+      const lifecycle = new SHKeeperSettingsLifecycle()
+      const failure = new Error(`${failureStage} failed`)
+      const failedSave = lifecycle.runSave(
+        async () => {
+          if (failureStage === 'cancellation') throw failure
+        },
+        async () => {
+          throw failure
+        }
+      )
+      const overlappingSave = lifecycle.runSave(
+        async () => undefined,
+        async () => 'unexpected overlapping write'
+      )
+
+      assert.equal(overlappingSave, failedSave)
+      await assert.rejects(failedSave, (error) => error === failure)
+
+      const events: string[] = []
+      const retry = lifecycle.runSave(
+        async () => {
+          events.push('cancel status')
+        },
+        async () => {
+          events.push('write settings')
+          return 'saved'
+        }
+      )
+
+      assert.notEqual(retry, failedSave)
+      assert.equal(await retry, 'saved')
+      assert.deepEqual(events, ['cancel status', 'write settings'])
+    })
+  }
 })
