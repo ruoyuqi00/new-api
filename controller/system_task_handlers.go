@@ -22,6 +22,28 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(shkeeperReconcileHandler{})
+}
+
+type shkeeperReconcileHandler struct{}
+
+func (shkeeperReconcileHandler) Type() string  { return model.SystemTaskTypeSHKeeperReconcile }
+func (shkeeperReconcileHandler) Enabled() bool { return isSHKeeperWebhookEnabled() }
+func (shkeeperReconcileHandler) Interval() time.Duration {
+	seconds := operation_setting.GetSHKeeperPaymentSetting().ReconcileIntervalSeconds
+	if seconds < 60 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
+}
+func (shkeeperReconcileHandler) NewPayload() any { return nil }
+func (shkeeperReconcileHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	result, err := service.ReconcileSHKeeperOrders(ctx, 100)
+	status := model.SystemTaskStatusSucceeded
+	if err != nil {
+		status = model.SystemTaskStatusFailed
+	}
+	finishSystemTaskHandler(task, runnerID, status, result, err)
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

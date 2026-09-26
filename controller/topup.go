@@ -96,16 +96,21 @@ func GetTopUpInfo(c *gin.Context) {
 	}
 
 	data := gin.H{
-		"enable_online_topup":                  isEpayTopUpEnabled(),
-		"enable_stripe_topup":                  isStripeTopUpEnabled(),
-		"enable_creem_topup":                   isCreemTopUpEnabled(),
-		"enable_waffo_topup":                   enableWaffo,
-		"enable_waffo_pancake_topup":           enableWaffoPancake,
-		"enable_redemption":                    complianceConfirmed,
-		"payment_compliance_confirmed":         complianceConfirmed,
-		"payment_compliance_terms_version":     operation_setting.CurrentComplianceTermsVersion,
-		"affiliate_credit_rebate_enabled":      common.AffiliateCreditRebateEnabled,
-		"affiliate_credit_rebate_basis_points": common.AffiliateCreditRebateBasisPoints,
+		"enable_shkeeper_topup":                 isSHKeeperTopUpEnabled(),
+		"shkeeper_packages":                     append([]operation_setting.SHKeeperTopUpPackage{}, operation_setting.GetSHKeeperPaymentSetting().Packages...),
+		"shkeeper_networks":                     append([]string{}, operation_setting.GetSHKeeperPaymentSetting().EnabledNetworks...),
+		"shkeeper_invoice_expiry_minutes":       operation_setting.GetSHKeeperPaymentSetting().InvoiceExpiryMinutes,
+		"shkeeper_transaction_recovery_enabled": operation_setting.GetSHKeeperPaymentSetting().BackendKey != "",
+		"enable_online_topup":                   isEpayTopUpEnabled(),
+		"enable_stripe_topup":                   isStripeTopUpEnabled(),
+		"enable_creem_topup":                    isCreemTopUpEnabled(),
+		"enable_waffo_topup":                    enableWaffo,
+		"enable_waffo_pancake_topup":            enableWaffoPancake,
+		"enable_redemption":                     complianceConfirmed,
+		"payment_compliance_confirmed":          complianceConfirmed,
+		"payment_compliance_terms_version":      operation_setting.CurrentComplianceTermsVersion,
+		"affiliate_credit_rebate_enabled":       common.AffiliateCreditRebateEnabled,
+		"affiliate_credit_rebate_basis_points":  common.AffiliateCreditRebateBasisPoints,
 		"waffo_pay_methods": func() interface{} {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()

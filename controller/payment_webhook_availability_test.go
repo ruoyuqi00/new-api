@@ -21,6 +21,18 @@ func confirmPaymentComplianceForTest(t *testing.T) {
 	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
 }
 
+func TestSHKeeperWebhookRemainsAvailableForExistingInvoices(t *testing.T) {
+
+	settings := operation_setting.GetSHKeeperPaymentSetting()
+	previous := *settings
+	t.Cleanup(func() { *settings = previous })
+	*settings = operation_setting.SHKeeperPaymentSetting{BaseURL: "https://pay.example.com", APIKey: "secret"}
+	require.True(t, isSHKeeperWebhookEnabled())
+	require.False(t, isSHKeeperTopUpEnabled())
+	settings.APIKey = ""
+	require.False(t, isSHKeeperWebhookEnabled())
+}
+
 func TestStripeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	confirmPaymentComplianceForTest(t)
 	originalAPISecret := setting.StripeApiSecret
