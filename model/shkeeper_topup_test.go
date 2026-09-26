@@ -16,7 +16,7 @@ import (
 
 func setupFixedSHKeeperOrder(t *testing.T, requestedUSDT string, balance string, quota int64) (*User, *SHKeeperTopUpOrder) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&SHKeeperTopUpOrder{}, &SHKeeperCreditedTransaction{}))
+	require.NoError(t, DB.AutoMigrate(&SHKeeperTopUpOrder{}, &SHKeeperCreditedTransaction{}, &Option{}, &AffiliateReward{}))
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&SHKeeperCreditedTransaction{}).Error)
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&SHKeeperTopUpOrder{}).Error)
 	originalQuotaPerUnit := common.QuotaPerUnit

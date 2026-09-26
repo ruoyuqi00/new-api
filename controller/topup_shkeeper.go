@@ -203,9 +203,15 @@ func SHKeeperWebhook(c *gin.Context) {
 		return
 	}
 	var payload struct {
-		ExternalID string `json:"external_id"`
-		Crypto     string `json:"crypto"`
-		Address    string `json:"addr"`
+		ExternalID   string `json:"external_id"`
+		Crypto       string `json:"crypto"`
+		Address      string `json:"addr"`
+		Status       string `json:"status"`
+		Transactions []struct {
+			TxID    string `json:"txid"`
+			Crypto  string `json:"crypto"`
+			Trigger bool   `json:"trigger"`
+		} `json:"transactions"`
 	}
 	if common.Unmarshal(body, &payload) != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false})
@@ -218,6 +224,34 @@ func SHKeeperWebhook(c *gin.Context) {
 	}
 	if payload.ExternalID != order.ExternalID || payload.Crypto != order.Crypto || payload.Address != order.InvoiceAddress || order.InvoiceAddress == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false})
+		return
+	}
+	if payload.Status == "unconfirmed" {
+		c.Status(http.StatusAccepted)
+		return
+	}
+	if payload.Status != "confirmed" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false})
+		return
+	}
+	transactionIDs := make([]string, 0)
+	for _, transaction := range payload.Transactions {
+		if !transaction.Trigger {
+			continue
+		}
+		txID, normalizeErr := service.NormalizeSHKeeperTransactionID(order.Crypto, transaction.TxID)
+		if transaction.Crypto != order.Crypto || normalizeErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false})
+			return
+		}
+		transactionIDs = append(transactionIDs, txID)
+	}
+	if len(transactionIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false})
+		return
+	}
+	if err := model.AuthorizeSHKeeperTransactions(order.ID, order.Crypto, transactionIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 		return
 	}
 	if _, err := service.ReconcileSHKeeperOrder(c.Request.Context(), order.TradeNo); err != nil {

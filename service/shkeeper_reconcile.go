@@ -37,12 +37,29 @@ func ReconcileSHKeeperOrder(ctx context.Context, tradeNo string) (*model.SHKeepe
 	if err != nil {
 		return nil, err
 	}
-	expected, err := decimal.NewFromString(order.RequestedUSDT)
-	if err != nil || !expected.IsPositive() || order.SettlementMode != model.SHKeeperSettlementModeFixedPackage {
+	expectedFiat := "USD"
+	expectedAmount := order.RequestedUSDT
+	legacyQuote := decimal.Zero
+	switch order.SettlementMode {
+	case model.SHKeeperSettlementModeFixedPackage:
+	case "":
+		expectedFiat = "CNY"
+		expectedAmount = order.RequestedBalance
+		rate, rateErr := decimal.NewFromString(order.LockedRate)
+		var quoteErr error
+		legacyQuote, quoteErr = decimal.NewFromString(order.QuotedUSDT)
+		if rateErr != nil || !rate.IsPositive() || quoteErr != nil || !legacyQuote.IsPositive() {
+			return nil, errors.New("SHKeeper legacy order requires operator recovery")
+		}
+	default:
+		return nil, errors.New("SHKeeper order requires operator recovery")
+	}
+	expected, err := decimal.NewFromString(expectedAmount)
+	if err != nil || !expected.IsPositive() || strings.TrimSpace(order.ExternalID) == "" {
 		return nil, errors.New("SHKeeper order requires operator recovery")
 	}
 	amount, err := decimal.NewFromString(invoice.AmountFiat)
-	if err != nil || !amount.Equal(expected) || invoice.Fiat != "USD" || invoice.ExternalID != order.ExternalID {
+	if err != nil || !amount.Equal(expected) || invoice.Fiat != expectedFiat || invoice.ExternalID != order.ExternalID {
 		return nil, errors.New("SHKeeper invoice identity or amount mismatch")
 	}
 	if strings.TrimSpace(order.InvoiceAddress) == "" {
@@ -60,6 +77,18 @@ func ReconcileSHKeeperOrder(ctx context.Context, tradeNo string) (*model.SHKeepe
 		status = model.SHKeeperOrderStatusOverpaid
 	default:
 		return nil, errors.New("unsupported SHKeeper invoice status")
+	}
+	authorizedIDs, err := model.ListSHKeeperAuthorizedTransactionIDs(order.ID, order.Crypto)
+	if err != nil {
+		return nil, err
+	}
+	authorized := make(map[string]bool, len(authorizedIDs))
+	for _, id := range authorizedIDs {
+		normalized, err := NormalizeSHKeeperTransactionID(order.Crypto, id)
+		if err != nil {
+			return nil, err
+		}
+		authorized[normalized] = true
 	}
 	total := decimal.Zero
 	seen := make(map[string]decimal.Decimal)
@@ -79,6 +108,9 @@ func ReconcileSHKeeperOrder(ctx context.Context, tradeNo string) (*model.SHKeepe
 		if err != nil {
 			return nil, err
 		}
+		if !authorized[txID] {
+			continue
+		}
 		if previous, ok := seen[txID]; ok {
 			if !previous.Equal(amount) {
 				return nil, errors.New("conflicting SHKeeper transaction amount")
@@ -88,6 +120,24 @@ func ReconcileSHKeeperOrder(ctx context.Context, tradeNo string) (*model.SHKeepe
 		seen[txID] = amount
 		total = total.Add(amount)
 		transactions = append(transactions, model.SHKeeperSettlementTransaction{TxID: txID, AmountUSDT: amount.String()})
+	}
+	if order.SettlementMode == "" {
+		// Invoice PAID may include transactions still waiting for confirmations.
+		// Only authorized crypto amounts are compared with the frozen quote.
+		status = model.SHKeeperOrderStatusUnpaid
+		if total.GreaterThan(legacyQuote) {
+			status = model.SHKeeperOrderStatusOverpaid
+		} else if total.Equal(legacyQuote) {
+			status = model.SHKeeperOrderStatusPaid
+		} else if total.IsPositive() {
+			status = model.SHKeeperOrderStatusPartial
+		}
+		if (status == model.SHKeeperOrderStatusPaid || status == model.SHKeeperOrderStatusOverpaid) && order.ExpiresAt > 0 && attemptedAt > order.ExpiresAt {
+			status = model.SHKeeperOrderStatusLate
+		}
+		if order.CompletedAt > 0 && (order.Status == model.SHKeeperOrderStatusPaid || order.Status == model.SHKeeperOrderStatusOverpaid || order.Status == model.SHKeeperOrderStatusLate) {
+			status = order.Status
+		}
 	}
 	result, err := model.SettleSHKeeperTopUp(model.SHKeeperSettlementInput{TradeNo: order.TradeNo, UserID: order.UserID, Crypto: order.Crypto, InvoiceAddress: order.InvoiceAddress, ProviderStatus: status, ReceivedUSDT: total.String(), Transactions: transactions, ReconciledAt: attemptedAt})
 	if err != nil {

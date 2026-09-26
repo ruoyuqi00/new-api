@@ -253,6 +253,7 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 	}
 
 	result := &SHKeeperSettlementResult{}
+	var affiliateReward *AffiliateReward
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		order := &SHKeeperTopUpOrder{}
 		if err := lockForUpdate(tx).Where("trade_no = ?", input.TradeNo).First(order).Error; err != nil {
@@ -278,7 +279,10 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 			return errors.New("SHKeeper received amount cannot decrease")
 		}
 		legacyRate := decimal.Zero
-		if order.SettlementMode != SHKeeperSettlementModeFixedPackage {
+		if order.SettlementMode != SHKeeperSettlementModeFixedPackage && order.SettlementMode != "" {
+			return errors.New("unsupported SHKeeper settlement mode")
+		}
+		if order.SettlementMode == "" {
 			legacyRate, err = decimal.NewFromString(order.LockedRate)
 			if err != nil || !legacyRate.IsPositive() {
 				return errors.New("invalid stored SHKeeper rate")
@@ -419,16 +423,13 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 		}
 		quotaDelta := targetQuota - order.CreditedQuota
 		if quotaDelta > 0 {
-			query := tx.Model(&User{}).Where("id = ?", order.UserID)
+			options := affiliateCreditOptions{accumulate: order.SettlementMode == ""}
 			if order.SettlementMode == SHKeeperSettlementModeFixedPackage {
-				query = query.Where("quota <= ?", operation_setting.SHKeeperMaxUserQuota-quotaDelta)
+				options.maxQuota = operation_setting.SHKeeperMaxUserQuota
 			}
-			update := query.Update("quota", gorm.Expr("quota + ?", quotaDelta))
-			if update.Error != nil {
-				return update.Error
-			}
-			if update.RowsAffected != 1 {
-				return errors.New("SHKeeper user not found or user quota limit exceeded")
+			affiliateReward, err = creditUserQuotaWithAffiliateRewardTx(tx, order.UserID, int(quotaDelta), AffiliateRewardSourceTopUp, order.TradeNo, options)
+			if err != nil {
+				return err
 			}
 			if topUp.Status == common.TopUpStatusPending {
 				topUp.Status = common.TopUpStatusSuccess
@@ -470,5 +471,6 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 	if err != nil {
 		return nil, err
 	}
+	RecordAffiliateRewardLog(affiliateReward)
 	return result, nil
 }

@@ -23,6 +23,7 @@ const (
 var (
 	ErrInvalidAffiliateCredit             = errors.New("invalid affiliate credit")
 	ErrInvalidAffiliateCreditRebateConfig = errors.New("invalid affiliate credit rebate configuration")
+	ErrAffiliateCreditQuotaLimit          = errors.New("user quota limit exceeded")
 )
 
 type AffiliateReward struct {
@@ -78,6 +79,17 @@ func CreditUserQuotaWithAffiliateRewardTx(
 	sourceType string,
 	sourceId string,
 ) (*AffiliateReward, error) {
+	return creditUserQuotaWithAffiliateRewardTx(tx, userId, creditedQuota, sourceType, sourceId, affiliateCreditOptions{})
+}
+
+type affiliateCreditOptions struct {
+	maxQuota int64
+	// Legacy SHKeeper invoices can credit multiple confirmed installments.
+	// Their one stable source row accumulates quota with cumulative rounding.
+	accumulate bool
+}
+
+func creditUserQuotaWithAffiliateRewardTx(tx *gorm.DB, userId, creditedQuota int, sourceType, sourceId string, options affiliateCreditOptions) (*AffiliateReward, error) {
 	if tx == nil || userId <= 0 || creditedQuota <= 0 || strings.TrimSpace(sourceId) == "" {
 		return nil, ErrInvalidAffiliateCredit
 	}
@@ -96,13 +108,21 @@ func CreditUserQuotaWithAffiliateRewardTx(
 	if err := tx.Select("id", "inviter_id").First(&invitee, userId).Error; err != nil {
 		return nil, err
 	}
-	result := tx.Model(&User{}).
-		Where("id = ?", userId).
-		Update("quota", gorm.Expr("quota + ?", creditedQuota))
+	query := tx.Model(&User{}).Where("id = ?", userId)
+	if options.maxQuota > 0 {
+		if int64(creditedQuota) > options.maxQuota {
+			return nil, ErrAffiliateCreditQuotaLimit
+		}
+		query = query.Where("quota <= ?", options.maxQuota-int64(creditedQuota))
+	}
+	result := query.Update("quota", gorm.Expr("quota + ?", creditedQuota))
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	if result.RowsAffected != 1 {
+		if options.maxQuota > 0 {
+			return nil, ErrAffiliateCreditQuotaLimit
+		}
 		return nil, gorm.ErrRecordNotFound
 	}
 
@@ -124,35 +144,62 @@ func CreditUserQuotaWithAffiliateRewardTx(
 		return nil, err
 	}
 
-	rewardQuota := decimal.NewFromInt(int64(creditedQuota)).
+	sourceHash := sha256.Sum256([]byte(sourceId))
+	sourceKey := hex.EncodeToString(sourceHash[:])
+	var previous AffiliateReward
+	if options.accumulate {
+		err := lockForUpdate(tx).Where("source_type = ? AND source_key = ?", sourceType, sourceKey).First(&previous).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if err == nil {
+			if previous.InviteeId != userId || previous.InviterId != inviter.Id {
+				return nil, ErrInvalidAffiliateCredit
+			}
+			basisPoints = previous.RatioBasisPoints
+		}
+	}
+	totalCredited := previous.CreditedQuota + creditedQuota
+	rewardQuota := decimal.NewFromInt(int64(totalCredited)).
 		Mul(decimal.NewFromInt(int64(basisPoints))).
 		Div(decimal.NewFromInt(10_000)).
 		IntPart()
-	if rewardQuota <= 0 {
+	rewardDelta := int(rewardQuota) - previous.RewardQuota
+	if rewardDelta <= 0 && previous.Id == 0 && !options.accumulate {
 		return nil, nil
 	}
 
-	sourceHash := sha256.Sum256([]byte(sourceId))
 	reward := &AffiliateReward{
 		SourceType:       sourceType,
-		SourceKey:        hex.EncodeToString(sourceHash[:]),
+		SourceKey:        sourceKey,
 		SourceId:         sourceId,
 		InviteeId:        userId,
 		InviterId:        inviter.Id,
-		CreditedQuota:    creditedQuota,
+		CreditedQuota:    totalCredited,
 		RatioBasisPoints: basisPoints,
 		RewardQuota:      int(rewardQuota),
 		CreatedTime:      common.GetTimestamp(),
 	}
-	if err := tx.Create(reward).Error; err != nil {
-		return nil, err
+	if previous.Id > 0 {
+		reward.Id = previous.Id
+		reward.CreatedTime = previous.CreatedTime
+		if err := tx.Save(reward).Error; err != nil {
+			return nil, err
+		}
+	} else {
+		if err := tx.Create(reward).Error; err != nil {
+			return nil, err
+		}
+	}
+	if rewardDelta == 0 {
+		return nil, nil
 	}
 
 	result = tx.Model(&User{}).
 		Where("id = ?", inviter.Id).
 		Updates(map[string]interface{}{
-			"aff_quota":   gorm.Expr("aff_quota + ?", reward.RewardQuota),
-			"aff_history": gorm.Expr("aff_history + ?", reward.RewardQuota),
+			"aff_quota":   gorm.Expr("aff_quota + ?", rewardDelta),
+			"aff_history": gorm.Expr("aff_history + ?", rewardDelta),
 		})
 	if result.Error != nil {
 		return nil, result.Error
@@ -160,6 +207,9 @@ func CreditUserQuotaWithAffiliateRewardTx(
 	if result.RowsAffected != 1 {
 		return nil, gorm.ErrRecordNotFound
 	}
+	// The committed row is cumulative; the audit log describes only this credit.
+	reward.CreditedQuota = creditedQuota
+	reward.RewardQuota = rewardDelta
 	return reward, nil
 }
 

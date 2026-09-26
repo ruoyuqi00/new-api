@@ -20,8 +20,9 @@ import (
 func setupSHKeeperReconcile(t *testing.T) (*model.User, *model.SHKeeperTopUpOrder, *SHKeeperInvoiceLookup) {
 	t.Helper()
 	truncate(t)
-	require.NoError(t, model.DB.AutoMigrate(&model.SHKeeperTopUpOrder{}, &model.SHKeeperCreditedTransaction{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.SHKeeperTopUpOrder{}, &model.SHKeeperCreditedTransaction{}, &model.SHKeeperTransactionAuthorization{}, &model.Option{}, &model.AffiliateReward{}))
 	t.Cleanup(func() {
+		model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SHKeeperTransactionAuthorization{})
 		model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SHKeeperCreditedTransaction{})
 		model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SHKeeperTopUpOrder{})
 	})
@@ -32,6 +33,7 @@ func setupSHKeeperReconcile(t *testing.T) (*model.User, *model.SHKeeperTopUpOrde
 	require.NoError(t, model.DB.Create(user).Error)
 	order := &model.SHKeeperTopUpOrder{TradeNo: "USDT1abc", ExternalID: "USDT1abc", UserID: user.Id, Crypto: "USDT", SettlementMode: model.SHKeeperSettlementModeFixedPackage, RequestedUSDT: "10", PackageBalance: "66", InvoiceAddress: "TAddress", ReceivedUSDT: "0", CreditedBalance: "0", Status: model.SHKeeperOrderStatusUnpaid, ExpiresAt: time.Now().Add(time.Hour).Unix()}
 	require.NoError(t, model.InsertSHKeeperTopUp(&model.TopUp{TradeNo: order.TradeNo, UserId: user.Id, PaymentMethod: model.PaymentMethodSHKeeper, PaymentProvider: model.PaymentProviderSHKeeper, Status: common.TopUpStatusPending}, order))
+	require.NoError(t, model.AuthorizeSHKeeperTransactions(order.ID, order.Crypto, []string{strings.Repeat("a", 64)}))
 	lookup := &SHKeeperInvoiceLookup{ExternalID: order.ExternalID, Fiat: "USD", AmountFiat: "10", BalanceFiat: "10", Status: "PAID", Transactions: []SHKeeperInvoiceTransaction{{Crypto: "USDT", Address: "TAddress", AmountUSDT: "10", TxID: strings.Repeat("a", 64), Status: "CONFIRMED"}}}
 	return user, order, lookup
 }
@@ -74,6 +76,7 @@ func TestSHKeeperReconcileThresholdReplayAndAudit(t *testing.T) {
 	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&count).Error)
 	assert.Zero(t, count)
 	lookup.Transactions = append(lookup.Transactions, SHKeeperInvoiceTransaction{Crypto: "USDT", Address: "TAddress", AmountUSDT: "1", TxID: strings.Repeat("b", 64), Status: "CONFIRMED"})
+	require.NoError(t, model.AuthorizeSHKeeperTransactions(order.ID, order.Crypto, []string{strings.Repeat("b", 64)}))
 	lookup.BalanceFiat = "10"
 	lookup.Status = "PAID"
 	duplicate := lookup.Transactions[0]
@@ -172,4 +175,78 @@ func TestSHKeeperReconcileFailedBatchRotates(t *testing.T) {
 	assert.Equal(t, 1, second.Failed)
 	require.NoError(t, model.DB.First(&other, other.ID).Error)
 	assert.Positive(t, other.LastReconciledAt, fmt.Sprint(second))
+}
+
+func TestSHKeeperReconcileLegacySnapshots(t *testing.T) {
+	for _, scenario := range []string{"coherent", "unknown-mode", "missing-rate", "missing-quote", "missing-request", "addressless", "wrong-fiat", "wrong-amount"} {
+		t.Run(scenario, func(t *testing.T) {
+			user, order, lookup := setupSHKeeperReconcile(t)
+			order.SettlementMode = ""
+			order.RequestedBalance = "66"
+			order.LockedRate = "6.6"
+			order.QuotedUSDT = "10"
+			order.RequestedUSDT = ""
+			lookup.Fiat = "CNY"
+			lookup.AmountFiat = "66"
+			lookup.Transactions[0].AmountUSDT = "4"
+			// Provider's PAID classification may include an unauthorized later transaction.
+			lookup.Transactions = append(lookup.Transactions, SHKeeperInvoiceTransaction{Crypto: "USDT", Address: "TAddress", AmountUSDT: "6", TxID: strings.Repeat("b", 64), Status: "CONFIRMED"})
+			switch scenario {
+			case "unknown-mode":
+				order.SettlementMode = "unknown"
+			case "missing-rate":
+				order.LockedRate = ""
+			case "missing-quote":
+				order.QuotedUSDT = ""
+			case "missing-request":
+				order.RequestedBalance = ""
+			case "addressless":
+				order.InvoiceAddress = ""
+			case "wrong-fiat":
+				lookup.Fiat = "USD"
+			case "wrong-amount":
+				lookup.AmountFiat = "65"
+			}
+			require.NoError(t, model.DB.Save(order).Error)
+			serveSHKeeperLookup(t, lookup, false)
+			result, err := ReconcileSHKeeperOrder(context.Background(), order.TradeNo)
+			if scenario != "coherent" {
+				require.Error(t, err)
+				require.NoError(t, model.DB.First(user, user.Id).Error)
+				assert.Zero(t, user.Quota)
+				return
+			}
+			require.NoError(t, err)
+			assert.EqualValues(t, 2640, result.CreditedQuotaDelta)
+			assert.Equal(t, "partial", result.Status)
+			replay, err := ReconcileSHKeeperOrder(context.Background(), order.TradeNo)
+			require.NoError(t, err)
+			assert.Zero(t, replay.CreditedQuotaDelta)
+			require.NoError(t, model.DB.First(user, user.Id).Error)
+			assert.Equal(t, 2640, user.Quota)
+			require.NoError(t, model.AuthorizeSHKeeperTransactions(order.ID, order.Crypto, []string{strings.Repeat("b", 64)}))
+			completed, err := ReconcileSHKeeperOrder(context.Background(), order.TradeNo)
+			require.NoError(t, err)
+			assert.EqualValues(t, 3960, completed.CreditedQuotaDelta)
+			assert.Equal(t, "paid", completed.Status)
+			replay, err = ReconcileSHKeeperOrder(context.Background(), order.TradeNo)
+			require.NoError(t, err)
+			assert.Zero(t, replay.CreditedQuotaDelta)
+		})
+	}
+}
+
+func TestSHKeeperReconcilePreservesPreviouslyCreditedEvidence(t *testing.T) {
+	user, order, lookup := setupSHKeeperReconcile(t)
+	serveSHKeeperLookup(t, lookup, false)
+	first, err := ReconcileSHKeeperOrder(context.Background(), order.TradeNo)
+	require.NoError(t, err)
+	assert.EqualValues(t, 6600, first.CreditedQuotaDelta)
+	require.NoError(t, model.DB.Where("order_id = ?", order.ID).Delete(&model.SHKeeperTransactionAuthorization{}).Error)
+	replay, err := ReconcileSHKeeperOrder(context.Background(), order.TradeNo)
+	require.NoError(t, err)
+	assert.Zero(t, replay.CreditedQuotaDelta)
+	assert.Equal(t, "10", replay.ReceivedUSDT)
+	require.NoError(t, model.DB.First(user, user.Id).Error)
+	assert.Equal(t, 6600, user.Quota)
 }

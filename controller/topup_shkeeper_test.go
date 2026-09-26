@@ -22,7 +22,7 @@ import (
 func setupSHKeeperController(t *testing.T, handler http.HandlerFunc) (*gin.Engine, *model.User) {
 	t.Helper()
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.TopUp{}, &model.SHKeeperTopUpOrder{}, &model.SHKeeperCreditedTransaction{}, &model.Log{}, &model.Option{}, &model.SystemTask{}, &model.SystemTaskLock{}))
+	require.NoError(t, db.AutoMigrate(&model.TopUp{}, &model.SHKeeperTopUpOrder{}, &model.SHKeeperCreditedTransaction{}, &model.SHKeeperTransactionAuthorization{}, &model.AffiliateReward{}, &model.Log{}, &model.Option{}, &model.SystemTask{}, &model.SystemTaskLock{}))
 	confirmPaymentComplianceForTest(t)
 	oldQuota := common.QuotaPerUnit
 	common.QuotaPerUnit = 100
@@ -228,7 +228,7 @@ func TestSHKeeperWebhookQueriesBeforeCreditAndAcknowledgement(t *testing.T) {
 		fmt.Fprintf(w, `{"status":"success","invoices":[{"external_id":"USDT1abc","fiat":"USD","amount_fiat":"10","balance_fiat":"10","status":"PAID","txs":[{"amount":"10","crypto":"USDT","addr":"TAddress","txid":"%s","status":"CONFIRMED"}]}]}`, strings.Repeat("a", 64))
 	})
 	insertSHKeeperControllerOrder(t, user)
-	body := `{"external_id":"USDT1abc","crypto":"USDT","addr":"TAddress","status":"PAID"}`
+	body := `{"external_id":"USDT1abc","crypto":"USDT","addr":"TAddress","status":"confirmed","transactions":[{"txid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","crypto":"USDT","trigger":true}]}`
 	timestamp := fmt.Sprint(time.Now().Unix())
 	mac := hmac.New(sha256.New, []byte("api-secret"))
 	mac.Write([]byte(timestamp + "." + body))
