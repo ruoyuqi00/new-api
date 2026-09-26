@@ -266,37 +266,39 @@ function SHKeeperSettingsSectionComponent(
   const testSettings = form.handleSubmit((values) => {
     testMutation.mutate(buildSHKeeperSettingsRequest(values))
   })
-  const saveSettings = React.useCallback(() => {
-    return lifecycle.runSave(
-      () =>
-        queryClient.cancelQueries({
-          queryKey: ['shkeeper-settings'],
-          exact: true,
-        }),
-      (generation) => {
-        if (!settingsResponse?.success || !settingsResponse.data) {
-          toast.error(t('Unable to load SHKeeper settings'))
-          void queryClient.invalidateQueries({
-            queryKey: ['shkeeper-settings'],
-          })
-          return Promise.reject(
-            new Error(t('SHKeeper settings are not ready to save'))
-          )
-        }
-        return form.handleSubmit(
-          async (values) => {
+  const saveSettings = React.useCallback(async () => {
+    let validationFailed = false
+    await form.handleSubmit(
+      async (values) => {
+        await lifecycle.runSave(
+          () =>
+            queryClient.cancelQueries({
+              queryKey: ['shkeeper-settings'],
+              exact: true,
+            }),
+          async (generation) => {
+            if (!settingsResponse?.success || !settingsResponse.data) {
+              toast.error(t('Unable to load SHKeeper settings'))
+              void queryClient.invalidateQueries({
+                queryKey: ['shkeeper-settings'],
+              })
+              throw new Error(t('SHKeeper settings are not ready to save'))
+            }
             await saveMutation.mutateAsync({
               generation,
               request: buildSHKeeperSettingsRequest(values),
             })
-          },
-          async () => {
-            toast.error(t('Fix validation errors before saving'))
-            throw new Error(t('Invalid SHKeeper settings'))
           }
-        )()
+        )
+      },
+      () => {
+        validationFailed = true
+        toast.error(t('Fix validation errors before saving'))
       }
-    )
+    )()
+    if (validationFailed) {
+      throw new Error(t('Invalid SHKeeper settings'))
+    }
   }, [form, lifecycle, queryClient, saveMutation, settingsResponse, t])
 
   React.useImperativeHandle(ref, () => ({ save: saveSettings }), [saveSettings])
@@ -407,7 +409,9 @@ function SHKeeperSettingsSectionComponent(
                     />
                   </FormControl>
                   <FormDescription>
-                    {t('Used for server-to-server SHKeeper API requests.')}
+                    {t(
+                      'Authenticates SHKeeper API requests and verifies webhook HMAC signatures.'
+                    )}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -434,7 +438,9 @@ function SHKeeperSettingsSectionComponent(
                     />
                   </FormControl>
                   <FormDescription>
-                    {t('Used to verify signed SHKeeper payment callbacks.')}
+                    {t(
+                      'Authorizes walletnotify requests to rescan transactions.'
+                    )}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
