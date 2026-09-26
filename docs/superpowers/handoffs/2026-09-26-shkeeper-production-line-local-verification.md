@@ -2,6 +2,47 @@
 
 Verified locally on 2026-09-27 (Asia/Shanghai). Feature verification and the 40-pair production UI comparison passed. The repository-wide `bun test`, lint, and format commands retain the baseline failures detailed below; this is not an assertion that every repository gate is green. No deployment, production database, live provider, blockchain, or funds were used.
 
+## Final whole-branch correction
+
+Implementation and regression commit: `2b060addeb716be62a3cc5286fd3a03af2b67ea5`, following review of `282e1426c`. This section supersedes the earlier assumption that lookup transaction `CONFIRMED` proves the configured confirmation threshold, including the original callback-as-wakeup description and incomplete historical callback fixture.
+
+Pinned SHKeeper v2.5.32 distinguishes stored transactions from threshold-cleared callbacks:
+
+- [Transaction.to_json](https://github.com/vsys-host/shkeeper.io/blob/v2.5.32/shkeeper/models.py#L623-L630) labels every stored transaction `CONFIRMED`.
+- [Transaction.add](https://github.com/vsys-host/shkeeper.io/blob/v2.5.32/shkeeper/models.py#L675-L705) sets `need_more_confirmations` from the wallet threshold; [later polling](https://github.com/vsys-host/shkeeper.io/blob/v2.5.32/shkeeper/models.py#L707-L713) revisits it.
+- [walletnotify](https://github.com/vsys-host/shkeeper.io/blob/v2.5.32/shkeeper/api_v1.py#L513-L539) can store a transaction after its first confirmation while withholding its callback until the configured threshold clears.
+- [Callback transaction serialization](https://github.com/vsys-host/shkeeper.io/blob/v2.5.32/shkeeper/callback.py#L78-L92) includes `transactions[]` and marks only the triggering transaction with `trigger:true`.
+
+Lookup now supplies identity and amounts only. After raw-body HMAC validation and local order/network/address checks, a signed `status:confirmed` callback persists normalized matching-network trigger IDs in an additive authorization ledger keyed by order/network/transaction. This commits before authenticated lookup, so a settlement failure leaves retryable evidence. Lookup may settle only authorized IDs or IDs already in the credited-transaction ledger. `unconfirmed` callbacks acknowledge without authorization or settlement; confirmed callbacks without valid trigger evidence fail closed. Invoice `PAID`/`OVERPAID` and lookup `CONFIRMED` never authorize new credit. Both normal and fast GORM migration paths register the ledger.
+
+Coherent empty-mode legacy orders again reconcile using CNY invoice amount equal to positive `RequestedBalance`, positive frozen `LockedRate` and `QuotedUSDT`, external ID and stored address. Status derives from authorized crypto totals and the frozen quote; partial legacy credit and later installments retain their rate behavior. Unknown modes and incomplete snapshots fail closed.
+
+SHKeeper credits now use the shared affiliate transaction logic with source `topup` and stable `TradeNo`. The internal capped option keeps fixed-package user credit as one conditional `quota <= 2147483647 - delta` update. User credit, reward row, inviter counters, top-up and order settlement commit atomically; reward logs are written after commit. Existing callers retain duplicate-source rejection. Legacy installments accumulate one reward row and round the cumulative entitlement using its snapshotted rebate ratio; even an initial sub-quota reward is retained for subsequent rounding. Replay creates neither quota nor another reward.
+
+Fresh validation:
+
+| Gate | Evidence |
+| --- | --- |
+| Initial RED | `go test ./model ./service ./controller -run 'TestSHKeeperAffiliateSettlementAtomicity\|TestSHKeeperReconcileLegacySnapshots\|TestSHKeeperConfirmationAuthorization' -count=1`: all three packages fail for the reviewed defects. Lookup credits 6600 before authorization; coherent legacy is rejected; enabled/cap-boundary/legacy settlement creates no reward. |
+| Fractional legacy RED | `go test ./model -run TestSHKeeperLegacyAffiliateCarriesFractionalReward -count=1`: two 10-quota installments at 5.25% incorrectly produce 0 instead of 1 reward quota. |
+| Focused GREEN | `go test ./model ./service ./controller -run 'SHKeeper\|Affiliate' -count=1`: all three packages pass, including existing affiliate tests. |
+| Full Go | `go test ./... -count=1`: exit 0; 40 packages pass, 50 have no tests, zero failed packages. |
+| Formatting and guards | `gofmt` applied to changed Go files; `git diff --check` passes; committed and working immutable guards against `27023295d` pass. Entire `web/default` diff against `282e1426c` is empty. |
+
+The real Gin/SQLite regressions cover lookup-before-authorization, signed normalized trigger authorization, replay, unconfirmed/no-trigger/invalid-ID/wrong-network rejection, authorizing only the trigger row, authorization surviving an injected settlement database error followed by scheduled repair, upgrade replay via credited evidence, legacy installments/replay/incomplete snapshots, configured 5.25% rebate (6600 credited -> 346 reward), disabled/missing inviter, exact quota cap, over-cap rollback, and injected order-save rollback. Affiliate and legacy evidence uses automated database/service integration because the local UI creates only fixed packages. Browser response contracts and frontend sources are unchanged; no frontend tests, typecheck, translation changes, or visual re-audit were needed for this backend-only correction.
+
+The fixture now exposes first-confirmation lookup rows before callback authorization, then emits a signed callback with one triggering transaction when `/control/confirm` clears the threshold. Existing list/quote/create/lookup/rescan/settle controls remain; the settle callback control emits one trigger callback per transaction. All 24 prior fixture invoices were saved and restored across restart, with the existing candidate database preserved. Fixture state is persisted locally for later restarts.
+
+Current candidate source is the clean implementation commit above, built with `go build -buildvcs=false -ldflags '-X github.com/QuantumNous/new-api/common.Version=local-shkeeper-2b060adde'`. Automatic Go VCS discovery inside this nested worktree incorrectly stamped the main checkout revision during the first build, so it was disabled and replaced with the explicit source version. Application status reports `local-shkeeper-2b060adde`. Final binary SHA-256 is `285CE3AB1E1CEEA56817C17F4122C196794391A04B529C28609D48688351CEEF`.
+
+Candidate PID **3468** started at `2026-09-27T03:51:05.5944825+08:00`, executable `D:/newapi-710-yuapi/.worktrees/shkeeper-production-line/.local-tests/shkeeper-production-line/candidate.exe`, with the existing isolated database/config and loopback port 13037. Fixture PID **41476** started at `2026-09-27T03:47:28.6772328+08:00`, executable `C:/Program Files/nodejs/node.exe`, script `D:/newapi-710-yuapi/.worktrees/shkeeper-production-line/.local-tests/shkeeper-production-line/provider-fixture.mjs`, loopback port 13038. Original PIDs 33280/39008 and intermediate candidate 7020 were stopped only after exact executable/command/creation identity checks. Both services remain healthy and running for review. Previous candidate binaries and logs are retained in the same ignored artifact directory.
+
+The final candidate's live synthetic audit passed at approximately 03:52:24 +08:00. Order `USDT1O4jREWl14LgnMtsxJOK22vbe` exposed invoice `PAID` and a 10-USDT `CONFIRMED` lookup row before callback authorization. A subsequent application-scheduler lookup was observed (excluding the audit's own lookup), and completed task 124 reported `26 processed / 0 credited / 0 failed`. The order remained `unpaid`, received/credited zero, both ledgers empty, and user quota 595,000,000. The threshold-cleared signed trigger callback returned 202 and produced one authorization row, one credited row, status `paid`, 66 balance / 33,000,000 quota, and user quota 628,000,000. Signed callback replay returned 202 with quota still 628,000,000 and one row in each ledger. The audit conditionally waited for actual scheduler work; elapsed time alone was never taken as confirmation. The initial unversioned candidate passed the same audit earlier, retained separately in `final-fix-threshold-initial.json`.
+
+Raw evidence: `final-fix-red.log`, `final-fix-fractional-red.log`, `final-fix-focused.log`, `final-fix-full-go.log`, `final-fix-build.log`, `final-fix-process-before.json`, `final-fix-provenance-before.json`, `final-fix-process-after.json`, and `final-fix-threshold{,-initial}.json`/`.log`, with the scoped restart and threshold scripts. These all remain under the ignored `.local-tests/shkeeper-production-line/` directory.
+
+Remaining limits are unchanged: the fixture does not validate real-chain confirmations or live-provider behavior, MySQL/PostgreSQL migration and concurrency remain production prerequisites, and the previously documented SQLite contention is not claimed fixed. No old/baseline path, other worktree, production, Docker, Caddy, Sub2API, or live funds were touched.
+
 ## Source identity
 
 - Production UI baseline: `27023295d21bcc824c5af1d6e9e36c22c54db3a5`.
@@ -9,21 +50,21 @@ Verified locally on 2026-09-27 (Asia/Shanghai). Feature verification and the 40-
 - Candidate implementation includes Tasks 1–4: `8841ef24b`, `b91a4099b`, `c337a2505`, `cc5b18f5f`, `1e040be18`, `0d4c8d5e9`, `cefcff28e`, `10c400374`, `9decb155a`, and `b5ee7fbf9`.
 - Task 5 fix: `840679c52ee16e7236e4114002164d67024b1762` (`fix: preserve SHKeeper validation feedback before saving`). The documentation commit containing this file adds the final six locale files.
 - Candidate worktree: `D:/newapi-710-yuapi/.worktrees/shkeeper-production-line`.
-- Detached baseline worktree: `D:/newapi-710-yuapi/.worktrees/shkeeper-production-baseline`; `git check-ignore` verified `.worktrees/` before creation. Its tracked files remain clean.
-- Candidate executable SHA-256: `49A01FF05ACE6433AF85179B68FC5E9BD6E9C7A646D730353EA5BFDF0069507A`.
+- Historical detached baseline worktree: `D:/newapi-710-yuapi/.worktrees/shkeeper-production-baseline`; removed in Task 6 after verification, with evidence retained below.
+- Historical Task 5 executable SHA-256: `49A01FF05ACE6433AF85179B68FC5E9BD6E9C7A646D730353EA5BFDF0069507A`; current binary identity is in the final correction above.
 - Both the committed and working-tree guards against the baseline passed for `web/default/src/features/yucore-brand/**` and `web/default/src/styles/**`.
 
 ## Review environment
 
 | Process | Address | PID | State |
 | --- | --- | --- | --- |
-| Production-line candidate | `http://127.0.0.1:13037` | 33280 | Running for review |
-| SHKeeper v2.5.32 fixture | `http://127.0.0.1:13038` | 39008 | Running; required by candidate review |
+| Production-line candidate | `http://127.0.0.1:13037` | 3468 | Running for review |
+| SHKeeper v2.5.32 fixture | `http://127.0.0.1:13038` | 41476 | Running; required by candidate review |
 | Temporary production baseline | `http://127.0.0.1:13036` | 15636 (follow-up) | Stopped again at 2026-09-27 02:21:07 +08:00 |
 
 Candidate sign-in: `http://127.0.0.1:13037/sign-in`. Wallet: `http://127.0.0.1:13037/wallet`. Payment settings: `http://127.0.0.1:13037/system-settings/billing/payment`, then SHKeeper.
 
-Synthetic administrator: `review_admin` / `LocalReview-2026!SHK`. These credentials exist only in the isolated test databases. Initial quota was 100,000,000 in each database (displayed as $200). Two successful audit runs leave candidate quota 562,000,000 (displayed as $1,124), with synthetic order history retained as evidence.
+Synthetic administrator: `review_admin` / `LocalReview-2026!SHK`. These credentials exist only in the isolated test databases. Initial quota was 100,000,000 in each database (displayed as $200). Task 5's two audit runs left quota 562,000,000; the final correction's two threshold audits leave candidate quota 628,000,000 (displayed as $1,256), with synthetic order history retained as evidence.
 
 Candidate packages are `10 → 66`, `50 → 330`, `100 → 660`, `200 → 1320`; all of `BNB-USDT`, `USDT`, and `POLYGON-USDT` are enabled. The first package has the synthetic label `Local review`. Expiry is 30 minutes; reconciliation interval is 60 seconds. Local write-only fixture credentials are API key `local-shkeeper-api-review-only` and backend key `local-shkeeper-backend-review-only`. The API key authenticates requests and signs webhook HMAC; the backend key authorizes walletnotify transaction rescans.
 
