@@ -21,6 +21,7 @@ import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 
 import { requestWaffoPayment, isApiSuccess } from '../api'
+import { parseOrdinaryTopUpAmount } from '../lib/payment'
 
 function getPaymentUrl(data: unknown): string | null {
   if (!data || typeof data !== 'object') {
@@ -50,11 +51,16 @@ export function useWaffoPayment() {
 
   const processWaffoPayment = useCallback(
     async (topupAmount: number, payMethodIndex?: number) => {
+      const amount = parseOrdinaryTopUpAmount(topupAmount)
+      if (amount === null) {
+        toast.error(i18next.t('Enter a positive whole number'))
+        return false
+      }
       setProcessing(true)
 
       try {
         const response = await requestWaffoPayment({
-          amount: Math.floor(topupAmount),
+          amount,
           pay_method_index: payMethodIndex,
         })
 
@@ -70,7 +76,7 @@ export function useWaffoPayment() {
 
         toast.error(getErrorMessage(response.message, response.data))
         return false
-      } catch (_error) {
+      } catch {
         toast.error(i18next.t('Payment request failed'))
         return false
       } finally {

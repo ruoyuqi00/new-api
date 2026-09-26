@@ -32,6 +32,7 @@ import {
   isStripePayment,
   isWaffoPancakePayment,
   submitPaymentForm,
+  parseOrdinaryTopUpAmount,
 } from '../lib'
 
 // ============================================================================
@@ -46,19 +47,22 @@ export function usePayment() {
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
     async (topupAmount: number, paymentType: string) => {
+      if (parseOrdinaryTopUpAmount(topupAmount) === null) {
+        setAmount(0)
+        return 0
+      }
       try {
         setCalculating(true)
 
         const isStripe = isStripePayment(paymentType)
         const isPancake = isWaffoPancakePayment(paymentType)
-        const response = isStripe
-          ? await calculateStripeAmount({ amount: topupAmount })
-          : isPancake
-            ? await calculateWaffoPancakeAmount({ amount: topupAmount })
-            : await calculateAmount({ amount: topupAmount })
+        let calculate = calculateAmount
+        if (isStripe) calculate = calculateStripeAmount
+        else if (isPancake) calculate = calculateWaffoPancakeAmount
+        const response = await calculate({ amount: topupAmount })
 
         if (isApiSuccess(response) && response.data) {
-          const calculatedAmount = parseFloat(response.data)
+          const calculatedAmount = Number.parseFloat(response.data)
           setAmount(calculatedAmount)
           return calculatedAmount
         }
@@ -66,7 +70,7 @@ export function usePayment() {
         // Don't show error for calculation, just set to 0
         setAmount(0)
         return 0
-      } catch (_error) {
+      } catch {
         setAmount(0)
         return 0
       } finally {
@@ -79,12 +83,15 @@ export function usePayment() {
   // Process payment
   const processPayment = useCallback(
     async (topupAmount: number, paymentType: string) => {
+      const amount = parseOrdinaryTopUpAmount(topupAmount)
+      if (amount === null) {
+        toast.error(i18next.t('Enter a positive whole number'))
+        return false
+      }
       try {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
-        const amount = Math.floor(topupAmount)
-
         const response = isStripe
           ? await requestStripePayment({
               amount,
@@ -118,7 +125,7 @@ export function usePayment() {
         }
 
         return false
-      } catch (_error) {
+      } catch {
         toast.error(i18next.t('Payment request failed'))
         return false
       } finally {

@@ -24,6 +24,14 @@ import {
 } from '../constants'
 import type { PresetAmount, TopupInfo } from '../types'
 
+export function parseOrdinaryTopUpAmount(
+  value: string | number
+): number | null {
+  if (!/^\d+$/.test(String(value))) return null
+  const amount = Number(value)
+  return Number.isSafeInteger(amount) && amount > 0 ? amount : null
+}
+
 // ============================================================================
 // Payment Processing Functions
 // ============================================================================

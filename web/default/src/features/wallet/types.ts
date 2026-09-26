@@ -120,6 +120,11 @@ export interface WaffoPayMethod {
  * Topup configuration information
  */
 export interface TopupInfo {
+  enable_shkeeper_topup?: boolean
+  shkeeper_packages?: SHKeeperPackage[]
+  shkeeper_networks?: SHKeeperNetwork[]
+  shkeeper_invoice_expiry_minutes?: number
+  shkeeper_transaction_recovery_enabled?: boolean
   /** Whether online topup is enabled */
   enable_online_topup: boolean
   /** Whether Stripe topup is enabled */
@@ -290,4 +295,34 @@ export interface BillingHistoryResponse {
  */
 export interface CompleteOrderRequest {
   trade_no: string
+}
+
+export type SHKeeperNetwork = 'BNB-USDT' | 'USDT' | 'POLYGON-USDT'
+export type SHKeeperOrderStatus =
+  | 'pending_provider'
+  | 'unpaid'
+  | 'partial'
+  | 'confirming'
+  | 'paid'
+  | 'overpaid'
+  | 'late'
+  | 'failed'
+export type SHKeeperPackage = { usdt: number; balance: string; label?: string }
+export type SHKeeperInvoice = {
+  trade_no: string
+  network: string
+  crypto: SHKeeperNetwork
+  usdt_amount: string
+  balance_amount: string
+  address: string
+  qr_payload: string
+  status: SHKeeperOrderStatus
+  expires_at: number
+  received_usdt: string
+  credited_balance: string
+  transaction_ids?: string[]
+}
+export type SHKeeperPaymentRequest = {
+  usdt_amount: number
+  crypto: SHKeeperNetwork
 }

@@ -39,6 +39,8 @@ import type {
   WaffoPaymentResponse,
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
+  SHKeeperInvoice,
+  SHKeeperPaymentRequest,
 } from './types'
 
 // ============================================================================
@@ -233,4 +235,57 @@ export async function completeOrder(
 ): Promise<ApiResponse> {
   const res = await api.post('/api/user/topup/complete', request)
   return res.data
+}
+
+export async function requestSHKeeperPayment(
+  request: SHKeeperPaymentRequest
+): Promise<SHKeeperInvoice> {
+  const res = await api.post<ApiResponse<SHKeeperInvoice>>(
+    '/api/user/shkeeper/pay',
+    {
+      usdt_amount: request.usdt_amount,
+      crypto: request.crypto,
+    },
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (res.data.success !== true || !res.data.data) {
+    throw new Error(res.data.message || 'SHKeeper payment request failed')
+  }
+  return res.data.data
+}
+
+export async function getSHKeeperOrder(
+  tradeNo: string,
+  signal?: AbortSignal
+): Promise<SHKeeperInvoice> {
+  const res = await api.get<ApiResponse<SHKeeperInvoice>>(
+    `/api/user/shkeeper/order/${encodeURIComponent(tradeNo)}`,
+    {
+      signal,
+      disableDuplicate: true,
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
+  )
+  if (res.data.success !== true || !res.data.data) {
+    throw new Error(res.data.message || 'SHKeeper order request failed')
+  }
+  return res.data.data
+}
+
+export async function submitSHKeeperTransaction(
+  tradeNo: string,
+  txid: string
+): Promise<void> {
+  const res = await api.post<ApiResponse>(
+    `/api/user/shkeeper/order/${encodeURIComponent(tradeNo)}/transaction`,
+    { txid },
+    {
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
+  )
+  if (res.data.success !== true) {
+    throw new Error(res.data.message || 'SHKeeper transaction rescan failed')
+  }
 }
