@@ -242,36 +242,43 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 			}
 		}
 
-		newTransactions := int64(0)
-		seenInput := make(map[string]decimal.Decimal, len(input.Transactions))
+		persistedTransactions := make([]SHKeeperCreditedTransaction, 0)
+		if err := tx.Where("order_id = ?", order.ID).Find(&persistedTransactions).Error; err != nil {
+			return err
+		}
+		evidence := make(map[string]decimal.Decimal, len(persistedTransactions)+len(input.Transactions))
 		transactionTotal := decimal.Zero
+		for _, persisted := range persistedTransactions {
+			txID := strings.TrimSpace(persisted.TxID)
+			amount, parseErr := decimal.NewFromString(persisted.ConfirmedUSDT)
+			if txID == "" || parseErr != nil || amount.IsNegative() {
+				return errors.New("invalid stored SHKeeper transaction")
+			}
+			if storedAmount, exists := evidence[txID]; exists {
+				if !storedAmount.Equal(amount) {
+					return errors.New("SHKeeper transaction ID has a different amount")
+				}
+				continue
+			}
+			evidence[txID] = amount
+			transactionTotal = transactionTotal.Add(amount)
+		}
+
+		newTransactions := int64(0)
 		for _, providerTransaction := range input.Transactions {
 			txID := strings.TrimSpace(providerTransaction.TxID)
 			amount, parseErr := decimal.NewFromString(strings.TrimSpace(providerTransaction.AmountUSDT))
 			if txID == "" || parseErr != nil || amount.IsNegative() {
 				return errors.New("invalid SHKeeper provider transaction")
 			}
-			if seenAmount, exists := seenInput[txID]; exists {
-				if !seenAmount.Equal(amount) {
+			if storedAmount, exists := evidence[txID]; exists {
+				if !storedAmount.Equal(amount) {
 					return errors.New("SHKeeper transaction ID has a different amount")
 				}
 				continue
 			}
-			seenInput[txID] = amount
+			evidence[txID] = amount
 			transactionTotal = transactionTotal.Add(amount)
-			var existing SHKeeperCreditedTransaction
-			existingQuery := tx.Where("crypto = ? AND tx_id = ? AND order_id = ?", order.Crypto, txID, order.ID).
-				Limit(1).Find(&existing)
-			if existingQuery.Error != nil {
-				return existingQuery.Error
-			}
-			if existingQuery.RowsAffected == 1 {
-				storedAmount, parseErr := decimal.NewFromString(existing.ConfirmedUSDT)
-				if parseErr != nil || !storedAmount.Equal(amount) {
-					return errors.New("SHKeeper transaction ID has a different amount")
-				}
-				continue
-			}
 			contribution := decimal.Zero
 			if order.SettlementMode != SHKeeperSettlementModeFixedPackage {
 				contribution = amount.Mul(legacyRate).Round(1)
@@ -288,7 +295,7 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 			}
 			newTransactions += insert.RowsAffected
 		}
-		if len(input.Transactions) > 0 && !transactionTotal.Equal(received) {
+		if !transactionTotal.Equal(received) {
 			return errors.New("SHKeeper transaction total does not match received amount")
 		}
 		if received.GreaterThan(previousReceived) && newTransactions == 0 {
@@ -343,6 +350,12 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 				}
 				targetQuota = order.CreditedQuota
 				if order.PackageQuota == 0 {
+					if topUp.Status != common.TopUpStatusSuccess {
+						return errors.New("SHKeeper credited zero-snapshot order requires ledger recovery")
+					}
+					if targetQuota > operation_setting.SHKeeperMaxUserQuota {
+						return errors.New("SHKeeper credited quota exceeds the supported quota limit")
+					}
 					order.PackageQuota = targetQuota
 				}
 			} else if entitlement.IsPositive() {
@@ -355,7 +368,8 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 				targetQuota = order.PackageQuota
 			}
 		} else {
-			targetQuota = entitlement.Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Round(0).IntPart()
+			quotaDelta := balanceDelta.Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Round(0).IntPart()
+			targetQuota = order.CreditedQuota + quotaDelta
 		}
 		if targetQuota < order.CreditedQuota {
 			return errors.New("SHKeeper credited quota cannot decrease")

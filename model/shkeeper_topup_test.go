@@ -72,14 +72,30 @@ func TestSettleSHKeeperFixedPackageCreditsOnlyOnceAtThreshold(t *testing.T) {
 	assert.Zero(t, partial.CreditedQuotaDelta)
 	assert.Equal(t, "0", partial.CreditedBalance)
 
-	paid := settleSHKeeper(t, order, user, "10", SHKeeperOrderStatusPaid, "tx-2")
+	paid, err := SettleSHKeeperTopUp(SHKeeperSettlementInput{
+		TradeNo: order.TradeNo, UserID: user.Id, Crypto: order.Crypto, InvoiceAddress: order.InvoiceAddress,
+		ProviderStatus: SHKeeperOrderStatusPaid, ReceivedUSDT: "10",
+		Transactions: []SHKeeperSettlementTransaction{
+			{TxID: "tx-1", AmountUSDT: "9"}, {TxID: "tx-2", AmountUSDT: "1"},
+		}, ReconciledAt: time.Now().Unix(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, DB.First(user, user.Id).Error)
 	assert.EqualValues(t, 6600, paid.CreditedQuotaDelta)
 	assert.Equal(t, 6600, user.Quota)
 
 	original := common.QuotaPerUnit
 	common.QuotaPerUnit = 200
 	t.Cleanup(func() { common.QuotaPerUnit = original })
-	replayed := settleSHKeeper(t, order, user, "12", SHKeeperOrderStatusOverpaid, "tx-3")
+	replayed, err := SettleSHKeeperTopUp(SHKeeperSettlementInput{
+		TradeNo: order.TradeNo, UserID: user.Id, Crypto: order.Crypto, InvoiceAddress: order.InvoiceAddress,
+		ProviderStatus: SHKeeperOrderStatusOverpaid, ReceivedUSDT: "12",
+		Transactions: []SHKeeperSettlementTransaction{
+			{TxID: "tx-1", AmountUSDT: "9"}, {TxID: "tx-2", AmountUSDT: "1"}, {TxID: "tx-3", AmountUSDT: "2"},
+		}, ReconciledAt: time.Now().Unix(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, DB.First(user, user.Id).Error)
 	assert.Zero(t, replayed.CreditedQuotaDelta)
 	assert.EqualValues(t, 6600, replayed.CreditedQuota)
 	assert.Equal(t, 6600, user.Quota)
@@ -150,6 +166,28 @@ func TestSettleSHKeeperRejectsReceivedTotalThatDoesNotMatchTransactions(t *testi
 	require.ErrorContains(t, err, "transaction total")
 	require.NoError(t, DB.First(user, user.Id).Error)
 	assert.Zero(t, user.Quota)
+}
+
+func TestSettleSHKeeperIncludesPersistedEvidenceInTransactionTotal(t *testing.T) {
+	user, order := setupFixedSHKeeperOrder(t, "10", "66", 6600)
+	settleSHKeeper(t, order, user, "9", SHKeeperOrderStatusPartial, "persisted")
+
+	_, err := SettleSHKeeperTopUp(SHKeeperSettlementInput{
+		TradeNo: order.TradeNo, UserID: user.Id, Crypto: order.Crypto, InvoiceAddress: order.InvoiceAddress,
+		ProviderStatus: SHKeeperOrderStatusPaid, ReceivedUSDT: "10",
+		Transactions: []SHKeeperSettlementTransaction{{TxID: "submitted", AmountUSDT: "10"}},
+		ReconciledAt: time.Now().Unix(),
+	})
+	require.ErrorContains(t, err, "transaction total")
+	require.NoError(t, DB.First(user, user.Id).Error)
+	assert.Zero(t, user.Quota)
+	stored, err := GetSHKeeperTopUpByTradeNo(user.Id, order.TradeNo)
+	require.NoError(t, err)
+	assert.Equal(t, "9", stored.ReceivedUSDT)
+	transactions, err := ListSHKeeperCreditedTransactions(order.ID)
+	require.NoError(t, err)
+	require.Len(t, transactions, 1)
+	assert.Equal(t, "persisted", transactions[0].TxID)
 }
 
 func TestSettleSHKeeperConcurrentReplayCreditsOnce(t *testing.T) {
@@ -234,6 +272,47 @@ func TestSettleSHKeeperPreSnapshotOrdersFailClosedOrRepair(t *testing.T) {
 	assert.EqualValues(t, 6600, stored.PackageQuota)
 }
 
+func TestSettleSHKeeperRejectsIncoherentCreditedZeroSnapshot(t *testing.T) {
+	tests := []struct {
+		name          string
+		topUpStatus   string
+		creditedQuota int64
+		wantError     string
+	}{
+		{name: "pending generic top-up", topUpStatus: common.TopUpStatusPending, creditedQuota: 6600, wantError: "ledger recovery"},
+		{name: "failed generic top-up", topUpStatus: common.TopUpStatusFailed, creditedQuota: 6600, wantError: "ledger recovery"},
+		{name: "credited quota above ceiling", topUpStatus: common.TopUpStatusSuccess, creditedQuota: operation_setting.SHKeeperMaxUserQuota + 1, wantError: "quota limit"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			user, order := setupFixedSHKeeperOrder(t, "10", "66", 6600)
+			require.NoError(t, DB.Model(&TopUp{}).Where("id = ?", order.TopUpID).Update("status", test.topUpStatus).Error)
+			require.NoError(t, DB.Model(order).Updates(map[string]any{
+				"package_quota": 0, "received_usdt": "10", "credited_balance": "66",
+				"credited_quota": test.creditedQuota, "status": SHKeeperOrderStatusPaid,
+			}).Error)
+			originalQuota := user.Quota
+
+			_, err := SettleSHKeeperTopUp(SHKeeperSettlementInput{
+				TradeNo: order.TradeNo, UserID: user.Id, Crypto: order.Crypto, InvoiceAddress: order.InvoiceAddress,
+				ProviderStatus: SHKeeperOrderStatusPaid, ReceivedUSDT: "10",
+				Transactions: []SHKeeperSettlementTransaction{{TxID: "historical", AmountUSDT: "10"}},
+				ReconciledAt: time.Now().Unix(),
+			})
+			require.ErrorContains(t, err, test.wantError)
+			stored, loadErr := GetSHKeeperTopUpByTradeNo(user.Id, order.TradeNo)
+			require.NoError(t, loadErr)
+			assert.Zero(t, stored.PackageQuota)
+			assert.Equal(t, test.creditedQuota, stored.CreditedQuota)
+			require.NoError(t, DB.First(user, user.Id).Error)
+			assert.Equal(t, originalQuota, user.Quota)
+			transactions, listErr := ListSHKeeperCreditedTransactions(order.ID)
+			require.NoError(t, listErr)
+			assert.Empty(t, transactions)
+		})
+	}
+}
+
 func TestSettleSHKeeperEmptyModeUsesLegacyRate(t *testing.T) {
 	user, order := setupFixedSHKeeperOrder(t, "10", "66", 6600)
 	require.NoError(t, DB.Model(order).Update("settlement_mode", "").Error)
@@ -241,6 +320,22 @@ func TestSettleSHKeeperEmptyModeUsesLegacyRate(t *testing.T) {
 	assert.Equal(t, "6.6", result.CreditedBalanceDelta)
 	assert.EqualValues(t, 660, result.CreditedQuotaDelta)
 	assert.Equal(t, 660, user.Quota)
+}
+
+func TestSettleSHKeeperLegacyReplayPreservesHistoricalQuotaConversion(t *testing.T) {
+	user, order := setupFixedSHKeeperOrder(t, "10", "66", 6600)
+	require.NoError(t, DB.Model(order).Update("settlement_mode", "").Error)
+	first := settleSHKeeper(t, order, user, "1", SHKeeperOrderStatusPartial, "legacy-replay")
+	require.EqualValues(t, 660, first.CreditedQuotaDelta)
+
+	common.QuotaPerUnit = 200
+	replayed := settleSHKeeper(t, order, user, "1", SHKeeperOrderStatusPartial, "legacy-replay")
+	assert.Zero(t, replayed.CreditedQuotaDelta)
+	assert.EqualValues(t, 660, replayed.CreditedQuota)
+	assert.Equal(t, 660, user.Quota)
+	stored, err := GetSHKeeperTopUpByTradeNo(user.Id, order.TradeNo)
+	require.NoError(t, err)
+	assert.EqualValues(t, 660, stored.CreditedQuota)
 }
 
 func TestSHKeeperPackageBalanceMatchesQuotaSnapshot(t *testing.T) {
