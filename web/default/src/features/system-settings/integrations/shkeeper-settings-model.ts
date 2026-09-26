@@ -172,3 +172,33 @@ export function buildSHKeeperSettingsRequest(
     allow_private_url: values.allow_private_url,
   }
 }
+
+export function shouldHydrateSHKeeperForm(isDirty: boolean) {
+  return !isDirty
+}
+
+export function shouldResetSHKeeperFormAfterSave(
+  submitted: SHKeeperSettingsRequest,
+  current: SHKeeperSettingsRequest
+) {
+  return (
+    getSHKeeperSettingsRequestSignature(submitted) ===
+    getSHKeeperSettingsRequestSignature(current)
+  )
+}
+
+export function getSHKeeperSettingsRequestSignature(
+  request: SHKeeperSettingsRequest
+) {
+  return JSON.stringify(request)
+}
+
+export function isSHKeeperTestResultCurrent(
+  testedRequestSignature: string,
+  currentRequest: SHKeeperSettingsRequest
+) {
+  return (
+    testedRequestSignature ===
+    getSHKeeperSettingsRequestSignature(currentRequest)
+  )
+}

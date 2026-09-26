@@ -24,7 +24,11 @@ import {
   buildSHKeeperFormDefaults,
   buildSHKeeperSettingsRequest,
   createSHKeeperSettingsSchema,
+  getSHKeeperSettingsRequestSignature,
   getSHKeeperArrayErrorMessage,
+  isSHKeeperTestResultCurrent,
+  shouldHydrateSHKeeperForm,
+  shouldResetSHKeeperFormAfterSave,
   type SHKeeperSettingsFormValues,
 } from './shkeeper-settings-model'
 
@@ -187,5 +191,58 @@ describe('SHKeeper settings form model', () => {
     assert.equal('backend_key_configured' in request, false)
     assert.equal(request.api_key, '')
     assert.equal(request.backend_key, '')
+  })
+
+  test('hydrates server settings only while the form is pristine', () => {
+    assert.equal(shouldHydrateSHKeeperForm(false), true)
+    assert.equal(shouldHydrateSHKeeperForm(true), false)
+  })
+
+  test('does not reset edits made after a save request started', () => {
+    const submitted = buildSHKeeperSettingsRequest(fixedSettings())
+    const unchanged = buildSHKeeperSettingsRequest(fixedSettings())
+    const edited = buildSHKeeperSettingsRequest({
+      ...fixedSettings(),
+      base_url: 'https://edited.example.com',
+    })
+
+    assert.equal(shouldResetSHKeeperFormAfterSave(submitted, unchanged), true)
+    assert.equal(shouldResetSHKeeperFormAfterSave(submitted, edited), false)
+  })
+
+  test('invalidates tested and pending readiness when configuration changes', () => {
+    const testedRequest = buildSHKeeperSettingsRequest(fixedSettings())
+    const unchangedRequest = buildSHKeeperSettingsRequest(fixedSettings())
+    const changedValues: SHKeeperSettingsFormValues[] = [
+      { ...fixedSettings(), enabled: false },
+      { ...fixedSettings(), base_url: 'https://other.example.com' },
+      { ...fixedSettings(), api_key: 'new-api-key' },
+      { ...fixedSettings(), backend_key: 'new-backend-key' },
+      { ...fixedSettings(), enabled_networks: ['POLYGON-USDT'] },
+      {
+        ...fixedSettings(),
+        packages: [{ usdt: 20, balance: '132', label: 'Common' }],
+      },
+      { ...fixedSettings(), invoice_expiry_minutes: 45 },
+      { ...fixedSettings(), reconcile_interval_seconds: 120 },
+      { ...fixedSettings(), allow_private_url: true },
+    ]
+
+    assert.equal(
+      isSHKeeperTestResultCurrent(
+        getSHKeeperSettingsRequestSignature(testedRequest),
+        unchangedRequest
+      ),
+      true
+    )
+    for (const changed of changedValues) {
+      assert.equal(
+        isSHKeeperTestResultCurrent(
+          getSHKeeperSettingsRequestSignature(testedRequest),
+          buildSHKeeperSettingsRequest(changed)
+        ),
+        false
+      )
+    }
   })
 })

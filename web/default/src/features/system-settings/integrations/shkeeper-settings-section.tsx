@@ -66,6 +66,10 @@ import {
   buildSHKeeperFormDefaults,
   buildSHKeeperSettingsRequest,
   createSHKeeperSettingsSchema,
+  getSHKeeperSettingsRequestSignature,
+  isSHKeeperTestResultCurrent,
+  shouldHydrateSHKeeperForm,
+  shouldResetSHKeeperFormAfterSave,
   type SHKeeperSettingsFormValues,
 } from './shkeeper-settings-model'
 
@@ -83,7 +87,21 @@ const emptyStatus: SHKeeperSettingsStatus = {
   allow_private_url: false,
 }
 
-export function SHKeeperSettingsSection() {
+type SHKeeperTestResultSnapshot = {
+  requestSignature: string
+  result: SHKeeperConnectionTest
+}
+
+export type SHKeeperSettingsHandle = {
+  save: () => Promise<void>
+}
+
+type SHKeeperSettingsSectionProps = Record<never, never>
+
+function SHKeeperSettingsSectionComponent(
+  _props: SHKeeperSettingsSectionProps,
+  ref: React.ForwardedRef<SHKeeperSettingsHandle>
+) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const schema = React.useMemo(() => createSHKeeperSettingsSchema(t), [t])
@@ -93,7 +111,7 @@ export function SHKeeperSettingsSection() {
     defaultValues: buildSHKeeperFormDefaults(emptyStatus),
   })
   const [testResult, setTestResult] =
-    React.useState<SHKeeperConnectionTest | null>(null)
+    React.useState<SHKeeperTestResultSnapshot | null>(null)
   const settingsQuery = useQuery({
     queryKey: ['shkeeper-settings'],
     queryFn: getSHKeeperSettings,
@@ -101,18 +119,26 @@ export function SHKeeperSettingsSection() {
 
   React.useEffect(() => {
     if (!settingsQuery.data?.success || !settingsQuery.data.data) return
+    if (!shouldHydrateSHKeeperForm(form.formState.isDirty)) return
     form.reset(buildSHKeeperFormDefaults(settingsQuery.data.data))
     setTestResult(null)
-  }, [form, settingsQuery.data])
+  }, [form, form.formState.isDirty, settingsQuery.data])
 
   const saveMutation = useMutation({
-    mutationFn: saveSHKeeperSettings,
-    onSuccess: (response) => {
+    mutationFn: async (
+      request: ReturnType<typeof buildSHKeeperSettingsRequest>
+    ) => {
+      const response = await saveSHKeeperSettings(request)
       if (!response.success || !response.data) {
-        toast.error(t('Failed to save SHKeeper settings'))
-        return
+        throw new Error(t('Failed to save SHKeeper settings'))
       }
-      form.reset(buildSHKeeperFormDefaults(response.data))
+      return { ...response, data: response.data }
+    },
+    onSuccess: (response, submittedRequest) => {
+      const currentRequest = buildSHKeeperSettingsRequest(form.getValues())
+      if (shouldResetSHKeeperFormAfterSave(submittedRequest, currentRequest)) {
+        form.reset(buildSHKeeperFormDefaults(response.data))
+      }
       setTestResult(null)
       queryClient.setQueryData(['shkeeper-settings'], response)
       toast.success(t('SHKeeper settings saved'))
@@ -124,14 +150,19 @@ export function SHKeeperSettingsSection() {
 
   const testMutation = useMutation({
     mutationFn: testSHKeeperConnection,
-    onSuccess: (response) => {
+    onSuccess: (response, testedRequest) => {
       if (!response.success || !response.data) {
         setTestResult(null)
         toast.error(t('SHKeeper connection test failed'))
         return
       }
-      setTestResult(response.data)
-      if (response.data.ready) {
+      const requestSignature =
+        getSHKeeperSettingsRequestSignature(testedRequest)
+      setTestResult({ requestSignature, result: response.data })
+      const currentRequest = buildSHKeeperSettingsRequest(form.getValues())
+      if (!isSHKeeperTestResultCurrent(requestSignature, currentRequest)) {
+        toast.info(t('SHKeeper connection test is stale'))
+      } else if (response.data.ready) {
         toast.success(t('SHKeeper connection is ready'))
       } else {
         toast.error(t('SHKeeper connection needs attention'))
@@ -143,22 +174,43 @@ export function SHKeeperSettingsSection() {
     },
   })
 
-  const enabled = form.watch('enabled')
-  const allowPrivateURL = form.watch('allow_private_url')
+  const currentFormValues = form.watch()
+  const enabled = currentFormValues.enabled
+  const allowPrivateURL = currentFormValues.allow_private_url
   const status = settingsQuery.data?.data
+  const currentRequest = buildSHKeeperSettingsRequest(currentFormValues)
+  const currentTestResult =
+    testResult &&
+    isSHKeeperTestResultCurrent(testResult.requestSignature, currentRequest)
+      ? testResult.result
+      : null
   const allNetworksReady =
-    !!testResult?.networks.length &&
-    testResult.networks.every(
+    !!currentTestResult?.networks.length &&
+    currentTestResult.networks.every(
       (network) =>
         network.available && network.quote_ok && network.amount_matches
     )
 
-  const submitSettings = form.handleSubmit((values) => {
-    saveMutation.mutate(buildSHKeeperSettingsRequest(values))
-  })
   const testSettings = form.handleSubmit((values) => {
     testMutation.mutate(buildSHKeeperSettingsRequest(values))
   })
+  const saveSettings = React.useCallback(async () => {
+    if (!settingsQuery.data?.success || !settingsQuery.data.data) {
+      toast.error(t('Unable to load SHKeeper settings'))
+      throw new Error(t('SHKeeper settings are not ready to save'))
+    }
+    await form.handleSubmit(
+      async (values) => {
+        await saveMutation.mutateAsync(buildSHKeeperSettingsRequest(values))
+      },
+      async () => {
+        toast.error(t('Fix validation errors before saving'))
+        throw new Error(t('Invalid SHKeeper settings'))
+      }
+    )()
+  }, [form, saveMutation, settingsQuery.data, t])
+
+  React.useImperativeHandle(ref, () => ({ save: saveSettings }), [saveSettings])
 
   if (settingsQuery.isLoading) {
     return (
@@ -426,7 +478,7 @@ export function SHKeeperSettingsSection() {
           ) : null}
         </FieldGroup>
 
-        {testResult ? (
+        {currentTestResult ? (
           <div className='flex flex-col gap-3'>
             <div className='flex flex-wrap items-center gap-2'>
               <h4 className='text-sm font-medium'>
@@ -437,7 +489,7 @@ export function SHKeeperSettingsSection() {
               </Badge>
             </div>
             <div className='flex flex-wrap gap-2'>
-              {testResult.networks.map((network) => {
+              {currentTestResult.networks.map((network) => {
                 const ready =
                   network.available &&
                   network.quote_ok &&
@@ -480,7 +532,7 @@ export function SHKeeperSettingsSection() {
           <Button
             type='button'
             disabled={saveMutation.isPending || testMutation.isPending}
-            onClick={submitSettings}
+            onClick={() => void saveSettings().catch(() => undefined)}
           >
             {saveMutation.isPending ? (
               <Spinner data-icon='inline-start' />
@@ -492,3 +544,8 @@ export function SHKeeperSettingsSection() {
     </Form>
   )
 }
+
+export const SHKeeperSettingsSection = React.forwardRef<
+  SHKeeperSettingsHandle,
+  SHKeeperSettingsSectionProps
+>(SHKeeperSettingsSectionComponent)

@@ -62,7 +62,12 @@ import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
 import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
-import { SHKeeperSettingsSection } from './shkeeper-settings-section'
+import { runPaymentSettingsSaves } from './payment-settings-save'
+import { PersistentPaymentTabContent } from './persistent-payment-tab-content'
+import {
+  SHKeeperSettingsSection,
+  type SHKeeperSettingsHandle,
+} from './shkeeper-settings-section'
 import {
   formatJsonForEditor,
   getJsonError,
@@ -247,6 +252,8 @@ export function PaymentSettingsSection({
   const [creemProductsVisualMode, setCreemProductsVisualMode] =
     React.useState(true)
   const [showComplianceDialog, setShowComplianceDialog] = React.useState(false)
+  const [isSavingAll, setIsSavingAll] = React.useState(false)
+  const shkeeperSettingsRef = React.useRef<SHKeeperSettingsHandle>(null)
   const [waffoPayMethods, setWaffoPayMethods] = React.useState<PayMethod[]>(
     () => parseWaffoPayMethods(waffoDefaultValues.WaffoPayMethods)
   )
@@ -797,6 +804,34 @@ export function PaymentSettingsSection({
     WaffoPancakeReturnURL: currentFormValues.WaffoPancakeReturnURL,
   }
 
+  const saveAllSettings = async () => {
+    if (isSavingAll) return
+    setIsSavingAll(true)
+    try {
+      await runPaymentSettingsSaves(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            void form.handleSubmit(
+              async (values) => {
+                try {
+                  await onSubmit(values)
+                  resolve()
+                } catch (error) {
+                  reject(error)
+                }
+              },
+              () => reject(new Error(t('Invalid payment settings')))
+            )()
+          }),
+        () => shkeeperSettingsRef.current?.save() ?? Promise.resolve()
+      )
+    } catch {
+      // The failing mutation owns its localized error toast.
+    } finally {
+      setIsSavingAll(false)
+    }
+  }
+
   return (
     <SettingsSection title={t('Payment Gateway')}>
       {!complianceConfirmed ? (
@@ -872,8 +907,8 @@ export function PaymentSettingsSection({
           data-no-autosubmit='true'
         >
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
-            isSaving={updateOption.isPending || isSubmitting}
+            onSave={saveAllSettings}
+            isSaving={updateOption.isPending || isSubmitting || isSavingAll}
             saveLabel='Save all settings'
           />
           <Tabs defaultValue='general' className='min-w-0'>
@@ -1590,12 +1625,12 @@ export function PaymentSettingsSection({
               </div>
             </TabsContent>
 
-            <TabsContent
+            <PersistentPaymentTabContent
               value='shkeeper'
               className={paymentTabContentClassName}
             >
-              <SHKeeperSettingsSection />
-            </TabsContent>
+              <SHKeeperSettingsSection ref={shkeeperSettingsRef} />
+            </PersistentPaymentTabContent>
 
             <TabsContent
               value='waffo-pancake'
