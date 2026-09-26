@@ -58,6 +58,7 @@ import {
 import type {
   SHKeeperConnectionTest,
   SHKeeperNetwork,
+  SHKeeperSettingsResponse,
   SHKeeperSettingsStatus,
 } from '../types'
 import { safeNumberFieldProps } from '../utils/numeric-field'
@@ -68,6 +69,7 @@ import {
   createSHKeeperSettingsSchema,
   getSHKeeperSettingsRequestSignature,
   isSHKeeperTestResultCurrent,
+  reconcileSHKeeperConfiguredSecrets,
   shouldHydrateSHKeeperForm,
   shouldResetSHKeeperFormAfterSave,
   type SHKeeperSettingsFormValues,
@@ -135,12 +137,48 @@ function SHKeeperSettingsSectionComponent(
       return { ...response, data: response.data }
     },
     onSuccess: (response, submittedRequest) => {
-      const currentRequest = buildSHKeeperSettingsRequest(form.getValues())
+      const currentValues = form.getValues()
+      const cachedStatus = queryClient.getQueryData<SHKeeperSettingsResponse>([
+        'shkeeper-settings',
+      ])?.data
+      const knownValues = cachedStatus
+        ? reconcileSHKeeperConfiguredSecrets(currentValues, cachedStatus)
+        : currentValues
+      const reconciledValues = reconcileSHKeeperConfiguredSecrets(
+        knownValues,
+        response.data
+      )
+      const currentRequest = buildSHKeeperSettingsRequest(currentValues)
       if (shouldResetSHKeeperFormAfterSave(submittedRequest, currentRequest)) {
-        form.reset(buildSHKeeperFormDefaults(response.data))
+        form.reset({
+          ...buildSHKeeperFormDefaults(response.data),
+          api_key_configured: reconciledValues.api_key_configured,
+          backend_key_configured: reconciledValues.backend_key_configured,
+        })
+      } else {
+        form.setValue(
+          'api_key_configured',
+          reconciledValues.api_key_configured,
+          { shouldDirty: false, shouldTouch: false, shouldValidate: true }
+        )
+        form.setValue(
+          'backend_key_configured',
+          reconciledValues.backend_key_configured,
+          { shouldDirty: false, shouldTouch: false, shouldValidate: true }
+        )
       }
       setTestResult(null)
-      queryClient.setQueryData(['shkeeper-settings'], response)
+      queryClient.setQueryData<SHKeeperSettingsResponse>(
+        ['shkeeper-settings'],
+        {
+          ...response,
+          data: {
+            ...response.data,
+            api_key_configured: reconciledValues.api_key_configured,
+            backend_key_configured: reconciledValues.backend_key_configured,
+          },
+        }
+      )
       toast.success(t('SHKeeper settings saved'))
     },
     onError: () => {

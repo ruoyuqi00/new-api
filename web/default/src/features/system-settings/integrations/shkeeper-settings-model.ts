@@ -202,3 +202,19 @@ export function isSHKeeperTestResultCurrent(
     getSHKeeperSettingsRequestSignature(currentRequest)
   )
 }
+
+export function reconcileSHKeeperConfiguredSecrets(
+  current: SHKeeperSettingsFormValues,
+  response: Pick<
+    SHKeeperSettingsStatus,
+    'api_key_configured' | 'backend_key_configured'
+  >
+): SHKeeperSettingsFormValues {
+  return {
+    ...current,
+    api_key_configured:
+      current.api_key_configured || response.api_key_configured,
+    backend_key_configured:
+      current.backend_key_configured || response.backend_key_configured,
+  }
+}

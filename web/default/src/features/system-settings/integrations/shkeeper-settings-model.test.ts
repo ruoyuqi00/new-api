@@ -27,6 +27,7 @@ import {
   getSHKeeperSettingsRequestSignature,
   getSHKeeperArrayErrorMessage,
   isSHKeeperTestResultCurrent,
+  reconcileSHKeeperConfiguredSecrets,
   shouldHydrateSHKeeperForm,
   shouldResetSHKeeperFormAfterSave,
   type SHKeeperSettingsFormValues,
@@ -244,5 +245,73 @@ describe('SHKeeper settings form model', () => {
         false
       )
     }
+  })
+
+  test('merges a newly configured API key without overwriting a later edit', () => {
+    const current = {
+      ...fixedSettings(),
+      base_url: 'https://edited-after-submit.example.com',
+      api_key_configured: false,
+    }
+    const response = {
+      ...status,
+      base_url: 'https://submitted.example.com',
+      api_key_configured: true,
+    }
+
+    const reconciled = reconcileSHKeeperConfiguredSecrets(current, response)
+
+    assert.equal(reconciled.base_url, 'https://edited-after-submit.example.com')
+    assert.equal(reconciled.api_key, 'api-key')
+    assert.equal(reconciled.api_key_configured, true)
+  })
+
+  test('merges a newly configured backend key and preserves known flags', () => {
+    const reconciled = reconcileSHKeeperConfiguredSecrets(
+      {
+        ...fixedSettings(),
+        api_key_configured: true,
+        backend_key_configured: false,
+      },
+      {
+        ...status,
+        api_key_configured: true,
+        backend_key_configured: true,
+      }
+    )
+
+    assert.equal(reconciled.api_key_configured, true)
+    assert.equal(reconciled.backend_key_configured, true)
+  })
+
+  test('accepts a blank API key after configured status is reconciled', () => {
+    const reconciled = reconcileSHKeeperConfiguredSecrets(
+      { ...fixedSettings(), api_key_configured: false },
+      { ...status, api_key_configured: true }
+    )
+    const result = createSHKeeperSettingsSchema(translate).safeParse({
+      ...reconciled,
+      api_key: '',
+    })
+
+    assert.equal(result.success, true)
+  })
+
+  test('does not let an older response downgrade configured flags', () => {
+    const reconciled = reconcileSHKeeperConfiguredSecrets(
+      {
+        ...fixedSettings(),
+        api_key_configured: true,
+        backend_key_configured: true,
+      },
+      {
+        ...status,
+        api_key_configured: false,
+        backend_key_configured: false,
+      }
+    )
+
+    assert.equal(reconciled.api_key_configured, true)
+    assert.equal(reconciled.backend_key_configured, true)
   })
 })
