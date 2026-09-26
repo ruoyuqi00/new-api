@@ -110,7 +110,9 @@ func RequestSHKeeperPay(c *gin.Context) {
 	now := time.Now().Unix()
 	order := &model.SHKeeperTopUpOrder{TradeNo: tradeNo, ExternalID: tradeNo, UserID: c.GetInt("id"), Crypto: crypto, SettlementMode: model.SHKeeperSettlementModeFixedPackage, RequestedUSDT: strconv.FormatInt(item.USDT, 10), PackageBalance: item.Balance, ReceivedUSDT: "0", CreditedBalance: "0", Status: model.SHKeeperOrderStatusPending, CreatedAt: now, ExpiresAt: now + int64(settings.InvoiceExpiryMinutes)*60, CallbackURL: strings.TrimRight(service.GetCallbackAddress(), "/") + "/api/shkeeper/webhook"}
 	balance, _ := decimal.NewFromString(item.Balance)
-	topUp := &model.TopUp{TradeNo: tradeNo, UserId: order.UserID, Amount: item.USDT, Money: balance.InexactFloat64(), PaymentMethod: model.PaymentMethodSHKeeper, PaymentProvider: model.PaymentProviderSHKeeper, Status: common.TopUpStatusPending, CreateTime: now}
+	// The legacy integer amount column stores the whole balance portion; history
+	// uses the package snapshot to retain any fractional balance exactly.
+	topUp := &model.TopUp{TradeNo: tradeNo, UserId: order.UserID, Amount: balance.IntPart(), Money: float64(item.USDT), PaymentMethod: model.PaymentMethodSHKeeper, PaymentProvider: model.PaymentProviderSHKeeper, Status: common.TopUpStatusPending, CreateTime: now}
 	if err := model.InsertSHKeeperTopUp(topUp, order); err != nil {
 		common.ApiErrorMsg(c, "Unable to create SHKeeper order or user quota limit exceeded")
 		return

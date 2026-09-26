@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -100,6 +101,48 @@ type SHKeeperInvoiceDetails struct {
 	ProviderInvoiceID string
 	Status            string
 	ExpiresAt         int64
+}
+
+// GetTopUpHistoryItems preserves ordinary top-up responses and projects fixed
+// SHKeeper packages from their immutable decimal snapshots. The legacy Amount
+// column remains an integer, with no schema or settlement changes for other providers.
+func GetTopUpHistoryItems(topUps []*TopUp) ([]any, error) {
+	items := make([]any, len(topUps))
+	ids := make([]int, 0)
+	for index, topUp := range topUps {
+		items[index] = topUp
+		if topUp.PaymentProvider == PaymentProviderSHKeeper {
+			ids = append(ids, topUp.Id)
+		}
+	}
+	if len(ids) == 0 {
+		return items, nil
+	}
+	var orders []SHKeeperTopUpOrder
+	if err := DB.Where("top_up_id IN ? AND settlement_mode = ?", ids, SHKeeperSettlementModeFixedPackage).Find(&orders).Error; err != nil {
+		return nil, err
+	}
+	byTopUpID := make(map[int]SHKeeperTopUpOrder, len(orders))
+	for _, order := range orders {
+		byTopUpID[order.TopUpID] = order
+	}
+	for index, topUp := range topUps {
+		order, exists := byTopUpID[topUp.Id]
+		if !exists {
+			continue
+		}
+		balance, balanceErr := decimal.NewFromString(order.PackageBalance)
+		payment, paymentErr := decimal.NewFromString(order.RequestedUSDT)
+		if order.UserID != topUp.UserId || order.TradeNo != topUp.TradeNo || balanceErr != nil || paymentErr != nil || !balance.IsPositive() || !payment.IsPositive() {
+			return nil, errors.New("invalid SHKeeper history snapshot")
+		}
+		items[index] = struct {
+			*TopUp
+			Amount json.Number `json:"amount"`
+			Money  json.Number `json:"money"`
+		}{TopUp: topUp, Amount: json.Number(balance.String()), Money: json.Number(payment.String())}
+	}
+	return items, nil
 }
 
 func CreateSHKeeperTopUp(tx *gorm.DB, topUp *TopUp, order *SHKeeperTopUpOrder) error {
@@ -401,7 +444,9 @@ func SettleSHKeeperTopUp(input SHKeeperSettlementInput) (*SHKeeperSettlementResu
 		order.CreditedQuota = targetQuota
 		order.Status = settlementStatus
 		order.ProviderSummary = input.ProviderSummary
-		order.LastReconciledAt = input.ReconciledAt
+		if input.ReconciledAt > order.LastReconciledAt {
+			order.LastReconciledAt = input.ReconciledAt
+		}
 		if order.CompletedAt == 0 && (settlementStatus == SHKeeperOrderStatusPaid || settlementStatus == SHKeeperOrderStatusOverpaid || settlementStatus == SHKeeperOrderStatusLate) {
 			order.CompletedAt = input.ReconciledAt
 		}

@@ -95,6 +95,51 @@ func TestSHKeeperPayResolvesPackageAndRejectsTamperingBeforeCreate(t *testing.T)
 	assert.Equal(t, 1, creates)
 }
 
+func TestSHKeeperGenericHistorySeparatesPaymentFromFractionalPackageBalance(t *testing.T) {
+	for _, item := range []struct {
+		balance string
+		amount  float64
+	}{{"66", 66}, {"66.5", 66.5}} {
+		t.Run(item.balance, func(t *testing.T) {
+			r, user := setupSHKeeperController(t, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `{"status":"success","id":1,"amount":"10","wallet":"TAddress"}`)
+			})
+			r.GET("/history", GetUserTopUps)
+			r.GET("/admin-history", GetAllTopUps)
+			settings := operation_setting.GetSHKeeperPaymentSetting()
+			settings.Packages[0].Balance = item.balance
+			created := decodeSHKeeperResponse(t, callSHKeeper(t, r, "POST", "/pay", `{"usdt_amount":10,"crypto":"USDT"}`))
+			require.Equal(t, true, created["success"])
+			tradeNo := created["data"].(map[string]any)["trade_no"].(string)
+			settings.Packages[0].Balance = "999"
+			ordinary := &model.TopUp{UserId: user.Id, TradeNo: "ordinary", Amount: 7, Money: 2.5, PaymentMethod: "alipay", PaymentProvider: model.PaymentProviderEpay, Status: common.TopUpStatusPending, CreateTime: time.Now().Unix()}
+			require.NoError(t, ordinary.Insert())
+			for _, path := range []string{"/history", "/admin-history", "/history?keyword=" + tradeNo, "/admin-history?keyword=" + tradeNo} {
+				response := decodeSHKeeperResponse(t, callSHKeeper(t, r, "GET", path, ""))
+				require.Equal(t, true, response["success"], path)
+				items := response["data"].(map[string]any)["items"].([]any)
+				found := false
+				for _, raw := range items {
+					row := raw.(map[string]any)
+					if row["trade_no"] == tradeNo {
+						found = true
+						assert.Equal(t, float64(10), row["money"], path)
+						assert.Equal(t, item.amount, row["amount"], path)
+					} else {
+						assert.Equal(t, "ordinary", row["trade_no"])
+						assert.Equal(t, float64(7), row["amount"])
+						assert.Equal(t, 2.5, row["money"])
+					}
+				}
+				assert.True(t, found, path)
+			}
+			persisted := model.GetTopUpByTradeNo(tradeNo)
+			require.NotNil(t, persisted)
+			assert.Equal(t, float64(10), persisted.Money)
+		})
+	}
+}
+
 func TestSHKeeperAmbiguousCreateNeverRetriesAndInvalidInvoiceNeverExposesAddress(t *testing.T) {
 	for _, scenario := range []string{"ambiguous", "amount", "crypto", "identity"} {
 		t.Run(scenario, func(t *testing.T) {

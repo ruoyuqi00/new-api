@@ -28,3 +28,26 @@ func TestSHKeeperReconciliationQueriesAgeOrders(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{order.TradeNo, "shkeeper-open"}, tradeNos)
 }
+
+func TestSHKeeperOlderReconciliationCannotMoveAttemptTimestampBackward(t *testing.T) {
+	user, order := setupFixedSHKeeperOrder(t, "10", "66", 6600)
+	const olderAttempt int64 = 1800000000
+	const newerAttempt int64 = olderAttempt + 60
+	require.NoError(t, RecordSHKeeperReconciliationAttempt(order.ID, olderAttempt))
+	require.NoError(t, RecordSHKeeperReconciliationAttempt(order.ID, newerAttempt))
+	// Complete the older provider lookup after a newer attempt has already been
+	// recorded, without timing or concurrency assumptions in the fixture.
+	result, err := SettleSHKeeperTopUp(SHKeeperSettlementInput{
+		TradeNo: order.TradeNo, UserID: user.Id, Crypto: order.Crypto,
+		InvoiceAddress: order.InvoiceAddress, ProviderStatus: SHKeeperOrderStatusPaid,
+		ReceivedUSDT: "10", ReconciledAt: olderAttempt,
+		Transactions: []SHKeeperSettlementTransaction{{TxID: "confirmed-payment", AmountUSDT: "10"}},
+	})
+	require.NoError(t, err)
+	assert.EqualValues(t, 6600, result.CreditedQuotaDelta)
+	require.NoError(t, DB.First(order, order.ID).Error)
+	assert.Equal(t, newerAttempt, order.LastReconciledAt)
+	assert.Equal(t, olderAttempt, order.CompletedAt, "funding time stays separate from scheduling freshness")
+	require.NoError(t, DB.First(user, user.Id).Error)
+	assert.Equal(t, 6600, user.Quota)
+}
