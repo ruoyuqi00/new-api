@@ -19,7 +19,7 @@ Verified locally on 2026-09-27 (Asia/Shanghai). Feature verification and the 40-
 | --- | --- | --- | --- |
 | Production-line candidate | `http://127.0.0.1:13037` | 33280 | Running for review |
 | SHKeeper v2.5.32 fixture | `http://127.0.0.1:13038` | 39008 | Running; required by candidate review |
-| Temporary production baseline | `http://127.0.0.1:13036` | 26780 | Stopped at 2026-09-27 01:53:16 +08:00 |
+| Temporary production baseline | `http://127.0.0.1:13036` | 15636 (follow-up) | Stopped again at 2026-09-27 02:21:07 +08:00 |
 
 Candidate sign-in: `http://127.0.0.1:13037/sign-in`. Wallet: `http://127.0.0.1:13037/wallet`. Payment settings: `http://127.0.0.1:13037/system-settings/billing/payment`, then SHKeeper.
 
@@ -77,6 +77,26 @@ All 80 pages had zero horizontal overflow. Renderer class selection, canvas boun
 
 The final source corrections affect only payment settings save handling and credential descriptions; the global matrix used the same immutable renderer/style files and shell. Final corrected binary was then used for the complete settings/payment audits and six-language review.
 
+### Mobile Home height follow-up (Fix Round 1)
+
+Review identified a gap in the original matrix: its assertions covered widths and renderer bounds, while three mobile Home pairs had body/root/main height differences of −3264, −3264, and +3264 pixels. Top-only captures could not prove below-fold equivalence. These saved measurements remain in `visual-audit.json`; they were explicitly rechecked as the RED evidence.
+
+The focused follow-up used the unchanged baseline executable/database and final candidate. After fonts and Home details were available, each page was scrolled to its actual bottom and back in viewport-sized increments, recalculating the bottom after each materialization, awaiting animation frames, visible image decoding, and finite reveal transitions. Root/body/main and both detail-section heights then had to remain identical across eight consecutive animation frames. It took 20 down/up steps at 390×844 and 24 at 360×740. No arbitrary sleeps were used.
+
+| Mobile Home pair | Original candidate − baseline body height | Baseline and candidate root/body/main height after traversal | Root/body/main scrollHeight | Width / scrollWidth | Final height difference |
+| --- | --- | --- | --- | --- | --- |
+| 390×844 light | −3264 px | 9245.46875 CSS px | 9245 px | 390 / 390 px | 0 px |
+| 390×844 dark | −3264 px | 9245.46875 CSS px | 9245 px | 390 / 390 px | 0 px |
+| 360×740 dark | +3264 px | 9340.703125 CSS px | 9341 px | 360 / 360 px | 0 px |
+
+Explicit assertions allow at most 1 CSS pixel for subpixel rounding at identical viewport/font/content settings; the measured differences were exactly zero for all recorded root/body/main width, height, client and scroll dimensions. Both detail sections' bounds/text and renderer/canvas bounds also matched. All 12 hardware canvases were nonblank and moving; console/page/request/HTTP errors were empty across the six pages.
+
+This confirms a materialization/timing artifact in the initial measurements, consistent with the unchanged `.yucore-home-details` CSS `content-visibility:auto` and `contain-intrinsic-size:auto 3200px`, rather than a candidate layout change. The initial fresh heights in the follow-up were also provisional and changed when the details were traversed. No source or immutable CSS change was needed.
+
+Chrome full-page screenshot capture can re-skip offscreen `content-visibility:auto` sections after returning to the top. Therefore, **after the unmodified layout measurements**, the capture pass temporarily set only those two DOM sections to `content-visibility:visible`, repeated traversal/reveal completion, asserted the body height stayed unchanged, captured the full page, then restored the inline values. This identical browser-only capture adjustment is recorded in JSON and was never applied to source or global renderer elements. Original/fresh/after top contact sheets, full-page pairs, and readable 1000-pixel panels were opened and visually inspected through the enterprise/footer content. Animated globe/preview-tab phases may differ, while the complete content and layout match.
+
+Artifacts under `.local-tests/shkeeper-production-line/`: `mobile-home-materialization.mjs`, `home-materialization.log`, `home-followup/result.json`, and `home-followup/home-{light,dark}-{390x844,360x740}-{before-after,full-pair}.jpg` for the three cases, plus `*-full-panel-*.jpg` and original PNGs. The unused light 360 case is not implied by the filename pattern. The focused command exits 0 with `HOME MATERIALIZATION PASS: 3/3 pairs, complete heights and widths`.
+
 ## Mounted settings and payment evidence
 
 `settings-audit.json` records actual UI/API interactions: fresh empty configuration; null and omitted arrays injected at the status transport boundary; add/remove/last-package validation; duplicate USDT amount rejection without a POST; six decimal balance accepted and seventh rejected; correction followed by one-click save; secret fields empty with two Configured badges after save/reload; status payload omits raw keys; all three exact quotes ready; Polygon amount mismatch makes overall readiness false; and SHKeeper-only Save-all persists. Mobile light/dark package editor and bottom Save/Test controls were reachable without horizontal overflow.
@@ -112,6 +132,16 @@ Deferred items: network order is stable but not lexically sorted; a prior fixtur
 
 MySQL >=5.7.8 and PostgreSQL >=9.6 migration/concurrency verification and real-provider/real-chain confirmation remain external prerequisites. This local fixture cannot establish real network fees, confirmations, provider availability, or deployment readiness.
 
+### SQLite contention observation
+
+Candidate `candidate.stdout.log` recorded `database is locked (5) (SQLITE_BUSY)` at `model/shkeeper_topup.go:453` (`tx.Save(order)`) on 2026-09-27 at 01:46:27, 01:47:27, 01:48:43, 01:56:57, 02:04:57, and 02:06:27 +08:00. The first three occurred during payment/mobile/locale auditing; the others occurred while the isolated preview and periodic reconciliation continued running. They affected unpaid, partial, and an already credited late order. This contention was observed and remains unresolved; it is not claimed fixed or exhaustively reproduced.
+
+The payment assertions still passed partial-zero/full/replay/overpayment/late-credit invariants. A fresh read-only database check at 02:19:22 +08:00 confirmed user quota 562,000,000 = initial 100,000,000 + the 462,000,000 sum of exactly six credited order snapshots; each credited order equals its fixed `package_quota`, and there are no duplicate transaction rows within an order/network/hash identity. A partial order remains at zero credit and the affected late order remains at 66. These are observed ledger invariants, not proof that SQLite contention is impossible.
+
+`sqlite-contention-evidence.json` correlates all six logged failures with later provider lookup events and greater persisted `last_reconciled_at` values. At capture there were 10–26 later lookups per affected order, and recent scheduled runs reported 24 processed / 0 credited / 0 failed. Code records an attempt before provider lookup and selects reconciliation candidates by `last_reconciled_at asc, id asc`; an individual failed settlement is counted and later scheduler passes revisit the order while rotating attempts. A task's overall `succeeded` label alone is not sufficient evidence, because per-order failures are reported in its result. The saved task results, provider events, and ledger snapshot provide that evidence here. No database settings or retry code were changed. SQLite preview contention and recovery do not establish MySQL/PostgreSQL production concurrency or migration behavior.
+
 ## Cleanup prerequisites
 
 Only the task-owned baseline PID 26780 was stopped after its exact executable path matched the detached baseline tree. The baseline worktree/database/artifacts remain for audit. Candidate PID 33280 and fixture PID 39008 stay running for review; their exact paths/command lines must be checked again before any later stop. The old 13035 preview belongs to Task 6 cleanup, which must separately inspect ownership and account for the baseline gate exceptions above. No hot switch or production action is authorized by this handoff.
+
+Fix Round 1 temporarily restarted that same verified baseline executable with its existing isolated `baseline.db` as PID 15636 on 13036. Its database identity (synthetic admin, default theme, local ServerAddress) and clean detached HEAD were checked before restart. PID 15636 was stopped after the focused audit at 02:21:07 +08:00 following exact executable-path verification; `home-followup/baseline-cleanup.json` records `stillRunning:false`. Candidate 33280, fixture 39008, and old preview 16220 were left running and unchanged.
