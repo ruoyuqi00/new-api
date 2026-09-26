@@ -30,6 +30,7 @@ const (
 	PaymentMethodWaffo        = "waffo"
 	PaymentMethodWaffoPancake = "waffo_pancake"
 	PaymentMethodBalance      = "balance"
+	PaymentMethodSHKeeper     = "shkeeper"
 )
 
 const (
@@ -39,6 +40,7 @@ const (
 	PaymentProviderWaffo        = "waffo"
 	PaymentProviderWaffoPancake = "waffo_pancake"
 	PaymentProviderBalance      = "balance"
+	PaymentProviderSHKeeper     = "shkeeper"
 )
 
 var (
@@ -417,6 +419,9 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		// 行级锁，避免并发补单
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
 			return errors.New("充值订单不存在")
+		}
+		if topUp.PaymentProvider == PaymentProviderSHKeeper || topUp.PaymentMethod == PaymentMethodSHKeeper {
+			return errors.New("SHKeeper orders require verified SHKeeper settlement")
 		}
 
 		// 幂等处理：已成功直接返回
