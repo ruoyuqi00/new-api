@@ -63,6 +63,7 @@ import type {
 } from '../types'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import { SHKeeperPackageEditor } from './shkeeper-package-editor'
+import { SHKeeperSettingsLifecycle } from './shkeeper-settings-lifecycle'
 import {
   buildSHKeeperFormDefaults,
   buildSHKeeperSettingsRequest,
@@ -94,6 +95,11 @@ type SHKeeperTestResultSnapshot = {
   result: SHKeeperConnectionTest
 }
 
+type SHKeeperSettingsQuerySnapshot = {
+  generation: number
+  response: SHKeeperSettingsResponse
+}
+
 export type SHKeeperSettingsHandle = {
   save: () => Promise<void>
 }
@@ -106,6 +112,11 @@ function SHKeeperSettingsSectionComponent(
 ) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const lifecycleRef = React.useRef<SHKeeperSettingsLifecycle | null>(null)
+  if (!lifecycleRef.current) {
+    lifecycleRef.current = new SHKeeperSettingsLifecycle()
+  }
+  const lifecycle = lifecycleRef.current
   const schema = React.useMemo(() => createSHKeeperSettingsSchema(t), [t])
   const form = useForm<SHKeeperSettingsFormValues>({
     resolver: zodResolver(schema) as Resolver<SHKeeperSettingsFormValues>,
@@ -116,31 +127,51 @@ function SHKeeperSettingsSectionComponent(
     React.useState<SHKeeperTestResultSnapshot | null>(null)
   const settingsQuery = useQuery({
     queryKey: ['shkeeper-settings'],
-    queryFn: getSHKeeperSettings,
+    queryFn: async ({ signal }) => {
+      const generation = lifecycle.beginStatusRequest()
+      const response = await getSHKeeperSettings(signal)
+      return { generation, response }
+    },
   })
+  const settingsResponse =
+    settingsQuery.data &&
+    lifecycle.canApplyStatus(settingsQuery.data.generation)
+      ? settingsQuery.data.response
+      : undefined
 
   React.useEffect(() => {
-    if (!settingsQuery.data?.success || !settingsQuery.data.data) return
+    if (!settingsResponse?.success || !settingsResponse.data) return
     if (!shouldHydrateSHKeeperForm(form.formState.isDirty)) return
-    form.reset(buildSHKeeperFormDefaults(settingsQuery.data.data))
+    const defaults = buildSHKeeperFormDefaults(settingsResponse.data)
+    const reconciledValues = reconcileSHKeeperConfiguredSecrets(
+      form.getValues(),
+      settingsResponse.data
+    )
+    form.reset({
+      ...defaults,
+      api_key_configured: reconciledValues.api_key_configured,
+      backend_key_configured: reconciledValues.backend_key_configured,
+    })
     setTestResult(null)
-  }, [form, form.formState.isDirty, settingsQuery.data])
+  }, [form, form.formState.isDirty, settingsResponse])
 
   const saveMutation = useMutation({
-    mutationFn: async (
+    mutationFn: async (variables: {
+      generation: number
       request: ReturnType<typeof buildSHKeeperSettingsRequest>
-    ) => {
-      const response = await saveSHKeeperSettings(request)
+    }) => {
+      const response = await saveSHKeeperSettings(variables.request)
       if (!response.success || !response.data) {
         throw new Error(t('Failed to save SHKeeper settings'))
       }
       return { ...response, data: response.data }
     },
-    onSuccess: (response, submittedRequest) => {
+    onSuccess: (response, variables) => {
       const currentValues = form.getValues()
-      const cachedStatus = queryClient.getQueryData<SHKeeperSettingsResponse>([
-        'shkeeper-settings',
-      ])?.data
+      const cachedStatus =
+        queryClient.getQueryData<SHKeeperSettingsQuerySnapshot>([
+          'shkeeper-settings',
+        ])?.response.data
       const knownValues = cachedStatus
         ? reconcileSHKeeperConfiguredSecrets(currentValues, cachedStatus)
         : currentValues
@@ -149,7 +180,7 @@ function SHKeeperSettingsSectionComponent(
         response.data
       )
       const currentRequest = buildSHKeeperSettingsRequest(currentValues)
-      if (shouldResetSHKeeperFormAfterSave(submittedRequest, currentRequest)) {
+      if (shouldResetSHKeeperFormAfterSave(variables.request, currentRequest)) {
         form.reset({
           ...buildSHKeeperFormDefaults(response.data),
           api_key_configured: reconciledValues.api_key_configured,
@@ -168,14 +199,17 @@ function SHKeeperSettingsSectionComponent(
         )
       }
       setTestResult(null)
-      queryClient.setQueryData<SHKeeperSettingsResponse>(
+      queryClient.setQueryData<SHKeeperSettingsQuerySnapshot>(
         ['shkeeper-settings'],
         {
-          ...response,
-          data: {
-            ...response.data,
-            api_key_configured: reconciledValues.api_key_configured,
-            backend_key_configured: reconciledValues.backend_key_configured,
+          generation: variables.generation,
+          response: {
+            ...response,
+            data: {
+              ...response.data,
+              api_key_configured: reconciledValues.api_key_configured,
+              backend_key_configured: reconciledValues.backend_key_configured,
+            },
           },
         }
       )
@@ -183,6 +217,7 @@ function SHKeeperSettingsSectionComponent(
     },
     onError: () => {
       toast.error(t('Failed to save SHKeeper settings'))
+      void queryClient.invalidateQueries({ queryKey: ['shkeeper-settings'] })
     },
   })
 
@@ -215,7 +250,6 @@ function SHKeeperSettingsSectionComponent(
   const currentFormValues = form.watch()
   const enabled = currentFormValues.enabled
   const allowPrivateURL = currentFormValues.allow_private_url
-  const status = settingsQuery.data?.data
   const currentRequest = buildSHKeeperSettingsRequest(currentFormValues)
   const currentTestResult =
     testResult &&
@@ -232,21 +266,38 @@ function SHKeeperSettingsSectionComponent(
   const testSettings = form.handleSubmit((values) => {
     testMutation.mutate(buildSHKeeperSettingsRequest(values))
   })
-  const saveSettings = React.useCallback(async () => {
-    if (!settingsQuery.data?.success || !settingsQuery.data.data) {
-      toast.error(t('Unable to load SHKeeper settings'))
-      throw new Error(t('SHKeeper settings are not ready to save'))
-    }
-    await form.handleSubmit(
-      async (values) => {
-        await saveMutation.mutateAsync(buildSHKeeperSettingsRequest(values))
-      },
-      async () => {
-        toast.error(t('Fix validation errors before saving'))
-        throw new Error(t('Invalid SHKeeper settings'))
+  const saveSettings = React.useCallback(() => {
+    return lifecycle.runSave(
+      () =>
+        queryClient.cancelQueries({
+          queryKey: ['shkeeper-settings'],
+          exact: true,
+        }),
+      (generation) => {
+        if (!settingsResponse?.success || !settingsResponse.data) {
+          toast.error(t('Unable to load SHKeeper settings'))
+          void queryClient.invalidateQueries({
+            queryKey: ['shkeeper-settings'],
+          })
+          return Promise.reject(
+            new Error(t('SHKeeper settings are not ready to save'))
+          )
+        }
+        return form.handleSubmit(
+          async (values) => {
+            await saveMutation.mutateAsync({
+              generation,
+              request: buildSHKeeperSettingsRequest(values),
+            })
+          },
+          async () => {
+            toast.error(t('Fix validation errors before saving'))
+            throw new Error(t('Invalid SHKeeper settings'))
+          }
+        )()
       }
-    )()
-  }, [form, saveMutation, settingsQuery.data, t])
+    )
+  }, [form, lifecycle, queryClient, saveMutation, settingsResponse, t])
 
   React.useImperativeHandle(ref, () => ({ save: saveSettings }), [saveSettings])
 
@@ -259,7 +310,7 @@ function SHKeeperSettingsSectionComponent(
     )
   }
 
-  if (settingsQuery.isError || settingsQuery.data?.success === false) {
+  if (settingsQuery.isError || settingsResponse?.success === false) {
     return (
       <Alert variant='destructive'>
         <AlertTitle>{t('Unable to load SHKeeper settings')}</AlertTitle>
@@ -343,7 +394,7 @@ function SHKeeperSettingsSectionComponent(
                 <FormItem>
                   <div className='flex items-center gap-2'>
                     <FormLabel>{t('SHKeeper API key')}</FormLabel>
-                    {status?.api_key_configured ? (
+                    {currentFormValues.api_key_configured ? (
                       <Badge variant='secondary'>{t('Configured')}</Badge>
                     ) : null}
                   </div>
@@ -370,7 +421,7 @@ function SHKeeperSettingsSectionComponent(
                 <FormItem>
                   <div className='flex items-center gap-2'>
                     <FormLabel>{t('SHKeeper backend key')}</FormLabel>
-                    {status?.backend_key_configured ? (
+                    {currentFormValues.backend_key_configured ? (
                       <Badge variant='secondary'>{t('Configured')}</Badge>
                     ) : null}
                   </div>

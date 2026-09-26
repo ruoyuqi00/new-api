@@ -37,9 +37,10 @@ import type {
   UpstreamRatiosResponse,
 } from './types'
 
-export async function getSHKeeperSettings() {
+export async function getSHKeeperSettings(signal?: AbortSignal) {
   const res = await api.get<SHKeeperSettingsResponse>(
-    '/api/option/shkeeper/status'
+    '/api/option/shkeeper/status',
+    { signal }
   )
   return res.data
 }
