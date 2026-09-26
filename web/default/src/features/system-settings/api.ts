@@ -24,6 +24,9 @@ import type {
   GroupCatalogResponse,
   LogCleanupTask,
   SensitiveInputCleanupTask,
+  SHKeeperConnectionTestResponse,
+  SHKeeperSettingsRequest,
+  SHKeeperSettingsResponse,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -33,6 +36,29 @@ import type {
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
 } from './types'
+
+export async function getSHKeeperSettings() {
+  const res = await api.get<SHKeeperSettingsResponse>(
+    '/api/option/shkeeper/status'
+  )
+  return res.data
+}
+
+export async function saveSHKeeperSettings(request: SHKeeperSettingsRequest) {
+  const res = await api.post<SHKeeperSettingsResponse>(
+    '/api/option/shkeeper/save',
+    request
+  )
+  return res.data
+}
+
+export async function testSHKeeperConnection(request: SHKeeperSettingsRequest) {
+  const res = await api.post<SHKeeperConnectionTestResponse>(
+    '/api/option/shkeeper/test',
+    request
+  )
+  return res.data
+}
 
 export async function getGroupCatalog() {
   const res = await api.get<GroupCatalogResponse>('/api/group/catalog')

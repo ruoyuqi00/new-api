@@ -39,6 +39,66 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type SHKeeperNetwork = 'BNB-USDT' | 'USDT' | 'POLYGON-USDT'
+
+export type SHKeeperTopUpPackage = {
+  usdt: number
+  balance: string
+  label?: string
+}
+
+export type SHKeeperSettingsStatus = {
+  enabled: boolean
+  base_url: string
+  api_key_configured: boolean
+  backend_key_configured: boolean
+  packages: SHKeeperTopUpPackage[] | null
+  enabled_networks: SHKeeperNetwork[] | null
+  invoice_expiry_minutes: number
+  reconcile_interval_seconds: number
+  allow_private_url: boolean
+}
+
+export type SHKeeperSettingsRequest = {
+  enabled: boolean
+  base_url: string
+  api_key: string
+  backend_key: string
+  packages: SHKeeperTopUpPackage[]
+  enabled_networks: SHKeeperNetwork[]
+  invoice_expiry_minutes: number
+  reconcile_interval_seconds: number
+  allow_private_url: boolean
+}
+
+export type SHKeeperNetworkTestResult = {
+  crypto: SHKeeperNetwork
+  available: boolean
+  quote_ok: boolean
+  amount_matches: boolean
+  crypto_amount?: string
+  message?: string
+}
+
+export type SHKeeperConnectionTest = {
+  reachable: boolean
+  api_key_valid: boolean
+  ready: boolean
+  networks: SHKeeperNetworkTestResult[]
+}
+
+export type SHKeeperSettingsResponse = {
+  success: boolean
+  message: string
+  data?: SHKeeperSettingsStatus
+}
+
+export type SHKeeperConnectionTestResponse = {
+  success: boolean
+  message: string
+  data?: SHKeeperConnectionTest
+}
+
 export type UpdateAffiliateRebateOptionsRequest = {
   enabled: boolean
   basis_points: number
