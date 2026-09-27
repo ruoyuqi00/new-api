@@ -48,7 +48,10 @@ export function tokenPayOrderQueryOptions(tradeNo: string) {
   })
 }
 
-export function useTokenPayPayment(onCredited: () => void | Promise<void>) {
+export function useTokenPayPayment(
+  onCredited: () => void | Promise<void>,
+  initialTradeNo = ''
+) {
   const attempted = useRef(false)
   const refreshed = useRef(new Set<string>())
   const create = useMutation({
@@ -57,7 +60,7 @@ export function useTokenPayPayment(onCredited: () => void | Promise<void>) {
     meta: KEEP_CURRENT_PAGE_ON_QUERY_ERROR,
     onError: () => {},
   })
-  const tradeNo = create.data?.trade_no || ''
+  const tradeNo = create.data?.trade_no || initialTradeNo
   const order = useQuery({
     ...tokenPayOrderQueryOptions(tradeNo),
     initialData: create.data,

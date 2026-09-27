@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,6 +87,7 @@ func RequestTokenPay(c *gin.Context) {
 	balance, _ := decimal.NewFromString(item.Balance)
 	order := &model.TokenPayTopUpOrder{TradeNo: tradeNo, UserID: userID, Network: input.Network,
 		RequestedUSDT: service.TokenPayPaymentAmount(item.USDT), PackageBalance: item.Balance,
+		ProviderBaseURL: settings.BaseURL, NotifyURL: baseURL + "/api/tokenpay/webhook", RedirectURL: baseURL + "/wallet",
 		OrderUserKey: service.TokenPayOrderUserKey(tradeNo, input.Network), Status: model.TokenPayOrderStatusPending,
 		CreatedAt: now, ExpiresAt: now + 30*60}
 	topUp := &model.TopUp{TradeNo: tradeNo, UserId: userID, Amount: balance.IntPart(), Money: float64(item.USDT),
@@ -97,17 +99,25 @@ func RequestTokenPay(c *gin.Context) {
 	}
 	invoice, err := client.CreateOrder(c.Request.Context(), service.TokenPayCreateRequest{
 		OutOrderID: tradeNo, OrderUserKey: order.OrderUserKey, ActualAmount: order.RequestedUSDT, Currency: order.Network,
-		NotifyURL: baseURL + "/api/tokenpay/webhook", RedirectURL: baseURL + "/wallet",
+		NotifyURL: order.NotifyURL, RedirectURL: order.RedirectURL,
 	})
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("TokenPay invoice creation failed trade_no=%s error=%q", tradeNo, err.Error()))
-		common.ApiErrorMsg(c, "Unable to create an exact TokenPay invoice; order retained for review")
+		if errors.Is(err, service.ErrTokenPayInvoiceInvalid) {
+			if failErr := model.FailTokenPayUnissuedInvoice(order.ID, order.UserID); failErr != nil {
+				common.ApiErrorMsg(c, "Unable to close invalid TokenPay invoice")
+				return
+			}
+			common.ApiErrorMsg(c, "Unable to create an exact TokenPay invoice")
+			return
+		}
+		respondTokenPayOrder(c, order)
 		return
 	}
 	if err := model.SaveTokenPayInvoice(tradeNo, userID, invoice.ProviderOrderID, invoice.PayAmountUSDT,
 		invoice.ReceiveAddress, invoice.PaymentURL, invoice.ExpiresAt); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("TokenPay invoice save failed trade_no=%s error=%q", tradeNo, err.Error()))
-		common.ApiErrorMsg(c, "Unable to save TokenPay invoice; order retained for review")
+		respondTokenPayOrder(c, order)
 		return
 	}
 	order.ProviderOrderID = &invoice.ProviderOrderID
@@ -124,6 +134,52 @@ func GetTokenPayOrder(c *gin.Context) {
 	if err != nil {
 		common.ApiErrorMsg(c, "TokenPay order not found")
 		return
+	}
+	if order.Status == model.TokenPayOrderStatusPending {
+		now := time.Now().Unix()
+		if now >= order.ExpiresAt {
+			if err := model.ExpireTokenPayUnissuedInvoice(order.ID, order.UserID, now); err != nil {
+				common.ApiErrorMsg(c, "Unable to update TokenPay order")
+				return
+			}
+		} else {
+			settings := operation_setting.GetTokenPayPaymentSetting()
+			if settings.BaseURL == order.ProviderBaseURL && settings.APIToken != "" {
+				claimed, claimErr := model.ClaimTokenPayInvoiceReconciliation(order.ID, order.UserID, now)
+				if claimErr != nil {
+					common.ApiErrorMsg(c, "Unable to reconcile TokenPay order")
+					return
+				}
+				if claimed {
+					client, clientErr := service.NewTokenPayClient(settings.BaseURL, settings.APIToken, settings.AllowPrivateURL, nil)
+					if clientErr != nil {
+						logger.LogError(c.Request.Context(), fmt.Sprintf("TokenPay reconciliation client failed trade_no=%s error=%q", order.TradeNo, clientErr.Error()))
+					} else {
+						invoice, createErr := client.CreateOrder(c.Request.Context(), service.TokenPayCreateRequest{
+							OutOrderID: order.TradeNo, OrderUserKey: order.OrderUserKey,
+							ActualAmount: order.RequestedUSDT, Currency: order.Network,
+							NotifyURL: order.NotifyURL, RedirectURL: order.RedirectURL,
+						})
+						if createErr != nil {
+							logger.LogError(c.Request.Context(), fmt.Sprintf("TokenPay reconciliation failed trade_no=%s error=%q", order.TradeNo, createErr.Error()))
+							if errors.Is(createErr, service.ErrTokenPayInvoiceInvalid) {
+								if failErr := model.FailTokenPayUnissuedInvoice(order.ID, order.UserID); failErr != nil {
+									logger.LogError(c.Request.Context(), fmt.Sprintf("TokenPay invalid invoice close failed trade_no=%s error=%q", order.TradeNo, failErr.Error()))
+								}
+							}
+						} else if saveErr := model.SaveTokenPayInvoice(order.TradeNo, order.UserID, invoice.ProviderOrderID,
+							invoice.PayAmountUSDT, invoice.ReceiveAddress, invoice.PaymentURL, invoice.ExpiresAt); saveErr != nil {
+							logger.LogError(c.Request.Context(), fmt.Sprintf("TokenPay reconciliation save failed trade_no=%s error=%q", order.TradeNo, saveErr.Error()))
+						}
+					}
+				}
+			}
+		}
+		order, err = model.GetTokenPayOrder(c.GetInt("id"), c.Param("trade_no"))
+		if err != nil {
+			common.ApiErrorMsg(c, "TokenPay order not found")
+			return
+		}
 	}
 	respondTokenPayOrder(c, order)
 }

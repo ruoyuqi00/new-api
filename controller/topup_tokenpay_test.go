@@ -20,10 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupTokenPayController(t *testing.T, quoted string) (*gin.Engine, *model.User) {
+func setupTokenPayController(t *testing.T, quoted string, failFirst ...int) (*gin.Engine, *model.User) {
 	t.Helper()
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.TopUp{}, &model.TokenPayTopUpOrder{}, &model.TokenPayCreditedTransaction{}, &model.AffiliateReward{}, &model.Log{}, &model.Option{}))
+	require.NoError(t, db.AutoMigrate(&model.TopUp{}, &model.TokenPayTopUpOrder{}, &model.TokenPayCreditedTransaction{}, &model.TokenPayRecoveryClaim{}, &model.AffiliateReward{}, &model.Log{}, &model.Option{}))
 	confirmPaymentComplianceForTest(t)
 	oldQuota := common.QuotaPerUnit
 	common.QuotaPerUnit = 100
@@ -45,19 +45,26 @@ func setupTokenPayController(t *testing.T, quoted string) (*gin.Engine, *model.U
 		common.OptionMap = oldOptionMap
 		common.OptionMapRWMutex.Unlock()
 	})
+	attempts := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/CreateOrder" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		attempts++
+		if len(failFirst) > 0 && attempts <= failFirst[0] {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		var request map[string]string
 		require.NoError(t, common.DecodeJson(r.Body, &request))
 		checkout := "https://" + r.Host + "/Pay?Id=invoice-1"
-		response := map[string]any{"success": true, "data": checkout, "info": map[string]string{
+		response := map[string]any{"success": true, "data": checkout, "info": map[string]any{
 			"Id": "invoice-1", "OutOrderId": request["OutOrderId"], "OrderUserKey": request["OrderUserKey"],
 			"ActualAmount": "10", "Amount": quoted, "BaseCurrency": "USD", "BlockChainName": "TRON",
 			"CurrencyName": "USDT", "ToAddress": "TKGTx4pCKiKQbk8evXHTborfZn754TGViP",
-			"ExpireTime": "2030-01-01 00:00:00",
+			"ExpireTimeUnix": time.Now().Add(30 * time.Minute).Unix(),
+			"IsCustomAmount": false, "MinCustomAmount": nil, "MaxCustomAmount": nil,
 		}}
 		data, err := common.Marshal(response)
 		require.NoError(t, err)
@@ -81,6 +88,7 @@ func setupTokenPayController(t *testing.T, quoted string) (*gin.Engine, *model.U
 	r.POST("/order/:trade_no/transaction", SubmitTokenPayTransaction)
 	r.POST("/webhook", TokenPayWebhook)
 	r.GET("/status", GetTokenPayStatus)
+	r.GET("/claims", ListTokenPayRecoveryClaims)
 	r.POST("/save", SaveTokenPaySettings)
 	r.GET("/info", GetTopUpInfo)
 	r.GET("/options", GetOptions)
@@ -131,6 +139,51 @@ func TestTokenPayRejectsChangedProviderAmountAndHidesCheckout(t *testing.T) {
 	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&order).Error)
 	assert.Empty(t, order.PaymentURL)
 	assert.Nil(t, order.ProviderOrderID)
+	assert.Equal(t, model.TokenPayOrderStatusFailed, order.Status)
+	var topUp model.TopUp
+	require.NoError(t, model.DB.Where("trade_no = ?", order.TradeNo).First(&topUp).Error)
+	assert.Equal(t, common.TopUpStatusFailed, topUp.Status)
+}
+
+func TestTokenPayAmbiguousCreationResumesSameOrderWithoutExposingEmptyAddress(t *testing.T) {
+	r, user := setupTokenPayController(t, "10", 2)
+	created := decodeTokenPayControllerResponse(t, callTokenPayController(t, r, "POST", "/pay", `{"usdt_amount":10,"network":"USDT_TRC20"}`))
+	require.Equal(t, true, created["success"])
+	pending := created["data"].(map[string]any)
+	tradeNo := pending["trade_no"].(string)
+	assert.Equal(t, model.TokenPayOrderStatusPending, pending["status"])
+	assert.Empty(t, pending["address"])
+	assert.Empty(t, pending["payment_url"])
+
+	resumed := decodeTokenPayControllerResponse(t, callTokenPayController(t, r, "GET", "/order/"+tradeNo, ""))
+	require.Equal(t, true, resumed["success"])
+	invoice := resumed["data"].(map[string]any)
+	assert.Equal(t, tradeNo, invoice["trade_no"])
+	assert.Equal(t, model.TokenPayOrderStatusUnpaid, invoice["status"])
+	assert.NotEmpty(t, invoice["address"])
+	var count int64
+	require.NoError(t, model.DB.Model(&model.TokenPayTopUpOrder{}).Where("user_id = ?", user.Id).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
+func TestTokenPayUnissuedInvoiceExpiresWithoutCrediting(t *testing.T) {
+	r, user := setupTokenPayController(t, "10", 2)
+	created := decodeTokenPayControllerResponse(t, callTokenPayController(t, r, "POST", "/pay", `{"usdt_amount":10,"network":"USDT_TRC20"}`))
+	require.Equal(t, true, created["success"])
+	tradeNo := created["data"].(map[string]any)["trade_no"].(string)
+	require.NoError(t, model.DB.Model(&model.TokenPayTopUpOrder{}).
+		Where("trade_no = ?", tradeNo).Update("expires_at", time.Now().Unix()-1).Error)
+
+	response := decodeTokenPayControllerResponse(t, callTokenPayController(t, r, "GET", "/order/"+tradeNo, ""))
+	require.Equal(t, true, response["success"])
+	data := response["data"].(map[string]any)
+	assert.Equal(t, model.TokenPayOrderStatusFailed, data["status"])
+	assert.Empty(t, data["address"])
+	var topUp model.TopUp
+	require.NoError(t, model.DB.Where("trade_no = ?", tradeNo).First(&topUp).Error)
+	assert.Equal(t, common.TopUpStatusFailed, topUp.Status)
+	require.NoError(t, model.DB.First(user, user.Id).Error)
+	assert.Zero(t, user.Quota)
 }
 
 func tokenPaySignedCallback(t *testing.T, fields map[string]any) string {
@@ -217,6 +270,27 @@ func TestTokenPayTransactionClaimOnlyRequestsReview(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, txHash, order.RecoveryHash)
 	assert.Equal(t, model.TokenPayOrderStatusUnpaid, order.Status)
+	require.NoError(t, model.DB.First(user, user.Id).Error)
+	assert.Zero(t, user.Quota)
+}
+
+func TestTokenPayAdminCanFindSubmittedHashWithoutCrediting(t *testing.T) {
+	r, user := setupTokenPayController(t, "10")
+	created := decodeTokenPayControllerResponse(t, callTokenPayController(t, r, "POST", "/pay", `{"usdt_amount":10,"network":"USDT_TRC20"}`))
+	require.Equal(t, true, created["success"])
+	tradeNo := created["data"].(map[string]any)["trade_no"].(string)
+	txHash := strings.Repeat("d", 64)
+	submitted := decodeTokenPayControllerResponse(t, callTokenPayController(t, r, "POST", "/order/"+tradeNo+"/transaction", `{"transaction_id":"`+txHash+`"}`))
+	require.Equal(t, true, submitted["success"])
+
+	response := decodeTokenPayControllerResponse(t, callTokenPayController(t, r, "GET", "/claims", ""))
+	require.Equal(t, true, response["success"])
+	items := response["data"].([]any)
+	require.Len(t, items, 1)
+	item := items[0].(map[string]any)
+	assert.Equal(t, tradeNo, item["trade_no"])
+	assert.Equal(t, txHash, item["transaction_id"])
+	assert.NotEmpty(t, item["receive_address"])
 	require.NoError(t, model.DB.First(user, user.Id).Error)
 	assert.Zero(t, user.Quota)
 }

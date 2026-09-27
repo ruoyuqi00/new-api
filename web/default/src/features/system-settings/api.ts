@@ -29,6 +29,7 @@ import type {
   SHKeeperSettingsResponse,
   TokenPaySettingsRequest,
   TokenPaySettingsResponse,
+  TokenPayRecoveryClaimsResponse,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -60,6 +61,21 @@ export async function saveTokenPaySettings(request: TokenPaySettingsRequest) {
   const res = await api.post<TokenPaySettingsResponse>(
     '/api/option/tokenpay/save',
     request
+  )
+  return res.data
+}
+
+export async function getTokenPayRecoveryClaims(
+  beforeID = 0,
+  signal?: AbortSignal
+) {
+  const res = await api.get<TokenPayRecoveryClaimsResponse>(
+    '/api/option/tokenpay/claims',
+    {
+      signal,
+      disableDuplicate: true,
+      params: beforeID > 0 ? { before: beforeID } : undefined,
+    }
   )
   return res.data
 }

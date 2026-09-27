@@ -31,6 +31,9 @@ type TokenPayTopUpOrder struct {
 	ProviderOrderID    *string `json:"provider_order_id" gorm:"size:128;uniqueIndex"`
 	OrderUserKey       string  `json:"order_user_key" gorm:"size:255;uniqueIndex"`
 	ProviderAmountUSDT string  `json:"provider_amount_usdt" gorm:"size:64"`
+	ProviderBaseURL    string  `json:"provider_base_url" gorm:"size:1024"`
+	NotifyURL          string  `json:"notify_url" gorm:"size:1024"`
+	RedirectURL        string  `json:"redirect_url" gorm:"size:1024"`
 	ReceiveAddress     string  `json:"receive_address" gorm:"size:255"`
 	PaymentURL         string  `json:"payment_url" gorm:"size:1024"`
 	RecoveryHash       string  `json:"recovery_hash" gorm:"size:255"`
@@ -38,6 +41,7 @@ type TokenPayTopUpOrder struct {
 	CreatedAt          int64   `json:"created_at"`
 	ExpiresAt          int64   `json:"expires_at"`
 	CompletedAt        int64   `json:"completed_at"`
+	LastReconcileAt    int64   `json:"last_reconcile_at"`
 }
 
 type TokenPayCreditedTransaction struct {
@@ -47,6 +51,27 @@ type TokenPayCreditedTransaction struct {
 	TxID        string `json:"tx_id" gorm:"size:255;uniqueIndex:idx_tokenpay_chain_tx,priority:2"`
 	AmountUSDT  string `json:"amount_usdt" gorm:"size:64"`
 	ProcessedAt int64  `json:"processed_at"`
+}
+
+type TokenPayRecoveryClaim struct {
+	ID            int64  `json:"id" gorm:"primaryKey"`
+	OrderID       int64  `json:"order_id" gorm:"uniqueIndex:idx_tokenpay_order_claim,priority:1;index"`
+	UserID        int    `json:"user_id" gorm:"index"`
+	Network       string `json:"network" gorm:"size:64"`
+	TransactionID string `json:"transaction_id" gorm:"size:70;uniqueIndex:idx_tokenpay_order_claim,priority:2"`
+	SubmittedAt   int64  `json:"submitted_at"`
+}
+
+type TokenPayRecoveryReviewItem struct {
+	ClaimID        int64  `json:"claim_id"`
+	TradeNo        string `json:"trade_no"`
+	UserID         int    `json:"user_id"`
+	Network        string `json:"network"`
+	RequestedUSDT  string `json:"requested_usdt"`
+	ReceiveAddress string `json:"receive_address"`
+	TransactionID  string `json:"transaction_id"`
+	OrderStatus    string `json:"order_status"`
+	SubmittedAt    int64  `json:"submitted_at"`
 }
 
 type TokenPaySettlementInput struct {
@@ -142,21 +167,124 @@ func GetTokenPayOrder(userID int, tradeNo string) (*TokenPayTopUpOrder, error) {
 	return &order, nil
 }
 
+func ClaimTokenPayInvoiceReconciliation(orderID int64, userID int, now int64) (bool, error) {
+	result := DB.Model(&TokenPayTopUpOrder{}).
+		Where("id = ? AND user_id = ? AND status = ? AND provider_order_id IS NULL AND expires_at > ? AND last_reconcile_at <= ?",
+			orderID, userID, TokenPayOrderStatusPending, now, now-15).
+		Update("last_reconcile_at", now)
+	return result.RowsAffected == 1, result.Error
+}
+
+func ExpireTokenPayUnissuedInvoice(orderID int64, userID int, now int64) error {
+	return failTokenPayUnissuedInvoice(orderID, userID, &now)
+}
+
+func FailTokenPayUnissuedInvoice(orderID int64, userID int) error {
+	return failTokenPayUnissuedInvoice(orderID, userID, nil)
+}
+
+func failTokenPayUnissuedInvoice(orderID int64, userID int, expiredAt *int64) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var order TokenPayTopUpOrder
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+			return err
+		}
+		if order.Status != TokenPayOrderStatusPending || order.ProviderOrderID != nil ||
+			expiredAt != nil && order.ExpiresAt > *expiredAt {
+			return nil
+		}
+		updated := tx.Model(&TokenPayTopUpOrder{}).
+			Where("id = ? AND status = ? AND provider_order_id IS NULL", order.ID, TokenPayOrderStatusPending)
+		if expiredAt != nil {
+			updated = updated.Where("expires_at <= ?", *expiredAt)
+		}
+		updated = updated.Update("status", TokenPayOrderStatusFailed)
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected == 0 {
+			return nil
+		}
+		return tx.Model(&TopUp{}).Where("id = ? AND status = ?", order.TopUpID, common.TopUpStatusPending).
+			Update("status", common.TopUpStatusFailed).Error
+	})
+}
+
 func SaveTokenPayRecoveryClaim(orderID int64, userID int, transactionID string) error {
 	transactionID = strings.ToLower(strings.TrimSpace(transactionID))
 	if orderID <= 0 || userID <= 0 || transactionID == "" {
 		return errors.New("invalid TokenPay recovery claim")
 	}
-	result := DB.Model(&TokenPayTopUpOrder{}).
-		Where("id = ? AND user_id = ? AND status = ?", orderID, userID, TokenPayOrderStatusUnpaid).
-		Update("recovery_hash", transactionID)
-	if result.Error != nil {
-		return result.Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var order TokenPayTopUpOrder
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND status = ?",
+			orderID, userID, TokenPayOrderStatusUnpaid).First(&order).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		var existing TokenPayRecoveryClaim
+		err := tx.Where("order_id = ? AND transaction_id = ?", orderID, transactionID).First(&existing).Error
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&TokenPayRecoveryClaim{}).Where("order_id = ?", orderID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= 3 {
+			return errors.New("TokenPay transaction review claim limit reached")
+		}
+		claim := TokenPayRecoveryClaim{OrderID: orderID, UserID: userID, Network: order.Network,
+			TransactionID: transactionID, SubmittedAt: common.GetTimestamp()}
+		if err := tx.Create(&claim).Error; err != nil {
+			return err
+		}
+		return tx.Model(&order).Update("recovery_hash", transactionID).Error
+	})
+}
+
+func ListTokenPayRecoveryClaims(limit int, beforeID int64) ([]TokenPayRecoveryReviewItem, error) {
+	if limit < 1 || limit > 100 {
+		limit = 50
 	}
-	if result.RowsAffected != 1 {
-		return ErrTopUpNotFound
+	var claims []TokenPayRecoveryClaim
+	query := DB.Model(&TokenPayRecoveryClaim{}).Order("id desc").Limit(limit)
+	if beforeID > 0 {
+		query = query.Where("id < ?", beforeID)
 	}
-	return nil
+	if err := query.Find(&claims).Error; err != nil {
+		return nil, err
+	}
+	if len(claims) == 0 {
+		return []TokenPayRecoveryReviewItem{}, nil
+	}
+	orderIDs := make([]int64, 0, len(claims))
+	for _, claim := range claims {
+		orderIDs = append(orderIDs, claim.OrderID)
+	}
+	var orders []TokenPayTopUpOrder
+	if err := DB.Where("id IN ?", orderIDs).Find(&orders).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]TokenPayTopUpOrder, len(orders))
+	for _, order := range orders {
+		byID[order.ID] = order
+	}
+	items := make([]TokenPayRecoveryReviewItem, 0, len(claims))
+	for _, claim := range claims {
+		order, found := byID[claim.OrderID]
+		if !found {
+			return nil, errors.New("TokenPay recovery claim has no order")
+		}
+		items = append(items, TokenPayRecoveryReviewItem{
+			ClaimID: claim.ID, TradeNo: order.TradeNo, UserID: claim.UserID, Network: claim.Network,
+			RequestedUSDT: order.RequestedUSDT, ReceiveAddress: order.ReceiveAddress,
+			TransactionID: claim.TransactionID, OrderStatus: order.Status, SubmittedAt: claim.SubmittedAt,
+		})
+	}
+	return items, nil
 }
 
 func SettleTokenPayTopUp(input TokenPaySettlementInput) (*TokenPaySettlementResult, error) {

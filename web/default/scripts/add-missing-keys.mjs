@@ -27,19 +27,37 @@ function stableStringify(obj) {
 
 const newKeys = {
   en: {
+    'Payment completed. Do not send another transfer.':
+      'Payment completed. Do not send another transfer.',
+    'This payment invoice has expired. Do not send USDT to this address.':
+      'This payment invoice has expired. Do not send USDT to this address.',
+    'Manual payment review': 'Manual payment review',
+    'Load older': 'Load older',
+    'Continue payment': 'Continue payment',
+    'Unable to load payment order. Retry or contact support.':
+      'Unable to load payment order. Retry or contact support.',
+    'No transaction hashes submitted': 'No transaction hashes submitted',
+    'Unable to load transaction reviews': 'Unable to load transaction reviews',
+    'No payment address was issued for this order.':
+      'No payment address was issued for this order.',
+    'Payment address is being prepared. Do not send USDT yet.':
+      'Payment address is being prepared. Do not send USDT yet.',
     'API token': 'API token',
     'Allow private TokenPay URL': 'Allow private TokenPay URL',
     'Enable TokenPay': 'Enable TokenPay',
     'Failed to save TokenPay settings': 'Failed to save TokenPay settings',
     'Open payment page': 'Open payment page',
-    'Permit a TokenPay service on localhost or a private network.': 'Permit a TokenPay service on localhost or a private network.',
-    'Saved token is never shown. Leave the field blank to keep it.': 'Saved token is never shown. Leave the field blank to keep it.',
+    'Permit a TokenPay service on localhost or a private network.':
+      'Permit a TokenPay service on localhost or a private network.',
+    'Saved token is never shown. Leave the field blank to keep it.':
+      'Saved token is never shown. Leave the field blank to keep it.',
     'Submit for review': 'Submit for review',
     'Submitted for manual review': 'Submitted for manual review',
     'TokenPay settings saved': 'TokenPay settings saved',
     'TokenPay USDT': 'TokenPay USDT',
     'Unable to load TokenPay settings': 'Unable to load TokenPay settings',
-    'Unable to submit transaction for review': 'Unable to submit transaction for review',
+    'Unable to submit transaction for review':
+      'Unable to submit transaction for review',
     'Ignore client max_output_tokens': 'Ignore client max_output_tokens',
     'Remove max_output_tokens from Responses requests before forwarding them upstream':
       'Remove max_output_tokens from Responses requests before forwarding them upstream',
@@ -229,13 +247,29 @@ const newKeys = {
     'Must be greater than zero': 'Must be greater than zero',
   },
   zh: {
+    'Payment completed. Do not send another transfer.':
+      '付款已完成，请勿再次转账。',
+    'This payment invoice has expired. Do not send USDT to this address.':
+      '此付款订单已过期，请勿再向该地址转账 USDT。',
+    'Manual payment review': '人工付款核对',
+    'Load older': '加载更早记录',
+    'Continue payment': '继续付款',
+    'Unable to load payment order. Retry or contact support.':
+      '无法加载付款订单，请重试或联系客服。',
+    'No transaction hashes submitted': '暂无提交的交易哈希',
+    'Unable to load transaction reviews': '无法加载交易核对记录',
+    'No payment address was issued for this order.': '此订单未生成收款地址。',
+    'Payment address is being prepared. Do not send USDT yet.':
+      '正在生成收款地址，暂时不要转账 USDT。',
     'API token': 'API 令牌',
     'Allow private TokenPay URL': '允许内网 TokenPay 地址',
     'Enable TokenPay': '启用 TokenPay',
     'Failed to save TokenPay settings': '保存 TokenPay 设置失败',
     'Open payment page': '打开付款页',
-    'Permit a TokenPay service on localhost or a private network.': '允许连接本机或内网的 TokenPay 服务。',
-    'Saved token is never shown. Leave the field blank to keep it.': '已保存的令牌不会显示。留空以保留当前令牌。',
+    'Permit a TokenPay service on localhost or a private network.':
+      '允许连接本机或内网的 TokenPay 服务。',
+    'Saved token is never shown. Leave the field blank to keep it.':
+      '已保存的令牌不会显示。留空以保留当前令牌。',
     'Submit for review': '提交核对',
     'Submitted for manual review': '已提交人工核对',
     'TokenPay settings saved': 'TokenPay 设置已保存',
@@ -427,19 +461,40 @@ const newKeys = {
     'Must be greater than zero': '必须大于 0',
   },
   fr: {
+    'Payment completed. Do not send another transfer.':
+      "Paiement terminé. N'effectuez pas de nouveau virement.",
+    'This payment invoice has expired. Do not send USDT to this address.':
+      "Cette facture de paiement a expiré. N'envoyez pas d'USDT à cette adresse.",
+    'Manual payment review': 'Vérification manuelle des paiements',
+    'Load older': 'Charger les anciennes entrées',
+    'Continue payment': 'Poursuivre le paiement',
+    'Unable to load payment order. Retry or contact support.':
+      "Impossible de charger la commande de paiement. Réessayez ou contactez l'assistance.",
+    'No transaction hashes submitted': 'Aucun hash de transaction soumis',
+    'Unable to load transaction reviews':
+      'Impossible de charger les vérifications des transactions',
+    'No payment address was issued for this order.':
+      "Aucune adresse de paiement n'a été émise pour cette commande.",
+    'Payment address is being prepared. Do not send USDT yet.':
+      "L'adresse de paiement est en cours de préparation. N'envoyez pas encore d'USDT.",
     'API token': 'Jeton API',
     'Allow private TokenPay URL': 'Autoriser une URL TokenPay privée',
     'Enable TokenPay': 'Activer TokenPay',
-    'Failed to save TokenPay settings': "Échec de l'enregistrement des paramètres TokenPay",
+    'Failed to save TokenPay settings':
+      "Échec de l'enregistrement des paramètres TokenPay",
     'Open payment page': 'Ouvrir la page de paiement',
-    'Permit a TokenPay service on localhost or a private network.': 'Autoriser un service TokenPay local ou sur le réseau privé.',
-    'Saved token is never shown. Leave the field blank to keep it.': "Le jeton enregistré n'est jamais affiché. Laissez ce champ vide pour le conserver.",
+    'Permit a TokenPay service on localhost or a private network.':
+      'Autoriser un service TokenPay local ou sur le réseau privé.',
+    'Saved token is never shown. Leave the field blank to keep it.':
+      "Le jeton enregistré n'est jamais affiché. Laissez ce champ vide pour le conserver.",
     'Submit for review': 'Soumettre à vérification',
     'Submitted for manual review': 'Soumis à une vérification manuelle',
     'TokenPay settings saved': 'Paramètres TokenPay enregistrés',
     'TokenPay USDT': 'TokenPay USDT',
-    'Unable to load TokenPay settings': 'Impossible de charger les paramètres TokenPay',
-    'Unable to submit transaction for review': 'Impossible de soumettre la transaction',
+    'Unable to load TokenPay settings':
+      'Impossible de charger les paramètres TokenPay',
+    'Unable to submit transaction for review':
+      'Impossible de soumettre la transaction',
     'Ignore client max_output_tokens': 'Ignorer max_output_tokens du client',
     'Remove max_output_tokens from Responses requests before forwarding them upstream':
       'Supprimer max_output_tokens des requêtes Responses avant leur transfert en amont',
@@ -629,19 +684,37 @@ const newKeys = {
     'Must be greater than zero': 'Doit être supérieur à zéro',
   },
   ja: {
+    'Payment completed. Do not send another transfer.':
+      '支払いは完了しました。再送金しないでください。',
+    'This payment invoice has expired. Do not send USDT to this address.':
+      'この支払い請求は期限切れです。このアドレスにUSDTを送金しないでください。',
+    'Manual payment review': '支払いの手動確認',
+    'Load older': '過去の記録を読み込む',
+    'Continue payment': '支払いを続ける',
+    'Unable to load payment order. Retry or contact support.':
+      '支払い注文を読み込めません。再試行するかサポートにお問い合わせください。',
+    'No transaction hashes submitted': '送信された取引ハッシュはありません',
+    'Unable to load transaction reviews': '取引確認記録を読み込めません',
+    'No payment address was issued for this order.':
+      'この注文には支払い先アドレスが発行されていません。',
+    'Payment address is being prepared. Do not send USDT yet.':
+      '支払い先アドレスを準備中です。まだUSDTを送金しないでください。',
     'API token': 'API トークン',
     'Allow private TokenPay URL': '非公開 TokenPay URL を許可',
     'Enable TokenPay': 'TokenPay を有効化',
     'Failed to save TokenPay settings': 'TokenPay 設定を保存できませんでした',
     'Open payment page': '支払いページを開く',
-    'Permit a TokenPay service on localhost or a private network.': 'ローカルまたはプライベートネットワーク上の TokenPay を許可します。',
-    'Saved token is never shown. Leave the field blank to keep it.': '保存済みトークンは表示されません。空欄にすると現在のトークンを維持します。',
+    'Permit a TokenPay service on localhost or a private network.':
+      'ローカルまたはプライベートネットワーク上の TokenPay を許可します。',
+    'Saved token is never shown. Leave the field blank to keep it.':
+      '保存済みトークンは表示されません。空欄にすると現在のトークンを維持します。',
     'Submit for review': '確認を依頼',
     'Submitted for manual review': '手動確認を依頼しました',
     'TokenPay settings saved': 'TokenPay 設定を保存しました',
     'TokenPay USDT': 'TokenPay USDT',
     'Unable to load TokenPay settings': 'TokenPay 設定を読み込めません',
-    'Unable to submit transaction for review': '取引の確認依頼を送信できませんでした',
+    'Unable to submit transaction for review':
+      '取引の確認依頼を送信できませんでした',
     'Ignore client max_output_tokens':
       'クライアントの max_output_tokens を無視',
     'Remove max_output_tokens from Responses requests before forwarding them upstream':
@@ -830,19 +903,40 @@ const newKeys = {
     'Must be greater than zero': '0 より大きい値が必要です',
   },
   ru: {
+    'Payment completed. Do not send another transfer.':
+      'Платёж завершён. Не отправляйте повторный перевод.',
+    'This payment invoice has expired. Do not send USDT to this address.':
+      'Срок действия счёта истёк. Не отправляйте USDT на этот адрес.',
+    'Manual payment review': 'Ручная проверка платежей',
+    'Load older': 'Загрузить более ранние записи',
+    'Continue payment': 'Продолжить оплату',
+    'Unable to load payment order. Retry or contact support.':
+      'Не удалось загрузить платёжный заказ. Повторите попытку или обратитесь в поддержку.',
+    'No transaction hashes submitted': 'Хеши транзакций не отправлены',
+    'Unable to load transaction reviews':
+      'Не удалось загрузить записи проверки транзакций',
+    'No payment address was issued for this order.':
+      'Для этого заказа не был выдан адрес оплаты.',
+    'Payment address is being prepared. Do not send USDT yet.':
+      'Адрес оплаты подготавливается. Пока не отправляйте USDT.',
     'API token': 'Токен API',
     'Allow private TokenPay URL': 'Разрешить приватный URL TokenPay',
     'Enable TokenPay': 'Включить TokenPay',
-    'Failed to save TokenPay settings': 'Не удалось сохранить настройки TokenPay',
+    'Failed to save TokenPay settings':
+      'Не удалось сохранить настройки TokenPay',
     'Open payment page': 'Открыть страницу оплаты',
-    'Permit a TokenPay service on localhost or a private network.': 'Разрешить сервис TokenPay на локальном узле или в частной сети.',
-    'Saved token is never shown. Leave the field blank to keep it.': 'Сохранённый токен не отображается. Оставьте поле пустым, чтобы сохранить его.',
+    'Permit a TokenPay service on localhost or a private network.':
+      'Разрешить сервис TokenPay на локальном узле или в частной сети.',
+    'Saved token is never shown. Leave the field blank to keep it.':
+      'Сохранённый токен не отображается. Оставьте поле пустым, чтобы сохранить его.',
     'Submit for review': 'Отправить на проверку',
     'Submitted for manual review': 'Отправлено на ручную проверку',
     'TokenPay settings saved': 'Настройки TokenPay сохранены',
     'TokenPay USDT': 'TokenPay USDT',
-    'Unable to load TokenPay settings': 'Не удалось загрузить настройки TokenPay',
-    'Unable to submit transaction for review': 'Не удалось отправить транзакцию на проверку',
+    'Unable to load TokenPay settings':
+      'Не удалось загрузить настройки TokenPay',
+    'Unable to submit transaction for review':
+      'Не удалось отправить транзакцию на проверку',
     'Ignore client max_output_tokens': 'Игнорировать max_output_tokens клиента',
     'Remove max_output_tokens from Responses requests before forwarding them upstream':
       'Удалять max_output_tokens из запросов Responses перед отправкой провайдеру',
@@ -1031,19 +1125,38 @@ const newKeys = {
     'Must be greater than zero': 'Значение должно быть больше нуля',
   },
   vi: {
+    'Payment completed. Do not send another transfer.':
+      'Thanh toán đã hoàn tất. Không chuyển thêm lần nữa.',
+    'This payment invoice has expired. Do not send USDT to this address.':
+      'Yêu cầu thanh toán này đã hết hạn. Không gửi USDT đến địa chỉ này.',
+    'Manual payment review': 'Đối soát thanh toán thủ công',
+    'Load older': 'Tải bản ghi cũ hơn',
+    'Continue payment': 'Tiếp tục thanh toán',
+    'Unable to load payment order. Retry or contact support.':
+      'Không thể tải đơn thanh toán. Hãy thử lại hoặc liên hệ hỗ trợ.',
+    'No transaction hashes submitted': 'Chưa có mã băm giao dịch nào được gửi',
+    'Unable to load transaction reviews':
+      'Không thể tải danh sách đối soát giao dịch',
+    'No payment address was issued for this order.':
+      'Đơn hàng này chưa được cấp địa chỉ thanh toán.',
+    'Payment address is being prepared. Do not send USDT yet.':
+      'Địa chỉ thanh toán đang được chuẩn bị. Chưa gửi USDT.',
     'API token': 'Mã API',
     'Allow private TokenPay URL': 'Cho phép URL TokenPay nội bộ',
     'Enable TokenPay': 'Bật TokenPay',
     'Failed to save TokenPay settings': 'Không thể lưu cài đặt TokenPay',
     'Open payment page': 'Mở trang thanh toán',
-    'Permit a TokenPay service on localhost or a private network.': 'Cho phép dịch vụ TokenPay trên máy cục bộ hoặc mạng riêng.',
-    'Saved token is never shown. Leave the field blank to keep it.': 'Mã đã lưu không được hiển thị. Để trống để giữ nguyên mã hiện tại.',
+    'Permit a TokenPay service on localhost or a private network.':
+      'Cho phép dịch vụ TokenPay trên máy cục bộ hoặc mạng riêng.',
+    'Saved token is never shown. Leave the field blank to keep it.':
+      'Mã đã lưu không được hiển thị. Để trống để giữ nguyên mã hiện tại.',
     'Submit for review': 'Gửi để kiểm tra',
     'Submitted for manual review': 'Đã gửi để kiểm tra thủ công',
     'TokenPay settings saved': 'Đã lưu cài đặt TokenPay',
     'TokenPay USDT': 'TokenPay USDT',
     'Unable to load TokenPay settings': 'Không thể tải cài đặt TokenPay',
-    'Unable to submit transaction for review': 'Không thể gửi giao dịch để kiểm tra',
+    'Unable to submit transaction for review':
+      'Không thể gửi giao dịch để kiểm tra',
     'Ignore client max_output_tokens': 'Bỏ qua max_output_tokens của máy khách',
     'Remove max_output_tokens from Responses requests before forwarding them upstream':
       'Xóa max_output_tokens khỏi yêu cầu Responses trước khi chuyển tiếp lên nhà cung cấp',

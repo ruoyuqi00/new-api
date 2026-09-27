@@ -20,7 +20,7 @@ import { Wallet01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { ExternalLink } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -40,9 +40,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
+import { Spinner } from '@/components/ui/spinner'
 
 import { useTokenPayPayment } from '../../hooks/use-tokenpay-payment'
 import {
+  canPayTokenPayInvoice,
   sortTokenPayPackages,
   tokenPayNetworkLabel,
 } from '../../lib/tokenpay-payment-model'
@@ -50,6 +52,7 @@ import type { TokenPayNetwork, TopupInfo } from '../../types'
 
 export function TokenPayPaymentDialog(props: {
   topupInfo: TopupInfo
+  tradeNo?: string
   onClose: () => void
   onCredited: () => void | Promise<void>
 }) {
@@ -57,11 +60,45 @@ export function TokenPayPaymentDialog(props: {
   const [amount, setAmount] = useState<number | null>(null)
   const [network, setNetwork] = useState<TokenPayNetwork | null>(null)
   const [transactionID, setTransactionID] = useState('')
-  const payment = useTokenPayPayment(props.onCredited)
+  const payment = useTokenPayPayment(props.onCredited, props.tradeNo)
   const invoice = payment.invoice
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!invoice?.expires_at) return
+    const delay = Math.max(0, invoice.expires_at * 1000 - Date.now())
+    const timer = window.setTimeout(() => setNow(Date.now()), delay + 10)
+    return () => window.clearTimeout(timer)
+  }, [invoice?.expires_at])
+  const hasPaymentAddress = canPayTokenPayInvoice(invoice, now)
+  const isExpired =
+    invoice?.status === 'unpaid' && invoice.expires_at * 1000 <= now
+  let description = t('Choose a fixed package and payment network.')
+  if (invoice?.status === 'paid') {
+    description = t('Paid')
+  } else if (invoice?.status === 'failed') {
+    description = t('Payment failed')
+  } else if (isExpired) {
+    description = t('Expired')
+  } else if (invoice && hasPaymentAddress) {
+    description = t('Pay the exact amount using the network and address below.')
+  } else if (invoice) {
+    description = t('Preparing invoice')
+  }
+  let paymentNotice = t(
+    'Payment address is being prepared. Do not send USDT yet.'
+  )
+  if (invoice?.status === 'paid') {
+    paymentNotice = t('Payment completed. Do not send another transfer.')
+  } else if (isExpired) {
+    paymentNotice = t(
+      'This payment invoice has expired. Do not send USDT to this address.'
+    )
+  } else if (invoice?.status === 'failed') {
+    paymentNotice = t('No payment address was issued for this order.')
+  }
   const statusLabels = {
     pending_provider: t('Preparing invoice'),
-    unpaid: t('Awaiting payment'),
+    unpaid: isExpired ? t('Expired') : t('Awaiting payment'),
     paid: t('Paid'),
     failed: t('Payment failed'),
   }
@@ -92,19 +129,15 @@ export function TokenPayPaymentDialog(props: {
             <HugeiconsIcon icon={Wallet01Icon} size={20} aria-hidden='true' />
             {t('USDT top-up')}
           </DialogTitle>
-          <DialogDescription>
-            {invoice
-              ? t('Pay the exact amount using the network and address below.')
-              : t('Choose a fixed package and payment network.')}
-          </DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
-        {invoice ? (
+        {invoice && (
           <div className='space-y-4 py-2'>
             <div className='flex flex-wrap items-start justify-between gap-3'>
               <div className='space-y-1'>
                 <p className='text-muted-foreground text-sm'>
-                  {t('Send exactly')}
+                  {hasPaymentAddress ? t('Send exactly') : t('USDT amount')}
                 </p>
                 <p className='text-2xl font-semibold tabular-nums'>
                   {invoice.usdt_amount} USDT
@@ -123,50 +156,58 @@ export function TokenPayPaymentDialog(props: {
                 {statusLabels[invoice.status]}
               </Badge>
             </div>
-            <Alert>
-              <AlertDescription>
-                {t(
-                  'Use {{network}} only. Sending on another network may result in lost funds.',
-                  { network: tokenPayNetworkLabel(invoice.network) }
-                )}
-              </AlertDescription>
-            </Alert>
-            <div className='flex flex-col items-center gap-4 sm:flex-row sm:items-start'>
-              <QRCodeSVG
-                value={invoice.address}
-                size={160}
-                marginSize={2}
-                title={t('Payment address QR code')}
-                className='shrink-0'
-              />
-              <div className='w-full min-w-0 space-y-2'>
-                <Label>{t('Payment address')}</Label>
-                <div className='bg-muted/30 flex items-center gap-2 rounded-md border p-2'>
-                  <code className='min-w-0 flex-1 text-xs break-all'>
-                    {invoice.address}
-                  </code>
-                  <CopyButton
+            {hasPaymentAddress ? (
+              <>
+                <Alert>
+                  <AlertDescription>
+                    {t(
+                      'Use {{network}} only. Sending on another network may result in lost funds.',
+                      { network: tokenPayNetworkLabel(invoice.network) }
+                    )}
+                  </AlertDescription>
+                </Alert>
+                <div className='flex flex-col items-center gap-4 sm:flex-row sm:items-start'>
+                  <QRCodeSVG
                     value={invoice.address}
-                    aria-label={t('Copy payment address')}
+                    size={160}
+                    marginSize={2}
+                    title={t('Payment address QR code')}
+                    className='shrink-0'
                   />
+                  <div className='w-full min-w-0 space-y-2'>
+                    <Label>{t('Payment address')}</Label>
+                    <div className='bg-muted/30 flex items-center gap-2 rounded-md border p-2'>
+                      <code className='min-w-0 flex-1 text-xs break-all'>
+                        {invoice.address}
+                      </code>
+                      <CopyButton
+                        value={invoice.address}
+                        aria-label={t('Copy payment address')}
+                      />
+                    </div>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      className='w-full sm:w-auto'
+                      onClick={() =>
+                        window.open(
+                          invoice.payment_url,
+                          '_blank',
+                          'noopener,noreferrer'
+                        )
+                      }
+                    >
+                      <ExternalLink className='size-4' aria-hidden='true' />
+                      {t('Open payment page')}
+                    </Button>
+                  </div>
                 </div>
-                <Button
-                  type='button'
-                  variant='outline'
-                  className='w-full sm:w-auto'
-                  onClick={() =>
-                    window.open(
-                      invoice.payment_url,
-                      '_blank',
-                      'noopener,noreferrer'
-                    )
-                  }
-                >
-                  <ExternalLink className='size-4' aria-hidden='true' />
-                  {t('Open payment page')}
-                </Button>
-              </div>
-            </div>
+              </>
+            ) : (
+              <Alert>
+                <AlertDescription>{paymentNotice}</AlertDescription>
+              </Alert>
+            )}
             <dl className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm'>
               <dt className='text-muted-foreground'>{t('Order number')}</dt>
               <dd className='text-right break-all'>{invoice.trade_no}</dd>
@@ -207,7 +248,37 @@ export function TokenPayPaymentDialog(props: {
               </>
             )}
           </div>
-        ) : (
+        )}
+        {!invoice && props.tradeNo && (
+          <div className='py-6'>
+            {payment.pollingError ? (
+              <Alert variant='destructive'>
+                <AlertDescription className='space-y-2'>
+                  <p>
+                    {t(
+                      'Unable to load payment order. Retry or contact support.'
+                    )}
+                  </p>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    disabled={payment.fetching}
+                    onClick={() => void payment.retryOrder()}
+                  >
+                    {t('Retry')}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <div className='text-muted-foreground flex items-center gap-2 text-sm'>
+                <Spinner />
+                {t('Loading...')}
+              </div>
+            )}
+          </div>
+        )}
+        {!invoice && !props.tradeNo && (
           <div className='space-y-4 py-2'>
             <fieldset className='space-y-2.5' disabled={payment.creating}>
               <legend className='text-sm font-medium'>
@@ -308,7 +379,7 @@ export function TokenPayPaymentDialog(props: {
           <Button variant='outline' onClick={props.onClose}>
             {t('Close')}
           </Button>
-          {!invoice && (
+          {!invoice && !props.tradeNo && (
             <Button
               disabled={
                 amount === null ||

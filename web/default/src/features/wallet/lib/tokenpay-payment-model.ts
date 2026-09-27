@@ -17,10 +17,39 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type {
+  TopupRecord,
+  TokenPayInvoice,
   TokenPayNetwork,
   TokenPayOrderStatus,
   TokenPayPackage,
 } from '../types'
+
+export function canResumeTokenPayRecord(
+  record: Pick<TopupRecord, 'payment_method' | 'status' | 'user_id'>,
+  userID: number
+): boolean {
+  return (
+    userID > 0 &&
+    record.user_id === userID &&
+    record.payment_method === 'tokenpay' &&
+    record.status === 'pending'
+  )
+}
+
+export function canPayTokenPayInvoice(
+  invoice:
+    | Pick<TokenPayInvoice, 'status' | 'address' | 'payment_url' | 'expires_at'>
+    | null
+    | undefined,
+  now = Date.now()
+): boolean {
+  return Boolean(
+    invoice?.status === 'unpaid' &&
+    invoice.address &&
+    invoice.payment_url &&
+    invoice.expires_at * 1000 > now
+  )
+}
 
 export function sortTokenPayPackages(
   packages: readonly TokenPayPackage[]

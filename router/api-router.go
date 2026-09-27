@@ -202,6 +202,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/shkeeper/save", controller.SaveSHKeeperSettings)
 			optionRoute.POST("/shkeeper/test", middleware.CriticalRateLimit(), controller.TestSHKeeperConnection)
 			optionRoute.GET("/tokenpay/status", controller.GetTokenPayStatus)
+			optionRoute.GET("/tokenpay/claims", controller.ListTokenPayRecoveryClaims)
 			optionRoute.POST("/tokenpay/save", controller.SaveTokenPaySettings)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.PUT("/affiliate_rebate", controller.UpdateAffiliateRebateOptions)

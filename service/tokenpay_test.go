@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
@@ -54,14 +55,16 @@ func TestTokenPayCallbackPreservesMonetaryTextAndRejectsTampering(t *testing.T) 
 
 func TestTokenPayCreateOrderValidatesFixedQuoteAndHostedCheckout(t *testing.T) {
 	for _, test := range []struct {
-		name      string
-		amount    string
-		checkout  string
-		wantError bool
+		name       string
+		amount     string
+		checkout   string
+		omitExpiry bool
+		wantError  bool
 	}{
 		{name: "exact fixed amount", amount: "10"},
 		{name: "tail added", amount: "10.0001", wantError: true},
 		{name: "external checkout", amount: "10", checkout: "https://other.example.com/Pay", wantError: true},
+		{name: "timezone-less legacy expiry", amount: "10", omitExpiry: true, wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,11 +81,17 @@ func TestTokenPayCreateOrderValidatesFixedQuoteAndHostedCheckout(t *testing.T) {
 				if test.checkout != "" {
 					checkout = test.checkout
 				}
-				response := map[string]any{"success": true, "data": checkout, "info": map[string]string{
+				info := map[string]any{
 					"Id": "invoice-1", "OutOrderId": "order-1", "OrderUserKey": "order-1-TRON",
 					"ActualAmount": "10", "Amount": test.amount, "BaseCurrency": "USD", "BlockChainName": "TRON",
-					"CurrencyName": "USDT", "ToAddress": "TKGTx4pCKiKQbk8evXHTborfZn754TGViP", "ExpireTime": "2030-01-01 00:00:00",
-				}}
+					"CurrencyName": "USDT", "ToAddress": "TKGTx4pCKiKQbk8evXHTborfZn754TGViP", "ExpireTimeUnix": time.Now().Add(30 * time.Minute).Unix(),
+					"IsCustomAmount": false, "MinCustomAmount": nil, "MaxCustomAmount": nil,
+				}
+				if test.omitExpiry {
+					delete(info, "ExpireTimeUnix")
+					info["ExpireTime"] = "2030-01-01 00:00:00"
+				}
+				response := map[string]any{"success": true, "data": checkout, "info": info}
 				data, marshalErr := common.Marshal(response)
 				require.NoError(t, marshalErr)
 				_, writeErr := w.Write(data)
@@ -97,6 +106,7 @@ func TestTokenPayCreateOrderValidatesFixedQuoteAndHostedCheckout(t *testing.T) {
 			})
 			if test.wantError {
 				require.Error(t, err)
+				assert.ErrorIs(t, err, ErrTokenPayInvoiceInvalid)
 				return
 			}
 			require.NoError(t, err)
@@ -104,6 +114,68 @@ func TestTokenPayCreateOrderValidatesFixedQuoteAndHostedCheckout(t *testing.T) {
 			assert.Equal(t, "invoice-1", result.ProviderOrderID)
 		})
 	}
+}
+
+func TestTokenPayCreateOrderUsesAbsoluteExpiryNotTimezoneLessDisplay(t *testing.T) {
+	expires := time.Now().Add(25 * time.Minute).Unix()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := map[string]any{"success": true, "data": "https://" + r.Host + "/Pay?Id=invoice-utc", "info": map[string]any{
+			"Id": "invoice-utc", "OutOrderId": "order-utc", "OrderUserKey": "order-utc-TRON",
+			"Amount": "10", "ActualAmount": "10", "BaseCurrency": "USD", "BlockChainName": "TRON",
+			"CurrencyName": "USDT", "ToAddress": "TKGTx4pCKiKQbk8evXHTborfZn754TGViP",
+			"ExpireTime": "2000-01-01 00:00:00", "ExpireTimeUnix": expires,
+		}}
+		payload, err := common.Marshal(response)
+		require.NoError(t, err)
+		_, err = w.Write(payload)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+	client, err := NewTokenPayClient(server.URL, "secret", true, server.Client())
+	require.NoError(t, err)
+	result, err := client.CreateOrder(context.Background(), TokenPayCreateRequest{
+		OutOrderID: "order-utc", OrderUserKey: "order-utc-TRON", ActualAmount: "10", Currency: "USDT_TRC20",
+		NotifyURL: "https://api.example.com/api/tokenpay/webhook", RedirectURL: "https://api.example.com/wallet",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, expires, result.ExpiresAt)
+}
+
+func TestTokenPayCreateOrderRetriesAmbiguousFailureWithSameOrderIdentity(t *testing.T) {
+	var attempts int
+	var orderIDs []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		var request map[string]string
+		require.NoError(t, common.DecodeJson(r.Body, &request))
+		orderIDs = append(orderIDs, request["OutOrderId"])
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		response := map[string]any{"success": true, "data": "https://" + r.Host + "/Pay?Id=invoice-reused", "info": map[string]any{
+			"Id": "invoice-reused", "OutOrderId": request["OutOrderId"], "OrderUserKey": request["OrderUserKey"],
+			"Amount": "10", "ActualAmount": "10", "BaseCurrency": "USD", "BlockChainName": "TRON",
+			"CurrencyName": "USDT", "ToAddress": "TKGTx4pCKiKQbk8evXHTborfZn754TGViP",
+			"ExpireTimeUnix": time.Now().Add(30 * time.Minute).Unix(), "IsCustomAmount": false, "MinCustomAmount": nil,
+		}}
+		payload, err := common.Marshal(response)
+		require.NoError(t, err)
+		_, err = w.Write(payload)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+	client, err := NewTokenPayClient(server.URL, "secret", true, server.Client())
+	require.NoError(t, err)
+
+	result, err := client.CreateOrder(context.Background(), TokenPayCreateRequest{
+		OutOrderID: "order-once", OrderUserKey: "order-once-TRON", ActualAmount: "10", Currency: "USDT_TRC20",
+		NotifyURL: "https://api.example.com/api/tokenpay/webhook", RedirectURL: "https://api.example.com/wallet",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "invoice-reused", result.ProviderOrderID)
+	assert.Equal(t, []string{"order-once", "order-once"}, orderIDs)
 }
 
 func TestNormalizeTokenPayTransactionIDByNetwork(t *testing.T) {

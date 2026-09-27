@@ -20,11 +20,62 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  canResumeTokenPayRecord,
+  canPayTokenPayInvoice,
   claimTokenPayCredit,
   isTokenPayTerminal,
   sortTokenPayPackages,
   tokenPayNetworkLabel,
 } from './tokenpay-payment-model'
+
+test('TokenPay never offers an address or checkout again after payment', () => {
+  const invoice = {
+    status: 'unpaid' as const,
+    address: 'Taddress',
+    payment_url: 'https://pay.example.com/Pay?Id=1',
+    expires_at: 2000000000,
+  }
+  const beforeExpiry = 1999999999000
+  assert.equal(canPayTokenPayInvoice(invoice, beforeExpiry), true)
+  assert.equal(
+    canPayTokenPayInvoice({ ...invoice, status: 'paid' }, beforeExpiry),
+    false
+  )
+  assert.equal(
+    canPayTokenPayInvoice({ ...invoice, status: 'failed' }, beforeExpiry),
+    false
+  )
+  assert.equal(
+    canPayTokenPayInvoice(
+      { ...invoice, status: 'pending_provider' },
+      beforeExpiry
+    ),
+    false
+  )
+  assert.equal(
+    canPayTokenPayInvoice({ ...invoice, address: '' }, beforeExpiry),
+    false
+  )
+  assert.equal(canPayTokenPayInvoice(invoice, 2000000000000), false)
+})
+
+test('Only the owner can resume an unfinished TokenPay order from billing history', () => {
+  const pending = {
+    payment_method: 'tokenpay',
+    status: 'pending' as const,
+    user_id: 7,
+  }
+  assert.equal(canResumeTokenPayRecord(pending, 7), true)
+  assert.equal(canResumeTokenPayRecord({ ...pending, user_id: 8 }, 7), false)
+  assert.equal(
+    canResumeTokenPayRecord({ ...pending, status: 'success' }, 7),
+    false
+  )
+  assert.equal(
+    canResumeTokenPayRecord({ ...pending, payment_method: 'shkeeper' }, 7),
+    false
+  )
+})
 
 test('TokenPay sorts packages without changing configured order', () => {
   const configured = [

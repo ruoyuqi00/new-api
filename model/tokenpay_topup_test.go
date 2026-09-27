@@ -14,7 +14,7 @@ import (
 
 func setupTokenPayOrder(t *testing.T, suffix string, network string) (*User, *TokenPayTopUpOrder) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&TokenPayTopUpOrder{}, &TokenPayCreditedTransaction{}, &Option{}, &AffiliateReward{}))
+	require.NoError(t, DB.AutoMigrate(&TokenPayTopUpOrder{}, &TokenPayCreditedTransaction{}, &TokenPayRecoveryClaim{}, &Option{}, &AffiliateReward{}))
 	oldQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 100
 	tradeNo := fmt.Sprintf("tokenpay-%s-%d", suffix, time.Now().UnixNano())
@@ -35,6 +35,7 @@ func setupTokenPayOrder(t *testing.T, suffix string, network string) (*User, *To
 	t.Cleanup(func() {
 		common.QuotaPerUnit = oldQuotaPerUnit
 		DB.Where("order_id = ?", order.ID).Delete(&TokenPayCreditedTransaction{})
+		DB.Where("order_id = ?", order.ID).Delete(&TokenPayRecoveryClaim{})
 		DB.Delete(&TokenPayTopUpOrder{}, order.ID)
 		DB.Delete(&TopUp{}, topup.Id)
 		DB.Unscoped().Delete(&User{}, user.Id)
@@ -141,4 +142,37 @@ func TestTokenPayRecoveryHashOnlyRecordsReviewClaim(t *testing.T) {
 	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&topup).Error)
 	assert.Equal(t, common.TopUpStatusPending, topup.Status)
 	require.Error(t, SaveTokenPayRecoveryClaim(order.ID, user.Id+1, "other"))
+}
+
+func TestTokenPayRecoveryClaimsPreserveHistoryAndLimitDistinctAttempts(t *testing.T) {
+	user, order := setupTokenPayOrder(t, "claim-limit", operation_setting.TokenPayNetworkTRON)
+	for _, transaction := range []string{"first", "second", "third"} {
+		require.NoError(t, SaveTokenPayRecoveryClaim(order.ID, user.Id, transaction))
+	}
+	require.NoError(t, SaveTokenPayRecoveryClaim(order.ID, user.Id, "first"))
+	require.Error(t, SaveTokenPayRecoveryClaim(order.ID, user.Id, "fourth"))
+	var claims []TokenPayRecoveryClaim
+	require.NoError(t, DB.Where("order_id = ?", order.ID).Order("id asc").Find(&claims).Error)
+	require.Len(t, claims, 3)
+	assert.Equal(t, []string{"first", "second", "third"}, []string{claims[0].TransactionID, claims[1].TransactionID, claims[2].TransactionID})
+	var topup TopUp
+	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&topup).Error)
+	assert.Equal(t, common.TopUpStatusPending, topup.Status)
+}
+
+func TestTokenPayRecoveryReviewCanPageToOlderUnpaidClaims(t *testing.T) {
+	user, order := setupTokenPayOrder(t, "claim-pages", operation_setting.TokenPayNetworkTRON)
+	for _, transaction := range []string{"older", "middle", "newer"} {
+		require.NoError(t, SaveTokenPayRecoveryClaim(order.ID, user.Id, transaction))
+	}
+	firstPage, err := ListTokenPayRecoveryClaims(2, 0)
+	require.NoError(t, err)
+	require.Len(t, firstPage, 2)
+	assert.Equal(t, "newer", firstPage[0].TransactionID)
+	assert.Equal(t, "middle", firstPage[1].TransactionID)
+	secondPage, err := ListTokenPayRecoveryClaims(2, firstPage[1].ClaimID)
+	require.NoError(t, err)
+	require.Len(t, secondPage, 1)
+	assert.Equal(t, "older", secondPage[0].TransactionID)
+	assert.Equal(t, TokenPayOrderStatusUnpaid, secondPage[0].OrderStatus)
 }

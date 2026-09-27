@@ -77,6 +77,7 @@ export function Wallet(props: WalletProps) {
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
   const [shkeeperDialogOpen, setSHKeeperDialogOpen] = useState(false)
   const [tokenPayDialogOpen, setTokenPayDialogOpen] = useState(false)
+  const [tokenPayTradeNo, setTokenPayTradeNo] = useState('')
   const topupInitialized = useRef(false)
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
@@ -287,7 +288,10 @@ export function Wallet(props: WalletProps) {
                 <RechargeFormCard
                   topupInfo={topupInfo}
                   onSHKeeperSelect={() => setSHKeeperDialogOpen(true)}
-                  onTokenPaySelect={() => setTokenPayDialogOpen(true)}
+                  onTokenPaySelect={() => {
+                    setTokenPayTradeNo('')
+                    setTokenPayDialogOpen(true)
+                  }}
                   presetAmounts={presetAmounts}
                   selectedPreset={selectedPreset}
                   onSelectPreset={handleSelectPreset}
@@ -357,6 +361,7 @@ export function Wallet(props: WalletProps) {
       {tokenPayDialogOpen && topupInfo && (
         <TokenPayPaymentDialog
           topupInfo={topupInfo}
+          tradeNo={tokenPayTradeNo}
           onClose={() => setTokenPayDialogOpen(false)}
           onCredited={fetchUser}
         />
@@ -386,6 +391,12 @@ export function Wallet(props: WalletProps) {
       <BillingHistoryDialog
         open={billingDialogOpen}
         onOpenChange={setBillingDialogOpen}
+        currentUserID={user?.id ?? 0}
+        onResumeTokenPayOrder={(tradeNo) => {
+          setBillingDialogOpen(false)
+          setTokenPayTradeNo(tradeNo)
+          setTokenPayDialogOpen(true)
+        }}
       />
 
       <CreemConfirmDialog

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +20,24 @@ func GetTokenPayStatus(c *gin.Context) {
 		"enabled_networks":     append([]string{}, settings.EnabledNetworks...),
 		"allow_private_url":    settings.AllowPrivateURL,
 	})
+}
+
+func ListTokenPayRecoveryClaims(c *gin.Context) {
+	var beforeID int64
+	if raw := c.Query("before"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			common.ApiErrorMsg(c, "Invalid TokenPay review cursor")
+			return
+		}
+		beforeID = parsed
+	}
+	items, err := model.ListTokenPayRecoveryClaims(50, beforeID)
+	if err != nil {
+		common.ApiErrorMsg(c, "Unable to load TokenPay review claims")
+		return
+	}
+	common.ApiSuccess(c, items)
 }
 
 func SaveTokenPaySettings(c *gin.Context) {

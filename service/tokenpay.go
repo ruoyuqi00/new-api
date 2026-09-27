@@ -70,6 +70,8 @@ type TokenPayCallback struct {
 }
 
 var tokenPayFieldBoundary = regexp.MustCompile(`&[A-Za-z_][A-Za-z0-9_]*=`)
+var errTokenPaySubmissionUnknown = errors.New("TokenPay request failed; submission status may be unknown")
+var ErrTokenPayInvoiceInvalid = errors.New("invalid TokenPay invoice")
 
 func SignTokenPayParameters(secret string, fields map[string]string) string {
 	keys := make([]string, 0, len(fields))
@@ -213,10 +215,13 @@ func (client *TokenPayClient) request(ctx context.Context, method, path string, 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.httpClient.Do(req)
 	if err != nil {
-		return nil, errors.New("TokenPay request failed; submission status may be unknown")
+		return nil, errTokenPaySubmissionUnknown
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode >= http.StatusInternalServerError {
+			return nil, fmt.Errorf("%w (HTTP %d)", errTokenPaySubmissionUnknown, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("TokenPay request rejected (HTTP %d)", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, (256<<10)+1))
@@ -249,42 +254,60 @@ func (client *TokenPayClient) CreateOrder(ctx context.Context, input TokenPayCre
 	default:
 		return result, errors.New("unsupported TokenPay network")
 	}
-	data, err := client.request(ctx, http.MethodPost, "/CreateOrder", map[string]string{
+	fields := map[string]string{
 		"OutOrderId": input.OutOrderID, "OrderUserKey": input.OrderUserKey, "ActualAmount": input.ActualAmount,
 		"Currency": input.Currency, "NotifyUrl": input.NotifyURL, "RedirectUrl": input.RedirectURL,
-	})
+	}
+	var data []byte
+	for attempt := 0; attempt < 2; attempt++ {
+		data, err = client.request(ctx, http.MethodPost, "/CreateOrder", fields)
+		if err == nil || !errors.Is(err, errTokenPaySubmissionUnknown) || ctx.Err() != nil {
+			break
+		}
+	}
 	if err != nil {
 		return result, err
 	}
 	var response struct {
-		Data string            `json:"data"`
-		Info map[string]string `json:"info"`
+		Data string `json:"data"`
+		Info struct {
+			ID             string `json:"Id"`
+			OutOrderID     string `json:"OutOrderId"`
+			OrderUserKey   string `json:"OrderUserKey"`
+			Amount         string `json:"Amount"`
+			ActualAmount   string `json:"ActualAmount"`
+			BaseCurrency   string `json:"BaseCurrency"`
+			BlockChainName string `json:"BlockChainName"`
+			CurrencyName   string `json:"CurrencyName"`
+			ToAddress      string `json:"ToAddress"`
+			ExpireTime     string `json:"ExpireTime"`
+			ExpireTimeUnix int64  `json:"ExpireTimeUnix"`
+			IsCustomAmount bool   `json:"IsCustomAmount"`
+		} `json:"info"`
 	}
 	if common.Unmarshal(data, &response) != nil {
-		return result, errors.New("invalid TokenPay invoice response")
+		return result, fmt.Errorf("%w: response", ErrTokenPayInvoiceInvalid)
 	}
 	info := response.Info
-	quoted, quoteErr := decimal.NewFromString(info["Amount"])
-	original, originalErr := decimal.NewFromString(info["ActualAmount"])
-	if quoteErr != nil || originalErr != nil || !quoted.Equal(amount) || !original.Equal(amount) || info["BaseCurrency"] != "USD" || info["CurrencyName"] != "USDT" || info["BlockChainName"] != chain || info["OutOrderId"] != input.OutOrderID || info["OrderUserKey"] != input.OrderUserKey || info["Id"] == "" {
-		return result, errors.New("TokenPay invoice identity or fixed amount mismatch")
+	quoted, quoteErr := decimal.NewFromString(info.Amount)
+	original, originalErr := decimal.NewFromString(info.ActualAmount)
+	if quoteErr != nil || originalErr != nil || !quoted.Equal(amount) || !original.Equal(amount) || info.BaseCurrency != "USD" || info.CurrencyName != "USDT" || info.BlockChainName != chain || info.OutOrderID != input.OutOrderID || info.OrderUserKey != input.OrderUserKey || info.ID == "" || info.IsCustomAmount {
+		return result, fmt.Errorf("%w: identity or fixed amount mismatch", ErrTokenPayInvoiceInvalid)
 	}
-	address := info["ToAddress"]
+	address := info.ToAddress
 	if chain == "TRON" && (len(address) != 34 || !strings.HasPrefix(address, "T")) || chain != "TRON" && !regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`).MatchString(address) {
-		return result, errors.New("invalid TokenPay receiving address")
+		return result, fmt.Errorf("%w: receiving address", ErrTokenPayInvoiceInvalid)
 	}
 	checkout, checkoutErr := url.Parse(response.Data)
 	base, _ := url.Parse(client.baseURL)
-	if checkoutErr != nil || checkout.Scheme != "https" || !strings.EqualFold(checkout.Host, base.Host) || checkout.User != nil || checkout.Fragment != "" || checkout.Path != "/Pay" || checkout.Query().Get("Id") != info["Id"] {
-		return result, errors.New("invalid TokenPay hosted checkout URL")
+	if checkoutErr != nil || checkout.Scheme != "https" || !strings.EqualFold(checkout.Host, base.Host) || checkout.User != nil || checkout.Fragment != "" || checkout.Path != "/Pay" || checkout.Query().Get("Id") != info.ID {
+		return result, fmt.Errorf("%w: hosted checkout URL", ErrTokenPayInvoiceInvalid)
 	}
-	zone, _ := time.LoadLocation("Asia/Shanghai")
-	expires, expiryErr := time.ParseInLocation("2006-01-02 15:04:05", info["ExpireTime"], zone)
-	if expiryErr != nil {
-		return result, errors.New("invalid TokenPay invoice expiry")
+	if info.ExpireTimeUnix <= time.Now().Unix() {
+		return result, fmt.Errorf("%w: expiry", ErrTokenPayInvoiceInvalid)
 	}
-	return TokenPayCreateResult{ProviderOrderID: info["Id"], OutOrderID: input.OutOrderID, OrderUserKey: input.OrderUserKey,
-		PayAmountUSDT: quoted.String(), ReceiveAddress: address, PaymentURL: response.Data, ExpiresAt: expires.Unix()}, nil
+	return TokenPayCreateResult{ProviderOrderID: info.ID, OutOrderID: input.OutOrderID, OrderUserKey: input.OrderUserKey,
+		PayAmountUSDT: quoted.String(), ReceiveAddress: address, PaymentURL: response.Data, ExpiresAt: info.ExpireTimeUnix}, nil
 }
 
 func (client *TokenPayClient) QueryOrder(ctx context.Context, providerID string) (TokenPayCallback, error) {

@@ -76,6 +76,24 @@ export type TokenPaySettingsResponse = {
   data?: TokenPaySettingsStatus
 }
 
+export type TokenPayRecoveryReviewItem = {
+  claim_id: number
+  trade_no: string
+  user_id: number
+  network: TokenPayNetwork
+  requested_usdt: string
+  receive_address: string
+  transaction_id: string
+  order_status: 'pending_provider' | 'unpaid' | 'paid' | 'failed'
+  submitted_at: number
+}
+
+export type TokenPayRecoveryClaimsResponse = {
+  success: boolean
+  message: string
+  data?: TokenPayRecoveryReviewItem[]
+}
+
 export type SHKeeperTopUpPackage = {
   usdt: number
   balance: string

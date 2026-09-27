@@ -50,6 +50,7 @@ import { Switch } from '@/components/ui/switch'
 import { getTokenPaySettings, saveTokenPaySettings } from '../api'
 import type { TokenPayNetwork } from '../types'
 import { SHKeeperPackageEditor } from './shkeeper-package-editor'
+import { TokenPayRecoveryClaims } from './tokenpay-recovery-claims'
 import {
   buildTokenPaySettingsRequest,
   createTokenPaySettingsSchema,
@@ -288,6 +289,7 @@ function TokenPaySettingsSectionComponent(
             </FormItem>
           )}
         />
+        <TokenPayRecoveryClaims />
       </div>
     </Form>
   )
