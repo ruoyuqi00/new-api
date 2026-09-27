@@ -109,10 +109,40 @@ type SHKeeperInvoiceDetails struct {
 func GetTopUpHistoryItems(topUps []*TopUp) ([]any, error) {
 	items := make([]any, len(topUps))
 	ids := make([]int, 0)
+	tokenPayIDs := make([]int, 0)
 	for index, topUp := range topUps {
 		items[index] = topUp
 		if topUp.PaymentProvider == PaymentProviderSHKeeper {
 			ids = append(ids, topUp.Id)
+		}
+		if topUp.PaymentProvider == PaymentProviderTokenPay {
+			tokenPayIDs = append(tokenPayIDs, topUp.Id)
+		}
+	}
+	if len(tokenPayIDs) > 0 {
+		var tokenPayOrders []TokenPayTopUpOrder
+		if err := DB.Where("top_up_id IN ?", tokenPayIDs).Find(&tokenPayOrders).Error; err != nil {
+			return nil, err
+		}
+		byID := make(map[int]TokenPayTopUpOrder, len(tokenPayOrders))
+		for _, order := range tokenPayOrders {
+			byID[order.TopUpID] = order
+		}
+		for index, topUp := range topUps {
+			if topUp.PaymentProvider != PaymentProviderTokenPay {
+				continue
+			}
+			order, exists := byID[topUp.Id]
+			balance, balanceErr := decimal.NewFromString(order.PackageBalance)
+			payment, paymentErr := decimal.NewFromString(order.RequestedUSDT)
+			if !exists || order.UserID != topUp.UserId || order.TradeNo != topUp.TradeNo || balanceErr != nil || paymentErr != nil || !balance.IsPositive() || !payment.IsPositive() {
+				return nil, errors.New("invalid TokenPay history snapshot")
+			}
+			items[index] = struct {
+				*TopUp
+				Amount json.Number `json:"amount"`
+				Money  json.Number `json:"money"`
+			}{TopUp: topUp, Amount: json.Number(balance.String()), Money: json.Number(payment.String())}
 		}
 	}
 	if len(ids) == 0 {

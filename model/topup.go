@@ -31,6 +31,7 @@ const (
 	PaymentMethodWaffoPancake = "waffo_pancake"
 	PaymentMethodBalance      = "balance"
 	PaymentMethodSHKeeper     = "shkeeper"
+	PaymentMethodTokenPay     = "tokenpay"
 )
 
 const (
@@ -41,6 +42,7 @@ const (
 	PaymentProviderWaffoPancake = "waffo_pancake"
 	PaymentProviderBalance      = "balance"
 	PaymentProviderSHKeeper     = "shkeeper"
+	PaymentProviderTokenPay     = "tokenpay"
 )
 
 var (
@@ -422,6 +424,9 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		}
 		if topUp.PaymentProvider == PaymentProviderSHKeeper || topUp.PaymentMethod == PaymentMethodSHKeeper {
 			return errors.New("SHKeeper orders require verified SHKeeper settlement")
+		}
+		if topUp.PaymentProvider == PaymentProviderTokenPay || topUp.PaymentMethod == PaymentMethodTokenPay {
+			return errors.New("TokenPay orders require verified TokenPay settlement")
 		}
 
 		// 幂等处理：已成功直接返回
