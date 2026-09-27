@@ -54,4 +54,20 @@ describe('payment settings page save', () => {
     )
     assert.deepEqual(calls, ['legacy', 'shkeeper'])
   })
+
+  test('saves TokenPay after the existing payment settings', async () => {
+    const calls: string[] = []
+    await runPaymentSettingsSaves(
+      async () => {
+        calls.push('legacy')
+      },
+      async () => {
+        calls.push('shkeeper')
+      },
+      async () => {
+        calls.push('tokenpay')
+      }
+    )
+    assert.deepEqual(calls, ['legacy', 'shkeeper', 'tokenpay'])
+  })
 })

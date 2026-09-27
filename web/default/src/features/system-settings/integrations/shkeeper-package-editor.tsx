@@ -44,7 +44,7 @@ import {
   type SHKeeperSettingsFormValues,
 } from './shkeeper-settings-model'
 
-export function SHKeeperPackageEditor() {
+export function SHKeeperPackageEditor(props: { errorId?: string }) {
   const { t } = useTranslation()
   const form = useFormContext<SHKeeperSettingsFormValues>()
   const packages = useWatch({ control: form.control, name: 'packages' })
@@ -111,7 +111,9 @@ export function SHKeeperPackageEditor() {
                     <FormControl
                       aria-invalid={!!fieldState.error || !!arrayError}
                       aria-errormessage={
-                        arrayError ? 'shkeeper-packages-error' : undefined
+                        arrayError
+                          ? (props.errorId ?? 'shkeeper-packages-error')
+                          : undefined
                       }
                     >
                       <Input
@@ -194,7 +196,9 @@ export function SHKeeperPackageEditor() {
         )
       })}
 
-      <FieldError id='shkeeper-packages-error'>{arrayError}</FieldError>
+      <FieldError id={props.errorId ?? 'shkeeper-packages-error'}>
+        {arrayError}
+      </FieldError>
     </FieldGroup>
   )
 }

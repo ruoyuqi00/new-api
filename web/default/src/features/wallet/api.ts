@@ -41,6 +41,8 @@ import type {
   WaffoPancakePaymentResponse,
   SHKeeperInvoice,
   SHKeeperPaymentRequest,
+  TokenPayInvoice,
+  TokenPayPaymentRequest,
 } from './types'
 
 // ============================================================================
@@ -287,5 +289,52 @@ export async function submitSHKeeperTransaction(
   )
   if (res.data.success !== true) {
     throw new Error(res.data.message || 'SHKeeper transaction rescan failed')
+  }
+}
+
+export async function requestTokenPayPayment(
+  request: TokenPayPaymentRequest
+): Promise<TokenPayInvoice> {
+  const res = await api.post<ApiResponse<TokenPayInvoice>>(
+    '/api/user/tokenpay/pay',
+    request,
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (res.data.success !== true || !res.data.data) {
+    throw new Error(res.data.message || 'TokenPay payment request failed')
+  }
+  return res.data.data
+}
+
+export async function getTokenPayOrder(
+  tradeNo: string,
+  signal?: AbortSignal
+): Promise<TokenPayInvoice> {
+  const res = await api.get<ApiResponse<TokenPayInvoice>>(
+    `/api/user/tokenpay/order/${encodeURIComponent(tradeNo)}`,
+    {
+      signal,
+      disableDuplicate: true,
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
+  )
+  if (res.data.success !== true || !res.data.data) {
+    throw new Error(res.data.message || 'TokenPay order request failed')
+  }
+  return res.data.data
+}
+
+export async function submitTokenPayTransaction(
+  tradeNo: string,
+  transactionID: string
+): Promise<void> {
+  const res = await api.post<ApiResponse>(
+    `/api/user/tokenpay/order/${encodeURIComponent(tradeNo)}/transaction`,
+    { transaction_id: transactionID },
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (res.data.success !== true) {
+    throw new Error(res.data.message || 'TokenPay review request failed')
   }
 }

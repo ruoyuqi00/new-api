@@ -120,6 +120,9 @@ export interface WaffoPayMethod {
  * Topup configuration information
  */
 export interface TopupInfo {
+  enable_tokenpay_topup?: boolean
+  tokenpay_packages?: TokenPayPackage[]
+  tokenpay_networks?: TokenPayNetwork[]
   enable_shkeeper_topup?: boolean
   shkeeper_packages?: SHKeeperPackage[]
   shkeeper_networks?: SHKeeperNetwork[]
@@ -325,4 +328,30 @@ export type SHKeeperInvoice = {
 export type SHKeeperPaymentRequest = {
   usdt_amount: number
   crypto: SHKeeperNetwork
+}
+
+export type TokenPayNetwork =
+  | 'USDT_TRC20'
+  | 'EVM_BSC_USDT_BEP20'
+  | 'EVM_Polygon_USDT_ERC20'
+export type TokenPayOrderStatus =
+  | 'pending_provider'
+  | 'unpaid'
+  | 'paid'
+  | 'failed'
+export type TokenPayPackage = { usdt: number; balance: string; label?: string }
+export type TokenPayInvoice = {
+  trade_no: string
+  network: TokenPayNetwork
+  usdt_amount: string
+  balance_amount: string
+  address: string
+  payment_url: string
+  status: TokenPayOrderStatus
+  expires_at: number
+  recovery_submitted: boolean
+}
+export type TokenPayPaymentRequest = {
+  usdt_amount: number
+  network: TokenPayNetwork
 }

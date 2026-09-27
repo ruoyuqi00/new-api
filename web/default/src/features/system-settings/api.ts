@@ -27,6 +27,8 @@ import type {
   SHKeeperConnectionTestResponse,
   SHKeeperSettingsRequest,
   SHKeeperSettingsResponse,
+  TokenPaySettingsRequest,
+  TokenPaySettingsResponse,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -42,6 +44,22 @@ export async function getSHKeeperSettings(signal?: AbortSignal) {
     '/api/option/shkeeper/status',
     // Query cancellation must not leave retries sharing the aborted request.
     { signal, disableDuplicate: true }
+  )
+  return res.data
+}
+
+export async function getTokenPaySettings(signal?: AbortSignal) {
+  const res = await api.get<TokenPaySettingsResponse>(
+    '/api/option/tokenpay/status',
+    { signal, disableDuplicate: true }
+  )
+  return res.data
+}
+
+export async function saveTokenPaySettings(request: TokenPaySettingsRequest) {
+  const res = await api.post<TokenPaySettingsResponse>(
+    '/api/option/tokenpay/save',
+    request
   )
   return res.data
 }

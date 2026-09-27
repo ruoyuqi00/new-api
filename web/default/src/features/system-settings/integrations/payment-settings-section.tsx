@@ -69,6 +69,10 @@ import {
   type SHKeeperSettingsHandle,
 } from './shkeeper-settings-section'
 import {
+  TokenPaySettingsSection,
+  type TokenPaySettingsHandle,
+} from './tokenpay-settings-section'
+import {
   formatJsonForEditor,
   getJsonError,
   normalizeJsonForComparison,
@@ -254,6 +258,7 @@ export function PaymentSettingsSection({
   const [showComplianceDialog, setShowComplianceDialog] = React.useState(false)
   const [isSavingAll, setIsSavingAll] = React.useState(false)
   const shkeeperSettingsRef = React.useRef<SHKeeperSettingsHandle>(null)
+  const tokenPaySettingsRef = React.useRef<TokenPaySettingsHandle>(null)
   const [waffoPayMethods, setWaffoPayMethods] = React.useState<PayMethod[]>(
     () => parseWaffoPayMethods(waffoDefaultValues.WaffoPayMethods)
   )
@@ -823,7 +828,8 @@ export function PaymentSettingsSection({
               () => reject(new Error(t('Invalid payment settings')))
             )()
           }),
-        () => shkeeperSettingsRef.current?.save() ?? Promise.resolve()
+        () => shkeeperSettingsRef.current?.save() ?? Promise.resolve(),
+        () => tokenPaySettingsRef.current?.save() ?? Promise.resolve()
       )
     } catch {
       // The failing mutation owns its localized error toast.
@@ -913,12 +919,13 @@ export function PaymentSettingsSection({
           />
           <Tabs defaultValue='general' className='min-w-0'>
             <div className='overflow-x-auto pb-1'>
-              <TabsList className='grid min-w-[52rem] grid-cols-7'>
+              <TabsList className='grid min-w-[60rem] grid-cols-8'>
                 <TabsTrigger value='general'>{t('General')}</TabsTrigger>
                 <TabsTrigger value='epay'>Epay</TabsTrigger>
                 <TabsTrigger value='stripe'>{t('Stripe')}</TabsTrigger>
                 <TabsTrigger value='creem'>Creem</TabsTrigger>
                 <TabsTrigger value='shkeeper'>{t('SHKeeper')}</TabsTrigger>
+                <TabsTrigger value='tokenpay'>TokenPay</TabsTrigger>
                 <TabsTrigger value='waffo-pancake'>Waffo Pancake</TabsTrigger>
                 <TabsTrigger value='waffo'>Waffo</TabsTrigger>
               </TabsList>
@@ -1630,6 +1637,13 @@ export function PaymentSettingsSection({
               className={paymentTabContentClassName}
             >
               <SHKeeperSettingsSection ref={shkeeperSettingsRef} />
+            </PersistentPaymentTabContent>
+
+            <PersistentPaymentTabContent
+              value='tokenpay'
+              className={paymentTabContentClassName}
+            >
+              <TokenPaySettingsSection ref={tokenPaySettingsRef} />
             </PersistentPaymentTabContent>
 
             <TabsContent

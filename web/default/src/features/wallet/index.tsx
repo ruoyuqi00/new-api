@@ -29,6 +29,7 @@ import { BillingHistoryDialog } from './components/dialogs/billing-history-dialo
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
 import { SHKeeperPaymentDialog } from './components/dialogs/shkeeper-payment-dialog'
+import { TokenPayPaymentDialog } from './components/dialogs/tokenpay-payment-dialog'
 import { TransferDialog } from './components/dialogs/transfer-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
@@ -75,6 +76,7 @@ export function Wallet(props: WalletProps) {
   const [redemptionCode, setRedemptionCode] = useState('')
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
   const [shkeeperDialogOpen, setSHKeeperDialogOpen] = useState(false)
+  const [tokenPayDialogOpen, setTokenPayDialogOpen] = useState(false)
   const topupInitialized = useRef(false)
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
@@ -285,6 +287,7 @@ export function Wallet(props: WalletProps) {
                 <RechargeFormCard
                   topupInfo={topupInfo}
                   onSHKeeperSelect={() => setSHKeeperDialogOpen(true)}
+                  onTokenPaySelect={() => setTokenPayDialogOpen(true)}
                   presetAmounts={presetAmounts}
                   selectedPreset={selectedPreset}
                   onSelectPreset={handleSelectPreset}
@@ -347,6 +350,14 @@ export function Wallet(props: WalletProps) {
         <SHKeeperPaymentDialog
           topupInfo={topupInfo}
           onClose={() => setSHKeeperDialogOpen(false)}
+          onCredited={fetchUser}
+        />
+      )}
+
+      {tokenPayDialogOpen && topupInfo && (
+        <TokenPayPaymentDialog
+          topupInfo={topupInfo}
+          onClose={() => setTokenPayDialogOpen(false)}
           onCredited={fetchUser}
         />
       )}

@@ -20,8 +20,10 @@ type PaymentSettingsSave = () => Promise<void>
 
 export async function runPaymentSettingsSaves(
   saveLegacySettings: PaymentSettingsSave,
-  saveSHKeeperSettings: PaymentSettingsSave
+  saveSHKeeperSettings: PaymentSettingsSave,
+  saveTokenPaySettings?: PaymentSettingsSave
 ) {
   await saveLegacySettings()
   await saveSHKeeperSettings()
+  await saveTokenPaySettings?.()
 }

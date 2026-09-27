@@ -41,6 +41,41 @@ export type UpdateOptionResponse = {
 
 export type SHKeeperNetwork = 'BNB-USDT' | 'USDT' | 'POLYGON-USDT'
 
+export type TokenPayNetwork =
+  | 'USDT_TRC20'
+  | 'EVM_BSC_USDT_BEP20'
+  | 'EVM_Polygon_USDT_ERC20'
+
+export type TokenPayTopUpPackage = {
+  usdt: number
+  balance: string
+  label?: string
+}
+
+export type TokenPaySettingsStatus = {
+  enabled: boolean
+  base_url: string
+  api_token_configured: boolean
+  packages: TokenPayTopUpPackage[] | null
+  enabled_networks: TokenPayNetwork[] | null
+  allow_private_url: boolean
+}
+
+export type TokenPaySettingsRequest = {
+  enabled: boolean
+  base_url: string
+  api_token: string
+  packages: TokenPayTopUpPackage[]
+  enabled_networks: TokenPayNetwork[]
+  allow_private_url: boolean
+}
+
+export type TokenPaySettingsResponse = {
+  success: boolean
+  message: string
+  data?: TokenPaySettingsStatus
+}
+
 export type SHKeeperTopUpPackage = {
   usdt: number
   balance: string

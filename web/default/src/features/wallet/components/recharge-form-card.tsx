@@ -82,6 +82,7 @@ interface RechargeFormCardProps {
   onWaffoMethodSelect?: (method: WaffoPayMethod, index: number) => void
   enableWaffoPancakeTopup?: boolean
   onSHKeeperSelect?: () => void
+  onTokenPaySelect?: () => void
 }
 
 export function RechargeFormCard({
@@ -113,6 +114,7 @@ export function RechargeFormCard({
   onWaffoMethodSelect,
   enableWaffoPancakeTopup,
   onSHKeeperSelect,
+  onTokenPaySelect,
 }: RechargeFormCardProps) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState<{ value: string; amount: number } | null>(
@@ -135,7 +137,10 @@ export function RechargeFormCard({
     enableWaffoTopup ||
     enableWaffoPancakeTopup
   const hasAnyTopup =
-    hasConfigurableTopup || enableCreemTopup || topupInfo?.enable_shkeeper_topup
+    hasConfigurableTopup ||
+    enableCreemTopup ||
+    topupInfo?.enable_shkeeper_topup ||
+    topupInfo?.enable_tokenpay_topup
   const hasStandardPaymentMethods =
     Array.isArray(topupInfo?.pay_methods) && topupInfo.pay_methods.length > 0
   const hasWaffoPaymentMethods =
@@ -223,6 +228,15 @@ export function RechargeFormCard({
               onClick={onSHKeeperSelect}
             >
               {t('USDT top-up')}
+            </Button>
+          )}
+          {topupInfo?.enable_tokenpay_topup && onTokenPaySelect && (
+            <Button
+              variant='outline'
+              className='w-full justify-start sm:w-auto'
+              onClick={onTokenPaySelect}
+            >
+              {t('TokenPay USDT')}
             </Button>
           )}
           {hasConfigurableTopup && (
