@@ -57,6 +57,7 @@ func SetApiRouter(router *gin.Engine) {
 
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, controller.StripeWebhook)
 		apiRouter.POST("/shkeeper/webhook", anonymousRequestBodyLimit, controller.SHKeeperWebhook)
+		apiRouter.POST("/tokenpay/webhook", anonymousRequestBodyLimit, controller.TokenPayWebhook)
 		apiRouter.POST("/creem/webhook", anonymousRequestBodyLimit, controller.CreemWebhook)
 		apiRouter.POST("/waffo/webhook", anonymousRequestBodyLimit, controller.WaffoWebhook)
 		// :env separates test vs prod URLs so the operator can register each
@@ -113,6 +114,9 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/shkeeper/pay", middleware.CriticalRateLimit(), controller.RequestSHKeeperPay)
 				selfRoute.GET("/shkeeper/order/:trade_no", controller.GetSHKeeperOrder)
 				selfRoute.POST("/shkeeper/order/:trade_no/transaction", middleware.CriticalRateLimit(), controller.SubmitSHKeeperTransaction)
+				selfRoute.POST("/tokenpay/pay", middleware.CriticalRateLimit(), controller.RequestTokenPay)
+				selfRoute.GET("/tokenpay/order/:trade_no", controller.GetTokenPayOrder)
+				selfRoute.POST("/tokenpay/order/:trade_no/transaction", middleware.CriticalRateLimit(), controller.SubmitTokenPayTransaction)
 				selfRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
 				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
 				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
@@ -197,6 +201,8 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/shkeeper/status", controller.GetSHKeeperStatus)
 			optionRoute.POST("/shkeeper/save", controller.SaveSHKeeperSettings)
 			optionRoute.POST("/shkeeper/test", middleware.CriticalRateLimit(), controller.TestSHKeeperConnection)
+			optionRoute.GET("/tokenpay/status", controller.GetTokenPayStatus)
+			optionRoute.POST("/tokenpay/save", controller.SaveTokenPaySettings)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.PUT("/affiliate_rebate", controller.UpdateAffiliateRebateOptions)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)

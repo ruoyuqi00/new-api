@@ -142,6 +142,23 @@ func GetTokenPayOrder(userID int, tradeNo string) (*TokenPayTopUpOrder, error) {
 	return &order, nil
 }
 
+func SaveTokenPayRecoveryClaim(orderID int64, userID int, transactionID string) error {
+	transactionID = strings.ToLower(strings.TrimSpace(transactionID))
+	if orderID <= 0 || userID <= 0 || transactionID == "" {
+		return errors.New("invalid TokenPay recovery claim")
+	}
+	result := DB.Model(&TokenPayTopUpOrder{}).
+		Where("id = ? AND user_id = ? AND status = ?", orderID, userID, TokenPayOrderStatusUnpaid).
+		Update("recovery_hash", transactionID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrTopUpNotFound
+	}
+	return nil
+}
+
 func SettleTokenPayTopUp(input TokenPaySettlementInput) (*TokenPaySettlementResult, error) {
 	input.TradeNo = strings.TrimSpace(input.TradeNo)
 	input.ProviderOrderID = strings.TrimSpace(input.ProviderOrderID)

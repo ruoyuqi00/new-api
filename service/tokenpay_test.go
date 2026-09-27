@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -103,4 +104,19 @@ func TestTokenPayCreateOrderValidatesFixedQuoteAndHostedCheckout(t *testing.T) {
 			assert.Equal(t, "invoice-1", result.ProviderOrderID)
 		})
 	}
+}
+
+func TestNormalizeTokenPayTransactionIDByNetwork(t *testing.T) {
+	tronHash := strings.Repeat("a", 64)
+	evmHash := "0x" + strings.Repeat("b", 64)
+	got, err := NormalizeTokenPayTransactionID("USDT_TRC20", " "+tronHash+" ")
+	require.NoError(t, err)
+	assert.Equal(t, tronHash, got)
+	got, err = NormalizeTokenPayTransactionID("EVM_BSC_USDT_BEP20", strings.ToUpper(evmHash))
+	require.NoError(t, err)
+	assert.Equal(t, evmHash, got)
+	_, err = NormalizeTokenPayTransactionID("USDT_TRC20", evmHash)
+	require.Error(t, err)
+	_, err = NormalizeTokenPayTransactionID("EVM_Polygon_USDT_ERC20", "bad")
+	require.Error(t, err)
 }

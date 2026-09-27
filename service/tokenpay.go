@@ -63,6 +63,7 @@ type TokenPayCallback struct {
 	ToAddress          string `json:"ToAddress"`
 	BlockTransactionID string `json:"BlockTransactionId"`
 	PayTime            string `json:"PayTime"`
+	SignatureType      string `json:"SignatureType"`
 	Status             int    `json:"Status"`
 	IsCustomAmount     bool   `json:"IsCustomAmount"`
 	IsDynamicAmount    bool   `json:"IsDynamicAmount"`
@@ -310,4 +311,29 @@ func TokenPayOrderUserKey(tradeNo, network string) string {
 
 func TokenPayPaymentAmount(usdt int64) string {
 	return strconv.FormatInt(usdt, 10)
+}
+
+func NormalizeTokenPayTransactionID(network, transactionID string) (string, error) {
+	transactionID = strings.ToLower(strings.TrimSpace(transactionID))
+	digits := transactionID
+	switch network {
+	case operation_setting.TokenPayNetworkTRON:
+		if strings.HasPrefix(digits, "0x") {
+			return "", errors.New("TRON transaction hash must not have 0x prefix")
+		}
+	case operation_setting.TokenPayNetworkBSC, operation_setting.TokenPayNetworkPolygon:
+		if !strings.HasPrefix(digits, "0x") {
+			return "", errors.New("EVM transaction hash requires 0x prefix")
+		}
+		digits = digits[2:]
+	default:
+		return "", errors.New("unsupported TokenPay network")
+	}
+	if len(digits) != 64 {
+		return "", errors.New("invalid TokenPay transaction hash length")
+	}
+	if _, err := hex.DecodeString(digits); err != nil {
+		return "", errors.New("invalid TokenPay transaction hash")
+	}
+	return transactionID, nil
 }

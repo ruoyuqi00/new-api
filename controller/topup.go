@@ -96,6 +96,9 @@ func GetTopUpInfo(c *gin.Context) {
 	}
 
 	data := gin.H{
+		"enable_tokenpay_topup":                 isTokenPayTopUpEnabled(),
+		"tokenpay_packages":                     append([]operation_setting.TokenPayTopUpPackage{}, operation_setting.GetTokenPayPaymentSetting().Packages...),
+		"tokenpay_networks":                     append([]string{}, operation_setting.GetTokenPayPaymentSetting().EnabledNetworks...),
 		"enable_shkeeper_topup":                 isSHKeeperTopUpEnabled(),
 		"shkeeper_packages":                     append([]operation_setting.SHKeeperTopUpPackage{}, operation_setting.GetSHKeeperPaymentSetting().Packages...),
 		"shkeeper_networks":                     append([]string{}, operation_setting.GetSHKeeperPaymentSetting().EnabledNetworks...),

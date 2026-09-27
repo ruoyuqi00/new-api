@@ -129,3 +129,16 @@ func TestTokenPayCreateOrderRollsBackOnInvalidQuota(t *testing.T) {
 	require.NoError(t, DB.Model(&TopUp{}).Where("trade_no = ?", topup.TradeNo).Count(&count).Error)
 	assert.Zero(t, count)
 }
+
+func TestTokenPayRecoveryHashOnlyRecordsReviewClaim(t *testing.T) {
+	user, order := setupTokenPayOrder(t, "recovery", operation_setting.TokenPayNetworkTRON)
+	require.NoError(t, SaveTokenPayRecoveryClaim(order.ID, user.Id, "abc"))
+	fresh, err := GetTokenPayOrder(user.Id, order.TradeNo)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", fresh.RecoveryHash)
+	assert.Equal(t, TokenPayOrderStatusUnpaid, fresh.Status)
+	var topup TopUp
+	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&topup).Error)
+	assert.Equal(t, common.TopUpStatusPending, topup.Status)
+	require.Error(t, SaveTokenPayRecoveryClaim(order.ID, user.Id+1, "other"))
+}
