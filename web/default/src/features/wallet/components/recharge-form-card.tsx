@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
+import {
+  ArrowRight,
+  Gift,
+  ExternalLink,
+  Loader2,
+  Receipt,
+  WalletCards,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -233,10 +240,18 @@ export function RechargeFormCard({
           {topupInfo?.enable_tokenpay_topup && onTokenPaySelect && (
             <Button
               variant='outline'
-              className='w-full justify-start sm:w-auto'
+              size='lg'
+              className='h-auto min-h-16 w-full justify-start gap-3 rounded-lg px-4 py-3 text-left text-base font-semibold whitespace-normal sm:min-h-[72px] sm:px-5'
               onClick={onTokenPaySelect}
             >
-              {t('TokenPay USDT')}
+              <span className='bg-primary/10 text-primary flex size-9 shrink-0 items-center justify-center rounded-md'>
+                <WalletCards className='size-5' aria-hidden='true' />
+              </span>
+              <span className='min-w-0 flex-1'>{t('USDT top-up')}</span>
+              <ArrowRight
+                className='text-muted-foreground size-4 shrink-0'
+                aria-hidden='true'
+              />
             </Button>
           )}
           {hasConfigurableTopup && (
