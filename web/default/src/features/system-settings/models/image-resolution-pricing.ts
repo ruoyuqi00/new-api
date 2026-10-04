@@ -15,29 +15,38 @@ export type ImageResolutionPricePolicies = Record<
   ImageResolutionPricePolicy
 >
 
-export type ImageResolutionPricingModel = PricingModel & {
-  image_resolution_pricing: ImageResolutionPricingMetadata
+export const IMAGE_RESOLUTION_TIERS = ['1k', '2k', '4k'] as const
+
+export function normalizeImageResolutionModelName(model: string): string {
+  return model.trim().toLowerCase().split('/').at(-1) ?? ''
 }
 
 export function buildImageResolutionPricingModels(
   models: PricingModel[],
   policies: ImageResolutionPricePolicies
-): ImageResolutionPricingModel[] {
-  const byCanonicalName = new Map<string, ImageResolutionPricingModel>()
+): PricingModel[] {
+  const byCanonicalName = new Map<string, PricingModel>()
 
   for (const model of models) {
     const metadata = model.image_resolution_pricing
-    if (!metadata) continue
-    const canonicalName = metadata.pricing_model.trim().toLowerCase()
+    if (
+      !metadata &&
+      !model.supported_endpoint_types?.includes('image-generation') &&
+      !model.output_modalities?.includes('image')
+    ) {
+      continue
+    }
+    const canonicalName = normalizeImageResolutionModelName(
+      metadata?.pricing_model ?? model.model_name
+    )
     byCanonicalName.set(canonicalName, {
       ...model,
-      model_name: metadata.pricing_model,
-      image_resolution_pricing: metadata,
+      model_name: canonicalName,
     })
   }
 
   for (const [modelName, policy] of Object.entries(policies)) {
-    const canonicalName = modelName.trim().toLowerCase()
+    const canonicalName = normalizeImageResolutionModelName(modelName)
     const existing = byCanonicalName.get(canonicalName)
     byCanonicalName.set(canonicalName, {
       id: existing?.id ?? 0,
@@ -77,9 +86,9 @@ export function getImageResolutionModelPolicy(
   policies: ImageResolutionPricePolicies,
   model: string
 ): ImageResolutionPricePolicy | undefined {
-  const normalized = model.trim().toLowerCase()
+  const normalized = normalizeImageResolutionModelName(model)
   const key = Object.keys(policies).find(
-    (candidate) => candidate.trim().toLowerCase() === normalized
+    (candidate) => normalizeImageResolutionModelName(candidate) === normalized
   )
   return key ? policies[key] : undefined
 }
@@ -90,13 +99,15 @@ function isPositiveFinite(value: unknown): value is number {
 
 export function validateImageResolutionDraft(
   draft: ImageResolutionPricePolicy,
-  metadata: ImageResolutionPricingMetadata
+  _metadata?: ImageResolutionPricingMetadata
 ): Record<string, string> {
   const errors: Record<string, string> = {}
-  const tiers = Object.keys(metadata.prices)
+  if (!IMAGE_RESOLUTION_TIERS.some((tier) => tier === draft.default_tier)) {
+    errors.default_tier = 'Invalid default tier'
+  }
   let previousPrice: number | undefined
 
-  for (const tier of tiers) {
+  for (const tier of IMAGE_RESOLUTION_TIERS) {
     const price = draft.prices[tier]
     if (price === undefined) {
       errors[`prices.${tier}`] = 'Required'
@@ -120,7 +131,7 @@ export function saveImageResolutionPolicy(
   current: ImageResolutionPricePolicies,
   model: string,
   draft: ImageResolutionPricePolicy,
-  metadata: ImageResolutionPricingMetadata
+  metadata?: ImageResolutionPricingMetadata
 ): ImageResolutionPricePolicies {
   const errors = validateImageResolutionDraft(draft, metadata)
   if (Object.keys(errors).length > 0) {
@@ -128,17 +139,20 @@ export function saveImageResolutionPolicy(
   }
 
   const next = structuredClone(current)
-  const normalized = model.trim().toLowerCase()
-  const existingKey = Object.keys(next).find(
-    (candidate) => candidate.trim().toLowerCase() === normalized
+  const normalized = normalizeImageResolutionModelName(
+    metadata?.pricing_model ?? model
   )
-  if (existingKey && existingKey !== metadata.pricing_model) {
+  if (!normalized) throw new Error('Required')
+  const existingKey = Object.keys(next).find(
+    (candidate) => normalizeImageResolutionModelName(candidate) === normalized
+  )
+  if (existingKey && existingKey !== normalized) {
     delete next[existingKey]
   }
-  next[metadata.pricing_model] = {
-    default_tier: metadata.default_tier,
+  next[normalized] = {
+    default_tier: draft.default_tier,
     prices: Object.fromEntries(
-      Object.keys(metadata.prices).map((tier) => [tier, draft.prices[tier]])
+      IMAGE_RESOLUTION_TIERS.map((tier) => [tier, draft.prices[tier]])
     ),
   }
   return next

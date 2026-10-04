@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import type { ImageResolutionPricingMetadata } from '@/features/pricing/types'
+import type {
+  ImageResolutionPricingMetadata,
+  PricingModel,
+} from '@/features/pricing/types'
 
 import {
   buildImageResolutionPricingModels,
@@ -32,6 +35,67 @@ const gptImageDraft: ImageResolutionPricePolicy = {
 }
 
 describe('image resolution pricing state', () => {
+  test('offers unconfigured image models without including text or vision-only models', () => {
+    const baseModel: PricingModel = {
+      id: 1,
+      model_name: 'gpt-image-2.5-sunburst',
+      quota_type: 1,
+      model_ratio: 0,
+      completion_ratio: 0,
+      enable_groups: ['image'],
+      supported_endpoint_types: ['image-generation'],
+    }
+    const result = buildImageResolutionPricingModels(
+      [
+        baseModel,
+        {
+          ...baseModel,
+          id: 2,
+          model_name: 'vision-chat-model',
+          supported_endpoint_types: ['openai'],
+          input_modalities: ['image', 'text'],
+          output_modalities: ['text'],
+        },
+      ],
+      {}
+    )
+
+    assert.deepEqual(
+      result.map((model) => model.model_name),
+      ['gpt-image-2.5-sunburst']
+    )
+    assert.equal(result[0].image_resolution_pricing, undefined)
+  })
+
+  test('creates a custom model policy without backend pricing metadata', () => {
+    const result = saveImageResolutionPolicy(
+      { 'gpt-image-2': gptImageDraft },
+      ' Provider/CUSTOM-image ',
+      {
+        default_tier: '2k',
+        prices: { '4k': 0.03, '1k': 0.01, '2k': 0.02 },
+      }
+    )
+
+    assert.deepEqual(result, {
+      'gpt-image-2': gptImageDraft,
+      'custom-image': {
+        default_tier: '2k',
+        prices: { '1k': 0.01, '2k': 0.02, '4k': 0.03 },
+      },
+    })
+  })
+
+  test('rejects an invalid default tier before saving', () => {
+    assert.deepEqual(
+      validateImageResolutionDraft(
+        { ...gptImageDraft, default_tier: '8k' },
+        gptImageMetadata
+      ),
+      { default_tier: 'Invalid default tier' }
+    )
+  })
+
   test('keeps configured image pricing models editable while channels are disabled', () => {
     const result = buildImageResolutionPricingModels([], {
       'gpt-image-2': gptImageDraft,

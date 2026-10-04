@@ -6,7 +6,7 @@ it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
-import { ImageIcon, PencilLine, Search } from 'lucide-react'
+import { ImageIcon, PencilLine, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -34,19 +34,20 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { usePricingData } from '@/features/pricing/hooks'
-import type { ImageResolutionPricingMetadata } from '@/features/pricing/types'
+import type {
+  ImageResolutionPricingMetadata,
+  PricingModel,
+} from '@/features/pricing/types'
 
 import {
   buildImageResolutionPricingModels,
   getImageResolutionModelPolicy,
+  normalizeImageResolutionModelName,
   parseImageResolutionPolicies,
   saveImageResolutionPolicy,
   type ImageResolutionPricePolicy,
 } from './image-resolution-pricing'
-import {
-  ImageResolutionPricingDrawer,
-  type ImageResolutionPricingModel,
-} from './image-resolution-pricing-drawer'
+import { ImageResolutionPricingDrawer } from './image-resolution-pricing-drawer'
 
 type ImageResolutionPricingSettingsProps = {
   value: string
@@ -69,20 +70,38 @@ export function ImageResolutionPricingSettings(
   const { t } = useTranslation()
   const { models, isLoading } = usePricingData()
   const [search, setSearch] = useState('')
-  const [selectedModel, setSelectedModel] =
-    useState<ImageResolutionPricingModel | null>(null)
+  const [selectedModel, setSelectedModel] = useState<PricingModel | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const policies = useMemo(
     () => parseImageResolutionPolicies(props.value),
     [props.value]
   )
+  const pricingModels = useMemo(
+    () => buildImageResolutionPricingModels(models, policies),
+    [models, policies]
+  )
+  const configuredModels = useMemo(
+    () =>
+      pricingModels
+        .filter((model) => model.image_resolution_pricing)
+        .map((model) => normalizeImageResolutionModelName(model.model_name)),
+    [pricingModels]
+  )
+  const availableModels = useMemo(
+    () =>
+      pricingModels
+        .filter((model) => !model.image_resolution_pricing)
+        .map((model) => model.model_name),
+    [pricingModels]
+  )
   const imageModels = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
-    return buildImageResolutionPricingModels(models, policies).filter(
+    return pricingModels.filter(
       (model) =>
         normalizedSearch === '' ||
         model.model_name.toLowerCase().includes(normalizedSearch)
     )
-  }, [models, policies, search])
+  }, [pricingModels, search])
 
   const selectedMetadata = selectedModel?.image_resolution_pricing
   const selectedPolicy = selectedModel
@@ -90,17 +109,29 @@ export function ImageResolutionPricingSettings(
     : undefined
   const initialPolicy =
     selectedPolicy ??
-    (selectedMetadata ? metadataPolicy(selectedMetadata) : undefined)
+    (selectedMetadata
+      ? metadataPolicy(selectedMetadata)
+      : {
+          default_tier: '1k',
+          prices: {
+            '1k': selectedModel?.model_price ?? Number.NaN,
+            '2k': selectedModel?.model_price ?? Number.NaN,
+            '4k': selectedModel?.model_price ?? Number.NaN,
+          },
+        })
 
-  async function saveModelPrices(policy: ImageResolutionPricePolicy) {
-    if (!selectedModel || !selectedMetadata) return
+  async function saveModelPrices(
+    modelName: string,
+    policy: ImageResolutionPricePolicy
+  ) {
     const next = saveImageResolutionPolicy(
       policies,
-      selectedModel.model_name,
+      modelName,
       policy,
       selectedMetadata
     )
     await props.onChange(JSON.stringify(next, null, 2))
+    setDrawerOpen(false)
     setSelectedModel(null)
   }
 
@@ -126,17 +157,30 @@ export function ImageResolutionPricingSettings(
             )}
           </p>
         </div>
-        <InputGroup className='w-full sm:w-72'>
-          <InputGroupAddon>
-            <Search aria-hidden='true' />
-          </InputGroupAddon>
-          <InputGroupInput
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t('Search image models')}
-            aria-label={t('Search image models')}
-          />
-        </InputGroup>
+        <div className='flex w-full flex-wrap items-center gap-2 sm:w-auto'>
+          <InputGroup className='min-w-40 flex-1 sm:w-64'>
+            <InputGroupAddon>
+              <Search aria-hidden='true' />
+            </InputGroupAddon>
+            <InputGroupInput
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t('Search image models')}
+              aria-label={t('Search image models')}
+            />
+          </InputGroup>
+          <Button
+            type='button'
+            onClick={() => {
+              setSelectedModel(null)
+              setDrawerOpen(true)
+            }}
+            disabled={props.isSaving}
+          >
+            <Plus data-icon='inline-start' />
+            {t('Add image model')}
+          </Button>
+        </div>
       </div>
 
       {imageModels.length === 0 ? (
@@ -171,7 +215,7 @@ export function ImageResolutionPricingSettings(
                 const metadata = model.image_resolution_pricing
                 const policy =
                   getImageResolutionModelPolicy(policies, model.model_name) ??
-                  metadataPolicy(metadata)
+                  (metadata ? metadataPolicy(metadata) : undefined)
                 return (
                   <TableRow key={model.model_name}>
                     <TableCell className='max-w-64 truncate font-mono font-medium'>
@@ -179,24 +223,30 @@ export function ImageResolutionPricingSettings(
                     </TableCell>
                     <TableCell>
                       <Badge variant='outline'>
-                        {policy.default_tier.toUpperCase()}
+                        {policy
+                          ? policy.default_tier.toUpperCase()
+                          : t('Not configured')}
                       </Badge>
                     </TableCell>
                     {(['1k', '2k', '4k'] as const).map((tier) => (
                       <TableCell key={tier} className='font-mono text-xs'>
-                        ${policy.prices[tier]}
+                        {policy ? `$${policy.prices[tier]}` : '—'}
                       </TableCell>
                     ))}
                     <TableCell>
                       <Button
                         type='button'
                         variant='ghost'
-                        size='icon-sm'
-                        onClick={() => setSelectedModel(model)}
-                        aria-label={t('Edit image resolution prices')}
+                        size={policy ? 'icon-sm' : 'sm'}
+                        disabled={props.isSaving}
+                        onClick={() => {
+                          setSelectedModel(model)
+                          setDrawerOpen(true)
+                        }}
+                        aria-label={`${t('Edit image resolution prices')}: ${model.model_name}`}
                         title={t('Edit image resolution prices')}
                       >
-                        <PencilLine />
+                        {policy ? <PencilLine /> : t('Configure')}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -207,14 +257,17 @@ export function ImageResolutionPricingSettings(
         </div>
       )}
 
-      {selectedModel && initialPolicy && (
+      {drawerOpen && (
         <ImageResolutionPricingDrawer
-          key={`${selectedModel.model_name}:${props.value}`}
+          key={`${selectedModel?.model_name ?? 'create'}:${props.value}`}
           open
-          model={selectedModel}
+          model={selectedModel ?? undefined}
+          availableModels={availableModels}
+          configuredModels={configuredModels}
           initialPolicy={initialPolicy}
           isSaving={props.isSaving}
           onOpenChange={(open) => {
+            setDrawerOpen(open)
             if (!open) setSelectedModel(null)
           }}
           onSave={saveModelPrices}

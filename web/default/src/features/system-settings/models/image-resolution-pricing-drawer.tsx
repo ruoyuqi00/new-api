@@ -8,8 +8,8 @@ License, or (at your option) any later version.
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Save } from 'lucide-react'
-import { useMemo } from 'react'
-import { type Path, useForm } from 'react-hook-form'
+import { useId, useMemo } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import * as z from 'zod'
 
@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -35,6 +36,14 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -42,44 +51,69 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import type {
-  ImageResolutionPricingMetadata,
+  ImageResolutionTier,
   PricingModel,
 } from '@/features/pricing/types'
 
-import type { ImageResolutionPricePolicy } from './image-resolution-pricing'
+import {
+  IMAGE_RESOLUTION_TIERS,
+  normalizeImageResolutionModelName,
+  type ImageResolutionPricePolicy,
+} from './image-resolution-pricing'
 
 type ImageResolutionFormValues = {
+  model_name: string
+  default_tier: ImageResolutionTier
   prices: Record<string, number>
-}
-
-export type ImageResolutionPricingModel = PricingModel & {
-  image_resolution_pricing: ImageResolutionPricingMetadata
 }
 
 type ImageResolutionPricingDrawerProps = {
   open: boolean
-  model: ImageResolutionPricingModel
+  model?: PricingModel
+  availableModels: string[]
+  configuredModels: string[]
   initialPolicy: ImageResolutionPricePolicy
   isSaving: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (policy: ImageResolutionPricePolicy) => Promise<void>
+  onSave: (
+    modelName: string,
+    policy: ImageResolutionPricePolicy
+  ) => Promise<void>
 }
 
 function createImageResolutionSchema(
-  metadata: ImageResolutionPricingMetadata,
+  isCreating: boolean,
+  configuredModels: string[],
   positiveMessage: string,
   requiredMessage: string,
-  monotonicMessage: string
+  monotonicMessage: string,
+  duplicateMessage: string
 ) {
   const positivePrice = z
     .number({ error: positiveMessage })
     .refine((value) => Number.isFinite(value) && value > 0, positiveMessage)
 
   return z
-    .object({ prices: z.record(z.string(), positivePrice) })
+    .object({
+      model_name: z
+        .string()
+        .trim()
+        .refine(
+          (name) => normalizeImageResolutionModelName(name) !== '',
+          requiredMessage
+        )
+        .refine(
+          (name) =>
+            !isCreating ||
+            !configuredModels.includes(normalizeImageResolutionModelName(name)),
+          duplicateMessage
+        ),
+      default_tier: z.enum(IMAGE_RESOLUTION_TIERS),
+      prices: z.record(z.string(), positivePrice),
+    })
     .superRefine((values, context) => {
       let previousPrice: number | undefined
-      for (const tier of Object.keys(metadata.prices)) {
+      for (const tier of IMAGE_RESOLUTION_TIERS) {
         const price = values.prices[tier]
         if (price === undefined) {
           context.addIssue({
@@ -105,25 +139,32 @@ export function ImageResolutionPricingDrawer(
   props: ImageResolutionPricingDrawerProps
 ) {
   const { t } = useTranslation()
-  const metadata = props.model.image_resolution_pricing
+  const suggestionsId = useId()
+  const isCreating = !props.model
   const schema = useMemo(
     () =>
       createImageResolutionSchema(
-        metadata,
+        isCreating,
+        props.configuredModels,
         t('Must be greater than zero'),
         t('Required'),
-        t('Higher tiers cannot cost less than lower tiers')
+        t('Higher tiers cannot cost less than lower tiers'),
+        t('Image resolution prices already configured')
       ),
-    [metadata, t]
+    [isCreating, props.configuredModels, t]
   )
   const form = useForm<ImageResolutionFormValues>({
     resolver: zodResolver(schema),
     mode: 'onChange',
-    defaultValues: { prices: structuredClone(props.initialPolicy.prices) },
+    defaultValues: {
+      model_name: props.model?.model_name ?? '',
+      default_tier: props.initialPolicy.default_tier as ImageResolutionTier,
+      prices: structuredClone(props.initialPolicy.prices),
+    },
   })
   const handleSubmit = form.handleSubmit(async (values) => {
-    await props.onSave({
-      default_tier: metadata.default_tier,
+    await props.onSave(values.model_name, {
+      default_tier: values.default_tier,
       prices: values.prices,
     })
   })
@@ -138,7 +179,7 @@ export function ImageResolutionPricingDrawer(
           <div className='flex min-w-0 items-start justify-between gap-3'>
             <div className='min-w-0'>
               <SheetTitle className='truncate font-mono text-base'>
-                {props.model.model_name}
+                {props.model?.model_name ?? t('Add image model')}
               </SheetTitle>
               <SheetDescription className='mt-1'>
                 {t('Set the base per-image price for each resolution tier.')}
@@ -155,9 +196,74 @@ export function ImageResolutionPricingDrawer(
           >
             <div className={sideDrawerFormClassName()}>
               <div className='grid gap-4'>
-                {Object.keys(metadata.prices).map((tier) => {
-                  const fieldName =
-                    `prices.${tier}` as Path<ImageResolutionFormValues>
+                {isCreating && (
+                  <FormField
+                    control={form.control}
+                    name='model_name'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Model name')}</FormLabel>
+                        <FormControl>
+                          <InputGroup>
+                            <InputGroupInput
+                              {...field}
+                              list={suggestionsId}
+                              aria-label={t('Model name')}
+                              placeholder={t(
+                                'Select or enter an image model name'
+                              )}
+                              autoComplete='off'
+                            />
+                          </InputGroup>
+                        </FormControl>
+                        <datalist id={suggestionsId}>
+                          {props.availableModels.map((name) => (
+                            <option key={name} value={name} />
+                          ))}
+                        </datalist>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+                <FormField
+                  control={form.control}
+                  name='default_tier'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Default tier')}</FormLabel>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue>
+                              {(value) => String(value).toUpperCase()}
+                            </SelectValue>
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectGroup>
+                            {IMAGE_RESOLUTION_TIERS.map((tier) => (
+                              <SelectItem key={tier} value={tier}>
+                                {tier.toUpperCase()}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        {t(
+                          'Default tier is used when size is omitted or auto.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {IMAGE_RESOLUTION_TIERS.map((tier) => {
+                  const fieldName = `prices.${tier}` as const
                   return (
                     <FormField
                       key={tier}
@@ -173,6 +279,9 @@ export function ImageResolutionPricingDrawer(
                               <InputGroup>
                                 <InputGroupAddon>$</InputGroupAddon>
                                 <InputGroupInput
+                                  name={field.name}
+                                  ref={field.ref}
+                                  onBlur={field.onBlur}
                                   type='number'
                                   min='0'
                                   step='any'
@@ -205,6 +314,9 @@ export function ImageResolutionPricingDrawer(
                     />
                   )
                 })}
+                <p className='text-muted-foreground text-xs'>
+                  {t('Prices apply per image before group ratios.')}
+                </p>
               </div>
             </div>
 
