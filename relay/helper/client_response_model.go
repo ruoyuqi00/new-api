@@ -21,7 +21,7 @@ func CaptureActualResponseModelJSON(info *relaycommon.RelayInfo, data []byte) {
 		return
 	}
 
-	for _, path := range []string{"response.model", "model", "message.model", "session.model"} {
+	for _, path := range []string{"response.model", "model", "message.model", "session.model", "modelVersion"} {
 		value := gjson.GetBytes(data, path)
 		if !value.Exists() || value.Type != gjson.String {
 			continue
