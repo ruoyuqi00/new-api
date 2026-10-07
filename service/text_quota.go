@@ -721,14 +721,17 @@ func postTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			logger.LogWarn(ctx, "unconfirmed GPT text usage exceeded reservation; capping settlement at pre-consumed quota")
 		}
 	}
-	keepReservationForAcceptedDisconnect := !unconfirmedClaudeMessagesUsage &&
+	// A token reservation includes the requested maximum output budget, which
+	// cannot become actual consumption when an accepted stream loses usage.
+	// Fixed per-call billing still retains its agreed request price.
+	keepReservationForAcceptedDisconnect := perCallExpression && !unconfirmedClaudeMessagesUsage &&
 		isFailedTextStreamRefundEligible(ctx, relayInfo) &&
 		shouldKeepReservationForAcceptedDisconnect(relayInfo, authoritativeUsage)
 	if keepReservationForAcceptedDisconnect {
 		if frozenQuota := frozenTextReservationQuota(relayInfo); frozenQuota > 0 {
 			summary.Quota = frozenQuota
 			settledFromReservation = true
-			extraContent = append(extraContent, "accepted stream disconnected without authoritative usage; frozen pre-consumed quota retained")
+			extraContent = append(extraContent, "accepted stream disconnected without authoritative usage; fixed per-call price retained")
 		}
 	}
 	if !estimatedGPTTextUsage && !unconfirmedClaudeMessagesUsage && (!authoritativeUsage || !isFailedTextStreamRefundEligible(ctx, relayInfo)) {

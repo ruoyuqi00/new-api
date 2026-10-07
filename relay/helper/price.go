@@ -40,6 +40,10 @@ const claudeCacheCreation1hMultiplier = 6 / 3.75
 // used for tiered expression pre-consume when the client omits max_tokens.
 const defaultTieredPreConsumeMaxTokens = 8192
 
+// Bound only the reservation estimate; upstream request limits and settlement
+// from authoritative usage retain their original values.
+const maxTieredPreConsumeCompletionTokens = 1_000_000
+
 func ResolveEffectiveGroup(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) string {
 	if value, exists := ctx.Get("auto_group"); exists {
 		if group, ok := value.(string); ok && group != "" {
@@ -335,6 +339,9 @@ func modelPriceHelperExpression(c *gin.Context, info *relaycommon.RelayInfo, pro
 		estimatedCompletionTokens = 0
 	} else if estimatedCompletionTokens == 0 && groupRatioInfo.GroupRatio != 0 {
 		estimatedCompletionTokens = defaultTieredPreConsumeMaxTokens
+	}
+	if estimatedCompletionTokens > maxTieredPreConsumeCompletionTokens {
+		estimatedCompletionTokens = maxTieredPreConsumeCompletionTokens
 	}
 
 	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info)

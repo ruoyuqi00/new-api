@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1277,7 +1278,7 @@ func TestGPTTextEstimatedSettlementCountsAsAffinityCacheHit(t *testing.T) {
 	require.Zero(t, stats.Unknown)
 }
 
-func TestUnconfirmedAcceptedTextStreamsKeepReservation(t *testing.T) {
+func TestUnconfirmedAcceptedTextStreamsSettleObservedUsage(t *testing.T) {
 	originalEnabled := constant.StreamUsageDrainEnabled
 	constant.StreamUsageDrainEnabled = true
 	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
@@ -1315,18 +1316,98 @@ func TestUnconfirmedAcceptedTextStreamsKeepReservation(t *testing.T) {
 			})
 
 			require.NoError(t, err)
-			require.Equal(t, []int{1250}, billing.settled)
+			assert.Equal(t, []int{40}, billing.settled)
 			var logs []model.Log
 			require.NoError(t, model.LOG_DB.Where("user_id = ?", relayInfo.UserId).Find(&logs).Error)
 			require.Len(t, logs, 1)
-			require.Equal(t, 1250, logs[0].Quota)
+			assert.Equal(t, 40, logs[0].Quota)
 			require.Contains(t, logs[0].Other, `"usage_unconfirmed":true`)
-			require.Contains(t, logs[0].Other, `"settled_from_reservation":true`)
+			assert.NotContains(t, logs[0].Other, `"settled_from_reservation":true`)
 			require.NotContains(t, logs[0].Other, `"unconfirmed_stream_charge_refunded":true`)
 
 			require.NoError(t, model.DB.Exec("UPDATE users SET used_quota = 0, request_count = 0 WHERE id = ?", relayInfo.UserId).Error)
 			require.NoError(t, model.DB.Exec("UPDATE channels SET used_quota = 0 WHERE id = ?", relayInfo.ChannelId).Error)
 			require.NoError(t, model.LOG_DB.Exec("DELETE FROM logs").Error)
+		})
+	}
+}
+
+func TestAcceptedDisconnectDoesNotBillMaximumOutputBudget(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
+
+	for _, tc := range []struct {
+		name  string
+		path  string
+		usage *dto.Usage
+		want  int
+	}{
+		{
+			name:  "estimated usage only charges observed cache input and placeholder output",
+			path:  "/v1/responses",
+			usage: &dto.Usage{PromptTokens: 19148, CompletionTokens: 1, TotalTokens: 19149, UsageSource: "estimated"},
+			want:  46,
+		},
+		{
+			name: "missing usage uses observed input instead of reserved output budget",
+			path: "/v1/responses",
+			want: 46,
+		},
+		{
+			name: "authoritative usage still charges actual input output and cache",
+			path: "/v1/responses",
+			usage: &dto.Usage{
+				PromptTokens: 19148, CompletionTokens: 20, TotalTokens: 19168, UsageSource: "upstream",
+				PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 18000},
+			},
+			want: 117,
+		},
+		{
+			name:  "Claude Messages without authoritative usage remains free",
+			path:  "/v1/messages",
+			usage: &dto.Usage{PromptTokens: 19148, CompletionTokens: 1, UsageSource: "estimated", UsageSemantic: "anthropic"},
+			want:  0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+			seedUser(t, 101, 0)
+			seedChannel(t, 201)
+			billing := &recordingTaskBillingSettler{preConsumed: 174721149}
+			expr := `tier("base", (p + c * 4 + cr * 0.04) * 2)`
+			info := &relaycommon.RelayInfo{
+				UserId: 101, TokenId: 301, UsingGroup: "中国模型特惠", OriginModelName: "deepseek-v4.1-flash",
+				RequestURLPath: tc.path, StartTime: time.Now(), IsStream: true,
+				StreamStatus: streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonClientGone, true),
+				Billing:      billing, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 201},
+				PriceData: types.PriceData{QuotaToPreConsume: 174721149, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.06}},
+				TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+					BillingMode: billingexpr.BillingModeTieredExpr, ExprString: expr, ExprHash: billingexpr.ExprHashString(expr),
+					GroupRatio: 0.06, QuotaPerUnit: 500000, EstimatedQuotaAfterGroup: 174721149,
+					EstimatedPromptTokens: 19148, EstimatedCompletionTokens: 728000000, EstimatedTier: "base",
+				},
+			}
+			info.SetEstimatePromptTokens(19148)
+			info.EnableStreamRecovery()
+			info.MarkStreamAccepted()
+			t.Cleanup(info.FinishStreamRecovery)
+			if tc.usage != nil && tc.usage.UsageSource == "upstream" {
+				info.MarkStreamTerminalUsage()
+			}
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, tc.path, nil)
+
+			require.NoError(t, SettleAcceptedTextBilling(ctx, info, tc.usage))
+			assert.Equal(t, []int{tc.want}, billing.settled)
+			var logs []model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ?", info.UserId).Find(&logs).Error)
+			require.Len(t, logs, 1)
+			assert.Equal(t, tc.want, logs[0].Quota)
+			assert.NotContains(t, logs[0].Other, `"settled_from_reservation":true`)
+			var user model.User
+			require.NoError(t, model.DB.First(&user, info.UserId).Error)
+			assert.Equal(t, tc.want, user.UsedQuota)
 		})
 	}
 }
@@ -1703,6 +1784,9 @@ func TestGPTTextAcceptedSettlementDoesNotChargeWhenEstimateIsUnavailable(t *test
 }
 
 func TestPerCallExpressionSettlesFrozenPriceWithoutTokenUsage(t *testing.T) {
+	originalEnabled := constant.StreamUsageDrainEnabled
+	constant.StreamUsageDrainEnabled = true
+	t.Cleanup(func() { constant.StreamUsageDrainEnabled = originalEnabled })
 	truncate(t)
 	seedUser(t, 101, 0)
 	seedChannel(t, 201)
@@ -1713,6 +1797,8 @@ func TestPerCallExpressionSettlesFrozenPriceWithoutTokenUsage(t *testing.T) {
 		UserId: 101, TokenId: 301, UsingGroup: "国模按次", OriginModelName: "MiniMax-M2.7-call",
 		RequestURLPath: "/v1/chat/completions",
 		StartTime:      time.Now(),
+		IsStream:       true,
+		StreamStatus:   streamStatusForAffinityUsageTest(relaycommon.StreamEndReasonClientGone, true),
 		Billing:        billing,
 		ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 201},
 		PriceData: types.PriceData{
@@ -1730,6 +1816,9 @@ func TestPerCallExpressionSettlesFrozenPriceWithoutTokenUsage(t *testing.T) {
 			QuotaPerUnit:              500_000,
 		},
 	}
+	relayInfo.EnableStreamRecovery()
+	relayInfo.MarkStreamAccepted()
+	t.Cleanup(relayInfo.FinishStreamRecovery)
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)

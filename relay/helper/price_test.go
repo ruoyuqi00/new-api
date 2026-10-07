@@ -317,6 +317,51 @@ func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {
 	}
 }
 
+func TestExpressionPreConsumeBoundsUnreasonableOutputBudget(t *testing.T) {
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":    `{"deepseek-v4.1-flash":"tiered_expr"}`,
+		"billing_setting.billing_expr":    `{"deepseek-v4.1-flash":"tier(\"base\", (p + c * 4 + cr * 0.04) * 2)"}`,
+		"group_ratio_setting.group_ratio": `{"中国模型特惠":0.06}`,
+	}))
+
+	for _, tc := range []struct {
+		name         string
+		budget       uint
+		wantQuota    int
+		wantEstimate int
+	}{
+		{name: "ordinary output limit remains unchanged", budget: 8192, wantQuota: 3115, wantEstimate: 8192},
+		{name: "large supported output limit remains unchanged", budget: 131072, wantQuota: 32606, wantEstimate: 131072},
+		{name: "hundreds of millions cannot become a reservation", budget: 728000000, wantQuota: 241149, wantEstimate: 1000000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			request := &dto.OpenAIResponsesRequest{Model: "deepseek-v4.1-flash", MaxOutputTokens: &tc.budget}
+			info := &relaycommon.RelayInfo{
+				OriginModelName: request.Model, UsingGroup: "中国模型特惠", UserGroup: "default", Request: request,
+				BillingRequestInput: &billingexpr.RequestInput{},
+			}
+			meta := &types.TokenCountMeta{MaxTokens: int(tc.budget)}
+
+			price, err := ModelPriceHelper(ctx, info, 19148, meta)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantQuota, price.QuotaToPreConsume)
+			require.NotNil(t, info.TieredBillingSnapshot)
+			assert.Equal(t, tc.wantEstimate, info.TieredBillingSnapshot.EstimatedCompletionTokens)
+			assert.Equal(t, int(tc.budget), meta.MaxTokens)
+			assert.Equal(t, tc.budget, *request.MaxOutputTokens)
+		})
+	}
+}
+
 func TestMappedModelBillingUsesPublicModelAcrossBillingModes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
