@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 type SystemTaskStatus string
@@ -23,23 +24,36 @@ const (
 	SystemTaskTypeAsyncTaskPoll         = "async_task_poll"
 	SystemTaskTypeSHKeeperReconcile     = "shkeeper_reconcile"
 	SystemTaskTypeSensitiveInputCleanup = "sensitive_input_cleanup"
+	SystemTaskTypeQualityMonitor        = "quality_monitor"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")
 
+// Manual quality-monitor snapshots can exceed MySQL TEXT's 65535-byte limit.
+// AutoMigrate widens existing system_tasks.payload to LONGTEXT on MySQL;
+// PostgreSQL and SQLite keep TEXT. State and Result retain their existing types.
+type SystemTaskPayload string
+
+func (SystemTaskPayload) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
+	if db != nil && db.Dialector.Name() == "mysql" {
+		return "LONGTEXT"
+	}
+	return "TEXT"
+}
+
 type SystemTask struct {
-	ID        int64            `json:"id" gorm:"primary_key"`
-	TaskID    string           `json:"task_id" gorm:"type:varchar(64);uniqueIndex"`
-	Type      string           `json:"type" gorm:"type:varchar(64);index"`
-	Status    SystemTaskStatus `json:"status" gorm:"type:varchar(32);index"`
-	ActiveKey *string          `json:"active_key,omitempty" gorm:"type:varchar(64);uniqueIndex"`
-	Payload   string           `json:"payload" gorm:"type:text"`
-	State     string           `json:"state" gorm:"type:text"`
-	Result    string           `json:"result" gorm:"type:text"`
-	Error     string           `json:"error" gorm:"type:text"`
-	LockedBy  string           `json:"locked_by" gorm:"type:varchar(128);index"`
-	CreatedAt int64            `json:"created_at" gorm:"bigint;index"`
-	UpdatedAt int64            `json:"updated_at" gorm:"bigint;index"`
+	ID        int64             `json:"id" gorm:"primary_key"`
+	TaskID    string            `json:"task_id" gorm:"type:varchar(64);uniqueIndex"`
+	Type      string            `json:"type" gorm:"type:varchar(64);index"`
+	Status    SystemTaskStatus  `json:"status" gorm:"type:varchar(32);index"`
+	ActiveKey *string           `json:"active_key,omitempty" gorm:"type:varchar(64);uniqueIndex"`
+	Payload   SystemTaskPayload `json:"payload"`
+	State     string            `json:"state" gorm:"type:text"`
+	Result    string            `json:"result" gorm:"type:text"`
+	Error     string            `json:"error" gorm:"type:text"`
+	LockedBy  string            `json:"locked_by" gorm:"type:varchar(128);index"`
+	CreatedAt int64             `json:"created_at" gorm:"bigint;index"`
+	UpdatedAt int64             `json:"updated_at" gorm:"bigint;index"`
 }
 
 type SystemTaskLock struct {
@@ -110,7 +124,7 @@ func CreateSystemTask(taskType string, payload any, state any) (*SystemTask, err
 		Type:      taskType,
 		Status:    SystemTaskStatusPending,
 		ActiveKey: &taskType,
-		Payload:   payloadText,
+		Payload:   SystemTaskPayload(payloadText),
 		State:     stateText,
 	}
 
@@ -459,7 +473,7 @@ func RequeueFailedLogCleanupTask(taskID string) (*SystemTask, error) {
 }
 
 func (task *SystemTask) DecodePayload(v any) error {
-	return decodeSystemTaskJSONString(task.Payload, v)
+	return decodeSystemTaskJSONString(string(task.Payload), v)
 }
 
 func (task *SystemTask) DecodeState(v any) error {
@@ -473,7 +487,7 @@ func (task *SystemTask) ToResponse() SystemTaskResponse {
 		Type:      task.Type,
 		Status:    task.Status,
 		ActiveKey: task.ActiveKey,
-		Payload:   decodeSystemTaskJSONValue(task.Payload),
+		Payload:   decodeSystemTaskJSONValue(string(task.Payload)),
 		State:     decodeSystemTaskJSONValue(task.State),
 		Result:    decodeSystemTaskJSONValue(task.Result),
 		Error:     task.Error,

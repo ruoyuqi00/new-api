@@ -375,6 +375,18 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 
+		qualityMonitorRoute := apiRouter.Group("/quality-monitor")
+		qualityMonitorRoute.Use(middleware.UserAuth())
+		{
+			qualityMonitorRoute.GET("/options", controller.GetQualityMonitorOptions)
+			qualityMonitorRoute.GET("/results", controller.GetQualityMonitorResults)
+			qualityMonitorRoute.GET("/plans", middleware.AdminAuth(), controller.GetQualityMonitorPlans)
+			qualityMonitorRoute.POST("/plans", middleware.AdminAuth(), controller.CreateQualityMonitorPlan)
+			qualityMonitorRoute.PUT("/plans/:id", middleware.AdminAuth(), controller.UpdateQualityMonitorPlan)
+			qualityMonitorRoute.DELETE("/plans/:id", middleware.AdminAuth(), controller.DeleteQualityMonitorPlan)
+			qualityMonitorRoute.POST("/plans/:id/run", middleware.AdminAuth(), controller.RunQualityMonitorPlan)
+		}
+
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())
 		{

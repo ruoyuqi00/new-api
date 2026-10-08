@@ -23,6 +23,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(shkeeperReconcileHandler{})
+	service.RegisterSystemTaskHandler(qualityMonitorHandler{})
 }
 
 type shkeeperReconcileHandler struct{}

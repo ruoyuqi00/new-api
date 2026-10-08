@@ -37,11 +37,20 @@ import (
 )
 
 type testResult struct {
-	context           *gin.Context
-	localErr          error
-	newAPIError       *types.NewAPIError
-	responseContent   string
-	responseTruncated bool
+	context             *gin.Context
+	localErr            error
+	newAPIError         *types.NewAPIError
+	responseContent     string
+	responseTruncated   bool
+	actualResponseModel string
+	estimatedQuota      int
+}
+
+// A custom Responses request is a site-funded monitor probe. Ordinary callers
+// retain the existing request, response limit, user context and consume log.
+type channelTestOptions struct {
+	Request *dto.OpenAIResponsesRequest
+	Group   string
 }
 
 const maxChannelTestResponseContentBytes = 8 << 10
@@ -77,7 +86,24 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, imageSize string) testResult {
+func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, imageSize string, options ...channelTestOptions) testResult {
+	var custom *channelTestOptions
+	if len(options) > 0 && options[0].Request != nil {
+		custom = &options[0]
+	}
+	var frozenInput, frozenReasoning, frozenBudget []byte
+	if custom != nil {
+		frozenInput = bytes.Clone(custom.Request.Input)
+		var err error
+		frozenReasoning, err = common.Marshal(custom.Request.Reasoning)
+		if err != nil {
+			return testResult{localErr: err}
+		}
+		frozenBudget, err = common.Marshal(custom.Request.MaxOutputTokens)
+		if err != nil {
+			return testResult{localErr: err}
+		}
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -105,6 +131,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
+	if custom != nil {
+		defer service.ReleaseCurrentProviderAccountLease(c)
+	}
 
 	testModel = strings.TrimSpace(testModel)
 	if testModel == "" {
@@ -167,21 +196,27 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 
 	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, requestPath, nil)
 
-	cache, err := model.GetUserCache(testUserID)
-	if err != nil {
-		return testResult{
-			localErr:    err,
-			newAPIError: nil,
+	if custom == nil {
+		cache, err := model.GetUserCache(testUserID)
+		if err != nil {
+			return testResult{localErr: err}
 		}
+		cache.WriteContext(c)
+	} else {
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, custom.Group)
 	}
-	cache.WriteContext(c)
 	c.Set("id", testUserID)
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
-	group, _ := model.GetUserGroup(testUserID, false)
+	group := ""
+	if custom == nil {
+		group, _ = model.GetUserGroup(testUserID, false)
+	} else {
+		group = custom.Group
+	}
 	c.Set("group", group)
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
@@ -244,6 +279,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	request := buildTestRequest(testModel, endpointType, channel, isStream, imageSize)
+	if custom != nil {
+		request = custom.Request
+	}
 
 	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
@@ -302,7 +340,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	//// 创建一个用于日志的 info 副本，移除 ApiKey
 	//logInfo := info
 	//logInfo.ApiKey = ""
-	common.SysLog(fmt.Sprintf("testing channel %d with model %s , info %+v ", channel.Id, testModel, info.ToString()))
+	if custom == nil {
+		common.SysLog(fmt.Sprintf("testing channel %d with model %s , info %+v ", channel.Id, testModel, info.ToString()))
+	}
 
 	priceData, err := helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
 	if err != nil {
@@ -445,6 +485,26 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		}
 	}
 
+	if custom != nil {
+		// Channel overrides and adapter defaults may normally remove budgets or
+		// change prompt/reasoning. Restore the monitor snapshot at the wire boundary.
+		var frozen map[string]json.RawMessage
+		if err := common.Unmarshal(jsonData, &frozen); err != nil {
+			return testResult{localErr: err}
+		}
+		frozen["input"] = frozenInput
+		frozen["reasoning"] = frozenReasoning
+		frozen["max_output_tokens"] = frozenBudget
+		frozen["stream"] = json.RawMessage("false")
+		frozen["store"] = json.RawMessage("false")
+		for _, key := range []string{"previous_response_id", "conversation", "background", "tools", "tool_choice", "max_tool_calls", "prompt"} {
+			delete(frozen, key)
+		}
+		jsonData, err = common.Marshal(frozen)
+		if err != nil {
+			return testResult{localErr: err}
+		}
+	}
 	requestBody := bytes.NewBuffer(jsonData)
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
 	resp, err := adaptor.DoRequest(c, info, requestBody)
@@ -458,6 +518,26 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	var httpResp *http.Response
 	if resp != nil {
 		httpResp = resp.(*http.Response)
+		if custom != nil {
+			body, readErr := io.ReadAll(io.LimitReader(httpResp.Body, (2<<20)+1))
+			_ = httpResp.Body.Close()
+			if readErr != nil {
+				return testResult{localErr: readErr, newAPIError: types.NewError(readErr, types.ErrorCodeReadResponseBodyFailed)}
+			}
+			if len(body) > 2<<20 {
+				err := errors.New("probe response exceeded 2 MiB")
+				return testResult{localErr: err, newAPIError: types.NewError(err, types.ErrorCodeBadResponseBody)}
+			}
+			if httpResp.StatusCode != http.StatusOK {
+				err := fmt.Errorf("upstream HTTP %d", httpResp.StatusCode)
+				return testResult{localErr: err, newAPIError: types.NewErrorWithStatusCode(err, types.ErrorCodeBadResponseStatusCode, httpResp.StatusCode)}
+			}
+			if !gjson.ValidBytes(body) || gjson.GetBytes(body, "object").String() != "response" || gjson.GetBytes(body, "id").String() == "" || gjson.GetBytes(body, "status").String() != "completed" || !gjson.GetBytes(body, "output").IsArray() {
+				err := errors.New("invalid or incomplete Responses response")
+				return testResult{localErr: err, newAPIError: types.NewError(err, types.ErrorCodeBadResponseBody)}
+			}
+			httpResp.Body = io.NopCloser(bytes.NewReader(body))
+		}
 		if httpResp.StatusCode != http.StatusOK {
 			err := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
 			common.SysError(fmt.Sprintf(
@@ -521,6 +601,28 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	info.SetEstimatePromptTokens(usage.PromptTokens)
 
 	quota, tieredResult := settleTestQuota(info, priceData, usage)
+	if custom != nil {
+		if tieredResult == nil {
+			quota, err = common.QuotaFromFloatStrict(float64(quota) * priceData.GroupRatioInfo.GroupRatio)
+			if err != nil {
+				return testResult{localErr: err}
+			}
+		}
+		var answer strings.Builder
+		appendChannelTestResponseJSON(&answer, respBody, false)
+		value := answer.String()
+		// MySQL TEXT permits at most 65535 bytes; stay within the 64 KiB
+		// answer budget on all supported databases.
+		truncated := len(value) > (64<<10)-1
+		if truncated {
+			end := (64 << 10) - 1
+			for end > 0 && !utf8.ValidString(value[:end]) {
+				end--
+			}
+			value = value[:end]
+		}
+		return testResult{context: c, responseContent: value, responseTruncated: truncated, actualResponseModel: info.ActualResponseModel, estimatedQuota: quota}
+	}
 	tok := time.Now()
 	milliseconds := tok.Sub(tik).Milliseconds()
 	consumedTime := float64(milliseconds) / 1000.0

@@ -20,6 +20,7 @@ import {
   Activity,
   Boxes,
   Box,
+  BrainCircuit,
   CreditCard,
   FileText,
   FlaskConical,
@@ -97,6 +98,11 @@ export function useSidebarData(): SidebarData {
             title: t('API Keys'),
             url: '/keys',
             icon: Key,
+          },
+          {
+            title: t('Quality monitor'),
+            url: '/quality-monitor',
+            icon: BrainCircuit,
           },
           {
             title: t('Usage Logs'),
